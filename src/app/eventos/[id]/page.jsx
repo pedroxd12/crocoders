@@ -6,11 +6,11 @@ import { useAuth } from '@/context/AuthContext';
 import { toast } from 'react-toastify';
 import Image from 'next/image';
 import { motion } from 'framer-motion';
-import Modal from '@/components/ui/Modal';
-import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
-import Select from '@/components/ui/Select';
-import LoadingSpinner from '@/components/LoadingSpinner';
+import Modal from '@/components/ui/Modal'; // Tu componente Modal
+import Button from '@/components/ui/Button'; // Tu componente Button
+import Input from '@/components/ui/Input'; // Tu componente Input
+import Select from '@/components/ui/Select'; // Tu componente Select
+import LoadingSpinner from '@/components/LoadingSpinner'; // Tu componente LoadingSpinner
 import { 
   Calendar, Users, Clock, ArrowLeft, CheckCircle, XCircle, UserPlus, 
   LogIn, AlertTriangle, DollarSign, Loader, Info, Tag 
@@ -50,6 +50,11 @@ function EventoDetalleContent() {
   const [showGuestFormModal, setShowGuestFormModal] = useState(false);
   const [showUnregisterModal, setShowUnregisterModal] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+
+  // --- Estados para el Modal de la Imagen ---
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [selectedImageUrl, setSelectedImageUrl] = useState('');
+  // --- Fin Estados para el Modal de la Imagen ---
 
   const [guestData, setGuestData] = useState({
     nombre_completo: '',
@@ -92,7 +97,7 @@ function EventoDetalleContent() {
         ...data,
         fecha: new Date(data.fecha).toISOString().split('T')[0],
         isPastEvent: eventEndDate < now,
-        tipo_evento_display: data.tipo ? data.tipo.charAt(0).toUpperCase() + data.tipo.slice(1) : 'General' // Para mostrar tipo de evento
+        tipo_evento_display: data.tipo ? data.tipo.charAt(0).toUpperCase() + data.tipo.slice(1) : 'General'
       });
     } catch (err) {
       setError(err.message);
@@ -270,6 +275,15 @@ function EventoDetalleContent() {
     date.setMinutes(minutes);
     return date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true });
   };
+
+  // --- Función para abrir el modal de la imagen ---
+  const handleImageClick = (imageUrl) => {
+    if (imageUrl) { // Solo abre si hay una URL válida
+        setSelectedImageUrl(imageUrl);
+        setShowImageModal(true);
+    }
+  };
+  // --- Fin Función para abrir el modal de la imagen ---
   
   if (authLoading || loading) return <LoadingSpinner fullScreen text="Cargando detalle del evento..." />;
   if (error) return (
@@ -307,12 +321,16 @@ function EventoDetalleContent() {
           initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.5, delay: 0.1 }}
           className="bg-gray-800 rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl border border-gray-700"
         >
-          <div className="relative h-64 md:h-80 lg:h-96 w-full"> {/* No más 'group' aquí */}
+          {/* --- Modificación para hacer la imagen clickeable --- */}
+          <div 
+            className="relative h-64 md:h-80 lg:h-96 w-full cursor-pointer" 
+            onClick={() => handleImageClick(evento.imagen_url || '/placeholder-event.jpg')}
+          >
             <Image
               src={evento.imagen_url || '/placeholder-event.jpg'}
               alt={evento.nombre_evento || "Imagen del evento"}
               fill
-              className="object-cover" // Quitada clase group-hover:scale-105
+              className="object-cover"
               sizes="(max-width: 768px) 100vw, (max-width: 1024px) 80vw, 60vw"
               priority
               quality={80}
@@ -340,12 +358,13 @@ function EventoDetalleContent() {
                 )}
             </div>
           </div>
+          {/* --- Fin Modificación para hacer la imagen clickeable --- */}
 
           <div className="p-6 md:p-8 lg:p-10">
             <motion.h1 
               initial={{ opacity: 0, y:10 }} animate={{ opacity: 1, y:0 }} transition={{ delay: 0.2, duration: 0.5 }}
               className="text-3xl md:text-4xl lg:text-5xl font-extrabold mb-3 md:mb-4 
-                         text-transparent bg-clip-text bg-gradient-to-r from-green-300 via-teal-300 to-sky-400 leading-tight"
+                           text-transparent bg-clip-text bg-gradient-to-r from-green-300 via-teal-300 to-sky-400 leading-tight"
             >
               {evento.nombre_evento}
             </motion.h1>
@@ -359,8 +378,8 @@ function EventoDetalleContent() {
             </motion.div>
 
             <motion.div 
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4, duration: 0.5 }} 
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 mb-8 md:mb-10"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4, duration: 0.5 }} 
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 mb-8 md:mb-10"
             >
               <InfoCard icon={<Clock size={20}/>} title="Horario">
                 {formatTime(evento.hora_inicio)} - {formatTime(evento.hora_fin)}
@@ -380,8 +399,8 @@ function EventoDetalleContent() {
             </motion.div>
 
             <motion.div 
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5, duration: 0.5 }} 
-                className="mb-8 md:mb-10"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5, duration: 0.5 }} 
+              className="mb-8 md:mb-10"
             >
               <h2 className="text-2xl md:text-3xl font-bold text-green-300 mb-3 md:mb-4 flex items-center">
                 <Info size={24} className="mr-3"/>
@@ -396,8 +415,8 @@ function EventoDetalleContent() {
             </motion.div>
 
             <motion.div 
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6, duration: 0.5 }} 
-                className="border-t border-gray-700 pt-6 md:pt-8"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6, duration: 0.5 }} 
+              className="border-t border-gray-700 pt-6 md:pt-8"
             >
               <Button 
                 onClick={handleParticipateFlow}
@@ -417,7 +436,7 @@ function EventoDetalleContent() {
         </motion.div>
       </div>
 
-      {/* Modals */}
+      {/* Modals existentes */}
       <Modal isOpen={showUnregisterModal} onClose={() => setShowUnregisterModal(false)} title="Confirmar Cancelación">
         <p className="text-gray-300 mb-6">¿Estás seguro de que deseas cancelar tu inscripción para "{evento?.nombre_evento}"?</p>
         <div className="flex justify-end space-x-3">
@@ -461,7 +480,7 @@ function EventoDetalleContent() {
           <Input label="Nombre completo *" name="nombre_completo" value={guestData.nombre_completo} onChange={handleGuestInputChange} required error={formErrors.nombre_completo} className="bg-gray-700 border-gray-600 focus:border-green-500"/>
           <Input label="Correo electrónico *" type="email" name="correo_electronico" value={guestData.correo_electronico} onChange={handleGuestInputChange} required error={formErrors.correo_electronico} className="bg-gray-700 border-gray-600 focus:border-green-500"/>
           <Input label="Número de teléfono *" name="numero_telefono" value={guestData.numero_telefono} onChange={handleGuestInputChange} required placeholder="10 dígitos" error={formErrors.numero_telefono} className="bg-gray-700 border-gray-600 focus:border-green-500"/>
-          <Select label="Carrera *" name="carrera" value={guestData.carrera} onChange={handleGuestInputChange} options={carreras.map(c => ({ value: c, label: c }))} placeholder="Selecciona tu carrera" required error={formErrors.carrera} classNameForSelect="bg-gray-700 border-gray-600 focus:border-green-500"/> {/* Asegúrate que `classNameForSelect` sea aplicado correctamente por tu componente `Select` */}
+          <Select label="Carrera *" name="carrera" value={guestData.carrera} onChange={handleGuestInputChange} options={carreras.map(c => ({ value: c, label: c }))} placeholder="Selecciona tu carrera" required error={formErrors.carrera} classNameForSelect="bg-gray-700 border-gray-600 focus:border-green-500"/>
           <Select label="Semestre *" name="semestre" value={guestData.semestre} onChange={handleGuestInputChange} options={semestres} placeholder="Selecciona tu semestre" required error={formErrors.semestre} classNameForSelect="bg-gray-700 border-gray-600 focus:border-green-500"/>
           <div className="flex justify-end space-x-3 pt-3">
             <Button type="button" onClick={() => { setShowGuestFormModal(false); setFormErrors({}); }} variant="secondary" disabled={actionLoading}>Cancelar</Button>
@@ -469,6 +488,39 @@ function EventoDetalleContent() {
           </div>
         </form>
       </Modal>
+
+      {/* --- Modal para ver imagen completa --- */}
+      <Modal 
+        isOpen={showImageModal} 
+        onClose={() => setShowImageModal(false)} 
+        title={evento?.nombre_evento || "Vista de Imagen"}
+        // Considera añadir una prop 'size' a tu Modal si necesitas controlar su ancho, ej: size="xl"
+        // o ajusta los estilos de tu Modal para que se adapte bien a una imagen grande.
+      >
+        <div className="flex justify-center items-center p-2 md:p-4 bg-black bg-opacity-50"> {/* Fondo oscuro para el contenido del modal */}
+            {selectedImageUrl ? (
+                <div style={{ maxWidth: '90vw', maxHeight: '85vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <Image
+                        src={selectedImageUrl}
+                        alt="Imagen del evento en tamaño completo"
+                        width={1200} // Un valor grande; objectFit se encargará del escalado
+                        height={800} // Un valor grande
+                        objectFit="contain" // Esencial para que la imagen se escale sin cortarse y quepa
+                        className="rounded-md" 
+                    />
+                </div>
+            ) : (
+                <p className="text-gray-300">No se pudo cargar la imagen.</p>
+            )}
+        </div>
+        <div className="flex justify-end p-3 md:p-4 border-t border-gray-700 mt-0"> {/* Quitado margen superior si el contenido ya tiene padding */}
+            <Button onClick={() => setShowImageModal(false)} variant="secondary">
+                Cerrar
+            </Button>
+        </div>
+      </Modal>
+      {/* --- Fin Modal para ver imagen completa --- */}
+
     </motion.main>
   );
 }
