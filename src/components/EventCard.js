@@ -1,22 +1,20 @@
 'use client';
 import { useState } from 'react';
 import Image from 'next/image';
-import { useAuth } from '@/context/AuthContext';
-import { useRouter, usePathname } from 'next/navigation';
-import { toast } from 'react-toastify';
-import { Calendar, Users, ArrowRight, Clock, CheckCircle, XCircle, MapPin, Loader } from 'lucide-react';
-import { motion } from 'framer-motion';
-import Button from './ui/Button';
+// Ya no se necesita useAuth, usePathname ni toast para la lógica de clic principal.
+// Se pueden mantener si se usan para otras cosas, pero para este cambio específico no son necesarios.
+// import { useAuth } from '@/context/AuthContext';
+import { useRouter } from 'next/navigation'; 
+// import { toast } from 'react-toastify';
+import { Calendar, Users, Clock, CheckCircle, XCircle, MapPin } from 'lucide-react';
 
-export default function EventCard({ evento, isRegistered, onParticipate, onViewDetails, index }) {
-  const { isAuthenticated } = useAuth();
+export default function EventCard({ evento, isRegistered, index }) {
+  // const { isAuthenticated } = useAuth(); // Ya no es necesario para la lógica de clic
   const router = useRouter();
-  const pathname = usePathname();
+  // const pathname = usePathname(); // Ya no es necesario para la lógica de clic
 
-  const [actionLoading, setActionLoading] = useState(false);
   const [imageError, setImageError] = useState(false);
 
-  // Usar la propiedad precalculada por el componente padre
   const isEventFinished = evento.isPastEvent;
 
   const fechaFormateada = evento.fecha 
@@ -31,79 +29,49 @@ export default function EventCard({ evento, isRegistered, onParticipate, onViewD
     if (isEventFinished) {
       return { 
         text: 'Finalizado', 
-        color: 'bg-slate-500', 
-        textColor: 'text-slate-200',
-        Icon: Clock, 
-        buttonDisabled: true, 
-        actionText: "Ver Detalles" 
+        color: 'bg-slate-500/90', 
+        textColor: 'text-white',
+        Icon: Clock,
       };
     }
     if (isRegistered) {
       return { 
         text: 'Inscrito', 
-        color: 'bg-purple-500', 
-        textColor: 'text-purple-100',
-        Icon: CheckCircle, 
-        buttonDisabled: false, 
-        actionText: "Ver Detalles / Cancelar" 
+        color: 'bg-purple-500/90', 
+        textColor: 'text-white',
+        Icon: CheckCircle,
       };
     }
     if (evento.cupos !== null && evento.cupos_disponibles <= 0) {
       return { 
         text: 'Cupos Llenos', 
-        color: 'bg-red-500', 
-        textColor: 'text-red-100',
-        Icon: XCircle, 
-        buttonDisabled: true, 
-        actionText: "Cupos Llenos" 
+        color: 'bg-red-500/90', 
+        textColor: 'text-white',
+        Icon: XCircle,
       };
     }
     return { 
       text: 'Disponible', 
-      color: 'bg-emerald-500', 
-      textColor: 'text-emerald-100',
-      Icon: null, 
-      buttonDisabled: false, 
-      actionText: "Inscribirme / Ver Detalles" 
+      color: 'bg-emerald-500/90', 
+      textColor: 'text-white',
+      Icon: null, // Puedes poner un icono como Sparkles si quieres
     };
   };
 
   const statusInfo = getEventStatusInfo();
 
-  const handleMainAction = async (e) => {
-    e.stopPropagation();
-
-    if (isEventFinished || (isRegistered && !isEventFinished) || (!isRegistered && statusInfo.buttonDisabled)) {
-      onViewDetails(evento.id_evento);
-      return;
-    }
-    
-    if (!isAuthenticated) {
-      const currentFullURL = `${pathname}${window.location.search}`;
-      router.push(`/iniciar?registerEvent=${evento.id_evento}&from=${encodeURIComponent(currentFullURL)}`);
-      return;
-    }
-
-    if (typeof onParticipate === 'function') {
-      setActionLoading(true);
-      try {
-        await onParticipate(evento);
-      } catch (error) {
-        console.error("Error en EventCard al llamar onParticipate:", error);
-        toast.error(error.message || "Ocurrió un error.", { theme: "dark" });
-      } finally {
-        setActionLoading(false);
-      }
-    } else {
-      onViewDetails(evento.id_evento);
-    }
-  };
-
+  // Lógica de clic modificada
   const handleCardClick = () => {
-    onViewDetails(evento.id_evento);
+    // Siempre navega a la página de detalles del evento
+    if (evento && evento.id_evento) {
+      router.push(`/eventos/${evento.id_evento}`);
+    } else {
+      console.error("Error: ID de evento no disponible en EventCard.");
+      // Opcionalmente, mostrar un toast de error si el ID no está disponible
+      // toast.error("No se pudo cargar el detalle del evento.", { theme: "dark" });
+    }
   };
 
-  // Calcular si hay pocos cupos disponibles (menos del 20%)
   const getCuposDisplay = () => {
     if (evento.cupos === null) return 'Cupos ilimitados';
     
@@ -127,33 +95,34 @@ export default function EventCard({ evento, isRegistered, onParticipate, onViewD
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, delay: index * 0.05 }}
-      className="group bg-gradient-to-br from-gray-800/90 to-gray-900/90 backdrop-blur-sm rounded-xl overflow-hidden shadow-lg border border-gray-700/60 
-                transition-all duration-300 flex flex-col h-full cursor-pointer hover:shadow-xl hover:shadow-green-500/10"
-      onClick={handleCardClick}
+    <div
+      className={`group bg-gradient-to-bl from-gray-800/80 to-gray-900/95 rounded-xl overflow-hidden shadow-lg 
+                border border-gray-700/30 transition-all duration-300 flex flex-col h-full cursor-pointer
+                hover:shadow-xl hover:shadow-green-500/15 hover:border-green-500/30 transform hover:-translate-y-1
+                animate-in fade-in-0 slide-in-from-bottom-5 duration-500 ease-out`}
+      onClick={handleCardClick} // Llama a la función modificada
+      // El estilo de animación con delay se mantiene, pero podrías quitarlo si la carga es muy rápida
+      // style={{ animationDelay: `${index * 50}ms` }} 
+      // Opcional: quitar el delay para que todas las tarjetas aparezcan más rápido o al mismo tiempo si `animate-in` es suficiente
     >
       {/* Imagen con overlay gradiente */}
-      <div className="relative w-full pt-[56.25%] overflow-hidden"> 
+      <div className="relative w-full pt-[52%] overflow-hidden"> 
         {!imageError && evento.imagen_url ? (
           <>
             <Image
               src={evento.imagen_url}
               alt={evento.nombre_evento || 'Imagen del evento'}
               fill
-              className="object-cover transition-transform duration-500 ease-out group-hover:scale-105"
+              className="object-cover transition-transform duration-700 ease-out group-hover:scale-105"
               sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-              priority={index < 3}
-              quality={80}
+              priority={index < 3} // Priorizar carga de las primeras imágenes visibles
+              quality={85}
               onError={() => {
                 console.warn(`Error cargando imagen: ${evento.imagen_url}`);
                 setImageError(true);
               }}
             />
-            {/* Overlay con gradiente sutil */}
-            <div className="absolute inset-0 bg-gradient-to-t from-gray-900/80 via-transparent to-transparent"></div>
+            <div className="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/50 to-transparent opacity-70 group-hover:opacity-60 transition-opacity"></div>
           </>
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-gray-700 to-gray-800 flex items-center justify-center">
@@ -163,13 +132,13 @@ export default function EventCard({ evento, isRegistered, onParticipate, onViewD
           </div>
         )}
         
-        {/* Badge de estado */}
-        <div className={`absolute top-3 right-3 text-xs font-medium px-3 py-1.5 rounded-full ${statusInfo.textColor} ${statusInfo.color} shadow-md backdrop-blur-sm flex items-center`}>
+        <div className={`absolute top-3 right-3 text-xs font-medium px-3 py-1.5 rounded-full 
+                         ${statusInfo.textColor} ${statusInfo.color} shadow-lg backdrop-blur-sm 
+                         flex items-center transition-all group-hover:scale-105`}>
           {statusInfo.Icon && <statusInfo.Icon size={14} className="mr-1.5" />}
           {statusInfo.text}
         </div>
 
-        {/* Título sobre la imagen */}
         <div className="absolute bottom-0 left-0 right-0 p-4">
           <h3 
             className="text-lg sm:text-xl font-bold text-white line-clamp-2 drop-shadow-md group-hover:text-green-200 transition-colors"
@@ -180,10 +149,8 @@ export default function EventCard({ evento, isRegistered, onParticipate, onViewD
         </div>
       </div>
       
-      {/* Contenido de la tarjeta */}
       <div className="p-5 flex flex-col flex-grow">
-        {/* Metadata del evento */}
-        <div className="text-sm text-gray-300 space-y-3 mb-4">
+        <div className="text-sm text-gray-300 space-y-3.5">
           <div className="flex items-center group-hover:text-green-300 transition-colors">
             <Calendar size={16} className="mr-2.5 text-green-400 flex-shrink-0" />
             <span className="font-medium">{fechaFormateada}</span>
@@ -204,33 +171,16 @@ export default function EventCard({ evento, isRegistered, onParticipate, onViewD
           )}
         </div>
         
-        {/* Descripción corta si existe */}
         {evento.descripcion_corta && (
-          <p className="text-sm text-gray-400 mb-4 line-clamp-2">
+          <p className="text-sm text-gray-400 mt-4 line-clamp-2 group-hover:text-gray-300 transition-colors">
             {evento.descripcion_corta}
           </p>
         )}
         
-        {/* Botón de acción */}
-        <div className="mt-auto pt-4 border-t border-gray-700/40">
-          <Button 
-            onClick={handleMainAction}
-            variant={isRegistered && !isEventFinished ? "secondary" : (statusInfo.buttonDisabled ? "disabled" : "primary")}
-            className="w-full text-sm py-2.5 font-medium"
-            disabled={actionLoading || (statusInfo.buttonDisabled && !isRegistered)}
-            loading={actionLoading}
-          >
-            {actionLoading ? (
-              <Loader size={16} className="animate-spin" />
-            ) : (
-              <span className="flex items-center justify-center">
-                {statusInfo.actionText}
-                <ArrowRight size={16} className="ml-2 transition-transform group-hover:translate-x-1" />
-              </span>
-            )}
-          </Button>
+        <div className="mt-auto pt-4 flex items-center justify-center">
+          <div className={`w-12 h-1 mt-2 rounded-full bg-gray-700/50 group-hover:bg-green-500/50 transition-all duration-300 group-hover:w-24`}></div>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

@@ -4,6 +4,10 @@ import Image from 'next/image';
 import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
 import CountUp from 'react-countup';
+// Si estás usando notificaciones toast, asegúrate de importarlas, por ejemplo:
+// import { toast } from 'react-toastify';
+// import 'react-toastify/dist/ReactToastify.css';
+
 
 const ParticleBackground = () => {
   const [particles, setParticles] = useState([]);
@@ -62,22 +66,52 @@ const StatsSection = () => {
     años: 1
   });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null); // Para manejar y mostrar errores
 
   useEffect(() => {
     const fetchStats = async () => {
+      setLoading(true);
+      setError(null); // Limpiar errores previos
       try {
         const response = await fetch('/api/estadisticas');
+        
+        if (!response.ok) {
+            // Intenta parsear el cuerpo del error si existe
+            let errorData = { message: "Error al obtener estadísticas." };
+            try {
+                errorData = await response.json();
+            } catch (parseError) {
+                // Si el cuerpo del error no es JSON, usa un mensaje genérico
+                console.error("Error al parsear respuesta de error de la API:", parseError);
+            }
+            throw new Error(errorData.error || errorData.message || `HTTP error! status: ${response.status}`);
+        }
+        
         const data = await response.json();
-        setStats(data);
-      } catch (error) {
-        console.error('Error fetching stats:', error);
-        // Valores por defecto en caso de error
+        
+        // Verificar que los datos recibidos tengan la estructura esperada
+        if (typeof data.miembros === 'number' &&
+            typeof data.problemas === 'number' &&
+            typeof data.eventos === 'number' &&
+            typeof data.años === 'number') {
+            setStats(data);
+        } else {
+            console.error('API de estadísticas devolvió datos incompletos o con formato incorrecto:', data);
+            throw new Error('La API de estadísticas devolvió datos con formato incorrecto.');
+        }
+
+      } catch (err) {
+        console.error('Error fetching stats:', err.message);
+        setError(err.message); // Guardar el error para mostrarlo al usuario
+        // Mantener valores por defecto o resetear a 0 en caso de error
         setStats({
-          miembros: 50,
-          problemas: 100,
+          miembros: 50, // O considera mantener el estado anterior o poner 0
+          problemas: 0,  // Importante: si falla, mostrar 0 o un indicador de error
           eventos: 30,
           años: 1
         });
+        // Aquí podrías usar una notificación toast para el usuario si lo deseas
+        // toast.error(err.message || "No se pudieron cargar las estadísticas.");
       } finally {
         setLoading(false);
       }
@@ -105,6 +139,19 @@ const StatsSection = () => {
     );
   }
 
+  if (error) {
+    return (
+      <div className="relative mb-20 md:mb-32 py-12 md:py-16 rounded-2xl md:rounded-3xl overflow-hidden bg-red-900/30 border border-red-700">
+        <div className="relative z-10 container mx-auto px-4 md:px-6 text-center text-red-300">
+          <p className="text-lg font-semibold">Error al cargar estadísticas</p>
+          <p className="text-sm">{error}</p>
+          {/* Podrías agregar un botón de reintentar aquí si lo deseas */}
+        </div>
+      </div>
+    );
+  }
+
+
   return (
     <motion.section
       className="relative mb-20 md:mb-32 py-12 md:py-16 rounded-2xl md:rounded-3xl overflow-hidden"
@@ -126,7 +173,7 @@ const StatsSection = () => {
             viewport={{ once: true }}
           >
             <div className="text-3xl md:text-4xl font-bold text-white mb-1 md:mb-2">
-              <CountUp end={stats.miembros} duration={2} />+
+              <CountUp end={stats.miembros} duration={2.5} separator="," />+
             </div>
             <div className="text-[#1ef184] text-sm md:text-base font-medium">Miembros</div>
           </motion.div>
@@ -139,7 +186,7 @@ const StatsSection = () => {
             viewport={{ once: true }}
           >
             <div className="text-3xl md:text-4xl font-bold text-white mb-1 md:mb-2">
-              <CountUp end={stats.problemas} duration={2} />+
+              <CountUp end={stats.problemas} duration={2.5} separator="," />+
             </div>
             <div className="text-[#1ef184] text-sm md:text-base font-medium">Problemas</div>
           </motion.div>
@@ -152,7 +199,7 @@ const StatsSection = () => {
             viewport={{ once: true }}
           >
             <div className="text-3xl md:text-4xl font-bold text-white mb-1 md:mb-2">
-              <CountUp end={stats.eventos} duration={2} />+
+              <CountUp end={stats.eventos} duration={2.5} separator="," />+
             </div>
             <div className="text-[#1ef184] text-sm md:text-base font-medium">Eventos</div>
           </motion.div>
@@ -165,7 +212,7 @@ const StatsSection = () => {
             viewport={{ once: true }}
           >
             <div className="text-3xl md:text-4xl font-bold text-white mb-1 md:mb-2">
-              {stats.años}+
+              <CountUp end={stats.años} duration={2.5} />+
             </div>
             <div className="text-[#1ef184] text-sm md:text-base font-medium">Años</div>
           </motion.div>
@@ -189,7 +236,8 @@ const FeatureCard = ({ image, title, description, features, colorClass }) => {
           alt={title} 
           fill
           className="object-cover transition-transform duration-700 group-hover:scale-105"
-          sizes="100vw"
+          sizes="(max-width: 768px) 100vw, 50vw"
+          quality={75}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
         <motion.div 
@@ -260,6 +308,7 @@ export default function ClubPage() {
           fill
           className="object-cover"
           priority
+          quality={85}
         />
         
         <ParticleBackground />

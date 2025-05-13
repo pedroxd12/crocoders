@@ -21,11 +21,10 @@ export default function EvidenciasPublicPage() {
 
   const [expandedEvents, setExpandedEvents] = useState({});
 
-  // Función para precargar imágenes (opcional, puede mejorar la UX)
   const preloadImages = useCallback((imageUrls) => {
     if (typeof window === 'undefined' || !imageUrls || imageUrls.length === 0) return Promise.resolve();
     
-    console.log('[EvidenciasPage] Preloading images:', imageUrls.slice(0,3)); // Log first 3
+    // console.log('[EvidenciasPage] Preloading images:', imageUrls.slice(0,3));
     return Promise.all(
       imageUrls.map(url => {
         return new Promise((resolve) => { 
@@ -38,23 +37,85 @@ export default function EvidenciasPublicPage() {
     );
   }, []);
 
+  const formatDate = useCallback((dateString) => {
+    if (!dateString || typeof dateString !== 'string') {
+      // console.log('[EvidenciasPage] formatDate: input not a valid string', dateString);
+      return "Fecha desconocida";
+    }
+  
+    let dateObj;
+    const trimmedDateString = dateString.trim();
+  
+    // Escenario 1: La entrada es probablemente YYYY-MM-DD (solo fecha)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmedDateString)) {
+      // Añadir hora y Z para interpretar como medianoche UTC
+      dateObj = new Date(trimmedDateString + 'T00:00:00.000Z');
+    } 
+    // Escenario 2: La entrada podría ser una cadena ISO completa u otra cosa que Date maneje
+    else {
+      dateObj = new Date(trimmedDateString);
+    }
+  
+    // Comprobar si dateObj es válido
+    if (isNaN(dateObj.getTime())) {
+      // console.warn(`[EvidenciasPage] formatDate: Failed to parse date string: "${dateString}" (Processed as: "${trimmedDateString}")`);
+      return "Fecha inválida";
+    }
+  
+    // Formatear la fecha en español, asegurando que la salida refleje la fecha en UTC.
+    try {
+      return dateObj.toLocaleDateString('es-ES', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'UTC' // Clave para una salida consistente independientemente de la zona horaria del cliente
+      });
+    } catch (e) {
+      // console.error('[EvidenciasPage] formatDate: Error during toLocaleDateString', e);
+      return "Fecha inválida"; 
+    }
+  }, []);
+
   const fetchInitialEventsList = useCallback(async () => {
-    console.log('[EvidenciasPage] Fetching initial events list...');
+    // console.log('[EvidenciasPage] Fetching initial events list...');
     setLoadingStates(prev => ({ ...prev, initialEvents: true }));
     try {
       const response = await fetch('/api/evidencias'); 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({})); // Intenta parsear JSON
+        const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `Error al cargar la lista de eventos con evidencias (HTTP ${response.status})`);
       }
       let data = await response.json();
-      console.log('[EvidenciasPage] Raw events data from API:', data);
+      // console.log('[EvidenciasPage] Raw events data from API:', data);
       
       data = data
         .filter(event => event.num_evidencias > 0)
-        .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+        .sort((a, b) => {
+            // Función auxiliar para parsear la fecha consistentemente para la ordenación
+            const parseDateForSort = (fechaStr) => {
+                if (!fechaStr || typeof fechaStr !== 'string') return new Date(NaN); // Fecha inválida
+                const trimmed = fechaStr.trim();
+                if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+                    return new Date(trimmed + 'T00:00:00.000Z');
+                }
+                return new Date(trimmed);
+            };
+
+            const dateA = parseDateForSort(a.fecha);
+            const dateB = parseDateForSort(b.fecha);
+
+            // Manejar fechas inválidas en la ordenación
+            const timeA = dateA.getTime();
+            const timeB = dateB.getTime();
+
+            if (isNaN(timeA) && isNaN(timeB)) return 0;
+            if (isNaN(timeA)) return 1; // Poner fechas inválidas al final (o al principio con -1)
+            if (isNaN(timeB)) return -1;
+
+            return timeB - timeA; // Para orden descendente (más reciente primero)
+        });
       
-      console.log('[EvidenciasPage] Filtered and sorted events:', data);
+      // console.log('[EvidenciasPage] Filtered and sorted events:', data);
       setEventsWithEvidencias(data);
 
     } catch (err) {
@@ -63,14 +124,14 @@ export default function EvidenciasPublicPage() {
     } finally {
       setLoadingStates(prev => ({ ...prev, initialEvents: false }));
     }
-  }, []);
+  }, []); // formatDate no es dependencia directa aquí, pero su lógica es relevante para la ordenación
 
   useEffect(() => {
     fetchInitialEventsList();
   }, [fetchInitialEventsList]);
 
   const fetchAndSetEventImages = useCallback(async (eventId, forModal = false) => {
-    console.log(`[EvidenciasPage] Fetching images for event ${eventId}. For modal: ${forModal}`);
+    // console.log(`[EvidenciasPage] Fetching images for event ${eventId}. For modal: ${forModal}`);
     setLoadingStates(prev => ({ ...prev, eventDetails: { ...prev.eventDetails, [eventId]: true } }));
     try {
       const response = await fetch(`/api/evidencias?evento=${eventId}`);
@@ -79,9 +140,8 @@ export default function EvidenciasPublicPage() {
         throw new Error(errorData.error || `Error al cargar las evidencias del evento (HTTP ${response.status})`);
       }
       const evidenciasData = await response.json();
-      console.log(`[EvidenciasPage] Evidencias data for event ${eventId}:`, evidenciasData);
+      // console.log(`[EvidenciasPage] Evidencias data for event ${eventId}:`, evidenciasData);
 
-      // Asumimos que imagen_url ya es una URL completa y correcta desde el backend (e.g., UploadThing)
       if (evidenciasData && evidenciasData.length > 0) {
         await preloadImages(evidenciasData.map(img => img.imagen_url));
       }
@@ -106,41 +166,32 @@ export default function EvidenciasPublicPage() {
 
   const toggleEventExpansion = useCallback((eventId) => {
     const isCurrentlyExpanded = !!expandedEvents[eventId];
-    console.log(`[EvidenciasPage] Toggling expansion for event ${eventId}. Currently expanded: ${isCurrentlyExpanded}`);
+    // console.log(`[EvidenciasPage] Toggling expansion for event ${eventId}. Currently expanded: ${isCurrentlyExpanded}`);
     setExpandedEvents(prev => ({ ...prev, [eventId]: !isCurrentlyExpanded }));
 
     if (!isCurrentlyExpanded && !detailedEventImages[eventId]) {
-      console.log(`[EvidenciasPage] Fetching images for inline display for event ${eventId}.`);
+      // console.log(`[EvidenciasPage] Fetching images for inline display for event ${eventId}.`);
       fetchAndSetEventImages(eventId, false);
     }
   }, [expandedEvents, detailedEventImages, fetchAndSetEventImages]);
 
   const openImageGalleryModal = (event) => {
-    console.log(`[EvidenciasPage] Opening image gallery modal for event ${event.id_evento}.`);
+    // console.log(`[EvidenciasPage] Opening image gallery modal for event ${event.id_evento}.`);
     const eventDataForModal = eventsWithEvidencias.find(e => e.id_evento === event.id_evento);
     
     if (detailedEventImages[event.id_evento] && detailedEventImages[event.id_evento].length > 0) {
-      console.log(`[EvidenciasPage] Using already loaded images for modal for event ${event.id_evento}.`);
+      // console.log(`[EvidenciasPage] Using already loaded images for modal for event ${event.id_evento}.`);
       setSelectedEventModal({ ...eventDataForModal, images: detailedEventImages[event.id_evento]});
     } else {
-      console.log(`[EvidenciasPage] Fetching images specifically for modal for event ${event.id_evento}.`);
+      // console.log(`[EvidenciasPage] Fetching images specifically for modal for event ${event.id_evento}.`);
       fetchAndSetEventImages(event.id_evento, true); 
     }
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return "Fecha desconocida";
-    try {
-      return new Date(dateString + 'T00:00:00Z') // Asumir UTC si no hay timezone, o ajustar si es necesario
-             .toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
-    } catch (e) {
-      console.warn(`[EvidenciasPage] Invalid date string: ${dateString}`);
-      return "Fecha inválida";
-    }
-  };
-
+  // formatDate se define arriba con useCallback
+  
   const getCategoryStyle = (hermandad) => {
-    const lowerHermandad = hermandad?.toLowerCase() || 'club de programación'; // Default al club
+    const lowerHermandad = hermandad?.toLowerCase() || 'club de programación'; 
     
     if (lowerHermandad.includes('computer society')) {
       return {
@@ -154,14 +205,14 @@ export default function EvidenciasPublicPage() {
         timelineNode: 'bg-gradient-to-br from-purple-500 to-fuchsia-500',
       };
     }
-    return { // Por defecto, Club de Programación
+    return { 
       name: 'Club de Programación',
       bgIcon: 'bg-green-500/10', textIcon: 'text-green-400',
       borderTimeline: 'border-green-500',
       bgCard: 'bg-gradient-to-br from-gray-800 via-green-900/30 to-gray-800',
       shadowCard: 'hover:shadow-green-500/20',
       tagBg: 'bg-green-500/20', tagText: 'text-green-300', tagBorder: 'border-green-700',
-      buttonClass: 'bg-green-600 hover:bg-green-700 text-gray-900',
+      buttonClass: 'bg-green-600 hover:bg-green-700 text-gray-900', // Originalmente text-white, ajustado a text-gray-900 por contraste con botón verde
       timelineNode: 'bg-gradient-to-br from-green-500 to-emerald-500',
     };
   };
@@ -183,7 +234,7 @@ export default function EvidenciasPublicPage() {
         className="relative text-center px-4 z-10 pt-16 pb-12"
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.7 }}
       >
-        <div className={`mb-5 inline-block p-4 rounded-full border-2 shadow-lg ${getCategoryStyle('club de programación').bgIcon} ${getCategoryStyle('club de programación').borderTimeline}/30`}>
+        <div className={`mb-5 inline-block p-4 rounded-full border-2 shadow-lg ${getCategoryStyle('club de programación').bgIcon} ${getCategoryStyle('club de programación').borderTimeline}/30`}> {/* Asegurar que esto usa una categoría base */}
             <Camera size={40} className={getCategoryStyle('club de programación').textIcon} />
         </div>
         <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold mb-4 text-transparent bg-clip-text bg-gradient-to-r from-green-300 via-teal-300 to-sky-300">
@@ -216,7 +267,7 @@ export default function EvidenciasPublicPage() {
           {eventsWithEvidencias.length > 0 ? (
             <div className="space-y-12 md:space-y-0">
               {eventsWithEvidencias.map((event, index) => {
-                const styleProps = getCategoryStyle(event.hermandad); // Usar hermandad
+                const styleProps = getCategoryStyle(event.hermandad);
                 const isExpanded = !!expandedEvents[event.id_evento];
                 const currentEventImages = detailedEventImages[event.id_evento] || [];
                 const isLoadingDetails = loadingStates.eventDetails[event.id_evento];
@@ -240,7 +291,7 @@ export default function EvidenciasPublicPage() {
                     <div className={`w-full md:w-5/12 p-5 sm:p-6 rounded-xl ${styleProps.bgCard} border ${styleProps.borderTimeline} shadow-xl transition-all duration-300 hover:shadow-2xl ${styleProps.shadowCard} ${cardMarginClass}`}>
                       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3">
                         <span className={`px-3 py-1 rounded-full text-xs font-semibold ${styleProps.tagBg} ${styleProps.tagText} ${styleProps.tagBorder}`}>
-                          {styleProps.name} {/* Muestra el nombre de la hermandad */}
+                          {styleProps.name}
                         </span>
                         <p className="text-xs text-gray-400 mt-1 sm:mt-0 flex items-center">
                           <CalendarDays size={14} className="mr-1.5"/> {formatDate(event.fecha)}
@@ -249,11 +300,11 @@ export default function EvidenciasPublicPage() {
 
                       <h3 className="text-xl sm:text-2xl font-bold mb-3 text-white">{event.nombre_evento}</h3>
                       
-                       {event.lugar && (
-                        <p className="text-xs text-gray-400 mb-4 flex items-center">
-                            <MapPin size={14} className="mr-1.5"/> {event.lugar}
-                        </p>
-                       )}
+                        {event.lugar && (
+                          <p className="text-xs text-gray-400 mb-4 flex items-center">
+                              <MapPin size={14} className="mr-1.5"/> {event.lugar}
+                          </p>
+                        )}
 
                       <button
                         onClick={() => toggleEventExpansion(event.id_evento)}
@@ -285,7 +336,7 @@ export default function EvidenciasPublicPage() {
                                   placeholder="blur"
                                   blurDataURL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
                                   onError={(e) => {e.target.onerror = null; e.target.src='/placeholder-image.jpg';}}
-                                  unoptimized={true} // Aplicado para solucionar error de Loader
+                                  unoptimized={true} 
                                 />
                                 {currentEventImages.length > 6 && imgIdx === 5 && (
                                     <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
@@ -375,9 +426,9 @@ export default function EvidenciasPublicPage() {
                         placeholder="blur"
                         blurDataURL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
                         onError={(e) => {e.target.onerror = null; e.target.src='/placeholder-image.jpg';}}
-                        unoptimized={true} // Aplicado para solucionar error de Loader
+                        unoptimized={true}
                       />
-                       {img.nombre && (
+                        {img.nombre && (
                           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                               <p className="text-white text-xs font-medium truncate">{img.nombre}</p>
                           </div>
@@ -386,10 +437,10 @@ export default function EvidenciasPublicPage() {
                   ))}
                 </div>
               ) : (
-                 <div className="h-64 flex flex-col items-center justify-center text-gray-400">
-                    <ImageOff size={48} className="mb-3"/>
-                    <p>No hay imágenes disponibles para este evento.</p>
-                 </div>
+                   <div className="h-64 flex flex-col items-center justify-center text-gray-400">
+                      <ImageOff size={48} className="mb-3"/>
+                      <p>No hay imágenes disponibles para este evento.</p>
+                   </div>
               )}
             </div>
           </motion.div>

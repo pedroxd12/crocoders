@@ -25,6 +25,7 @@ const PUBLIC_PATHS = [
   '/eventos/(.*)', 
   '/_next/(.*)',
   '/public/(.*)',
+  '/video/(.*)',
   '/public/uploads/eventos/(.*)',
   '/evidencia/(.*)',
   '/img/uploads/eventos/(.*)',
