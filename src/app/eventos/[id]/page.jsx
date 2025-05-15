@@ -5,15 +5,14 @@ import { useRouter, useParams, usePathname, useSearchParams } from 'next/navigat
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'react-toastify';
 import Image from 'next/image';
-import { motion } from 'framer-motion';
-import Modal from '@/components/ui/Modal'; // Tu componente Modal
-import Button from '@/components/ui/Button'; // Tu componente Button
-import Input from '@/components/ui/Input'; // Tu componente Input
-import Select from '@/components/ui/Select'; // Tu componente Select
-import LoadingSpinner from '@/components/LoadingSpinner'; // Tu componente LoadingSpinner
+import { motion, AnimatePresence } from 'framer-motion';
+import Modal from '@/components/ui/Modal';
+import Button from '@/components/ui/Button';
+import Input from '@/components/ui/Input';
+import LoadingSpinner from '@/components/LoadingSpinner';
 import { 
   Calendar, Users, Clock, ArrowLeft, CheckCircle, XCircle, UserPlus, 
-  LogIn, AlertTriangle, DollarSign, Loader, Info, Tag 
+  LogIn, AlertTriangle, DollarSign, Loader, Info, Tag, BookOpen, Building, PartyPopper
 } from 'lucide-react';
 
 async function sendEventRegistrationEmail(email, name, eventDetails) {
@@ -25,10 +24,8 @@ async function sendEventRegistrationEmail(email, name, eventDetails) {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Error al enviar correo');
-    // No es necesario retornar result si solo se quiere confirmar el envío
   } catch (error) {
     console.error('Error al enviar correo de confirmación:', error);
-    // No relanzar para no bloquear el flujo principal
   }
 }
 
@@ -40,7 +37,7 @@ function EventoDetalleContent() {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   
   const [evento, setEvento] = useState(null);
-  const [loading, setLoading] = useState(true); // For event details
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
   const [isRegistered, setIsRegistered] = useState(false);
@@ -51,25 +48,24 @@ function EventoDetalleContent() {
   const [showUnregisterModal, setShowUnregisterModal] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
-  // --- Estados para el Modal de la Imagen ---
   const [showImageModal, setShowImageModal] = useState(false);
   const [selectedImageUrl, setSelectedImageUrl] = useState('');
-  // --- Fin Estados para el Modal de la Imagen ---
+
+  const [showGuestRegistrationSuccess, setShowGuestRegistrationSuccess] = useState(false);
+  // NUEVO: Estado para la animación de éxito de registro de MIEMBRO
+  const [showMemberRegistrationSuccess, setShowMemberRegistrationSuccess] = useState(false);
+
 
   const [guestData, setGuestData] = useState({
     nombre_completo: '',
     correo_electronico: '',
     numero_telefono: '',
     semestre: '',
-    carrera: ''
+    carrera: '',
+    escuela_institucion: ''
   });
   const [formErrors, setFormErrors] = useState({});
 
-  const carreras = [
-    'Ingeniería en Sistemas Computacionales', 'Ingeniería en Electronica',
-    'Ingeniería Industrial', 'Ingeniería Quimica',
-    'Ingeniería en Logistica', 'Ingeniería en Mecatronica', 'Otra'
-  ];
   const semestres = Array.from({ length: 14 }, (_, i) => ({ value: (i + 1).toString(), label: `${i + 1}° Semestre` }));
 
   const fetchEventoDetails = useCallback(async () => {
@@ -150,9 +146,17 @@ function EventoDetalleContent() {
       setIsRegistered(true);
       setRegistrationCheckLoading(false); 
       toast.success('¡Inscripción exitosa!', { theme: "dark" });
+      
+      if (!isAuthenticated) { // Si no está autenticado, fue un invitado
+        setShowGuestRegistrationSuccess(true);
+        setTimeout(() => setShowGuestRegistrationSuccess(false), 4000);
+      } else if (isAuthenticated) { // Si está autenticado, fue un miembro
+        setShowMemberRegistrationSuccess(true);
+        setTimeout(() => setShowMemberRegistrationSuccess(false), 4000);
+      }
       router.replace(`/eventos/${id}`, {scroll: false}); 
     }
-  }, [searchParams, router, id]);
+  }, [searchParams, router, id, isAuthenticated]);
 
   const validateGuestForm = () => {
     const errors = {};
@@ -161,7 +165,8 @@ function EventoDetalleContent() {
     else if (!/\S+@\S+\.\S+/.test(guestData.correo_electronico)) errors.correo_electronico = 'Email no válido';
     if (!guestData.numero_telefono.trim()) errors.numero_telefono = 'Teléfono es requerido';
     else if (!/^[0-9]{10}$/.test(guestData.numero_telefono)) errors.numero_telefono = 'Teléfono debe ser de 10 dígitos';
-    if (!guestData.carrera) errors.carrera = 'Carrera es requerida';
+    if (!guestData.carrera.trim()) errors.carrera = 'Carrera/Bachillerato es requerido';
+    if (!guestData.escuela_institucion.trim()) errors.escuela_institucion = 'Escuela/Institución es requerida';
     if (!guestData.semestre) errors.semestre = 'Semestre es requerido';
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
@@ -217,13 +222,21 @@ function EventoDetalleContent() {
         if (emailToSend && nameToSend && result.event) {
           sendEventRegistrationEmail(emailToSend, nameToSend, result.event);
         }
+        
+        if (!isAuthenticated) { // Invitado
+          setShowGuestRegistrationSuccess(true);
+          setTimeout(() => setShowGuestRegistrationSuccess(false), 4000);
+        } else { // Miembro
+          setShowMemberRegistrationSuccess(true);
+          setTimeout(() => setShowMemberRegistrationSuccess(false), 4000);
+        }
       }
 
       setShowRegistrationTypeModal(false);
       setShowGuestFormModal(false);
       setShowUnregisterModal(false);
       if (type === 'register' && !isAuthenticated) {
-        setGuestData({ nombre_completo: '', correo_electronico: '', numero_telefono: '', semestre: '', carrera: '' });
+        setGuestData({ nombre_completo: '', correo_electronico: '', numero_telefono: '', semestre: '', carrera: '', escuela_institucion: '' });
         setFormErrors({});
       }
 
@@ -245,9 +258,9 @@ function EventoDetalleContent() {
     } else if (evento.cupos !== null && evento.cupos_disponibles <= 0) {
       toast.info('No hay cupos disponibles para este evento.', { theme: "dark" });
     } else if (isAuthenticated) {
-      handleApiRegistration('register');
+      handleApiRegistration('register'); // Miembros se registran directamente
     } else {
-      setShowRegistrationTypeModal(true);
+      setShowRegistrationTypeModal(true); // Invitados ven el modal de tipo de registro
     }
   };
 
@@ -276,14 +289,12 @@ function EventoDetalleContent() {
     return date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true });
   };
 
-  // --- Función para abrir el modal de la imagen ---
   const handleImageClick = (imageUrl) => {
-    if (imageUrl) { // Solo abre si hay una URL válida
+    if (imageUrl) {
         setSelectedImageUrl(imageUrl);
         setShowImageModal(true);
     }
   };
-  // --- Fin Función para abrir el modal de la imagen ---
   
   if (authLoading || loading) return <LoadingSpinner fullScreen text="Cargando detalle del evento..." />;
   if (error) return (
@@ -321,7 +332,6 @@ function EventoDetalleContent() {
           initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.5, delay: 0.1 }}
           className="bg-gray-800 rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl border border-gray-700"
         >
-          {/* --- Modificación para hacer la imagen clickeable --- */}
           <div 
             className="relative h-64 md:h-80 lg:h-96 w-full cursor-pointer" 
             onClick={() => handleImageClick(evento.imagen_url || '/placeholder-event.jpg')}
@@ -358,7 +368,6 @@ function EventoDetalleContent() {
                 )}
             </div>
           </div>
-          {/* --- Fin Modificación para hacer la imagen clickeable --- */}
 
           <div className="p-6 md:p-8 lg:p-10">
             <motion.h1 
@@ -436,7 +445,6 @@ function EventoDetalleContent() {
         </motion.div>
       </div>
 
-      {/* Modals existentes */}
       <Modal isOpen={showUnregisterModal} onClose={() => setShowUnregisterModal(false)} title="Confirmar Cancelación">
         <p className="text-gray-300 mb-6">¿Estás seguro de que deseas cancelar tu inscripción para "{evento?.nombre_evento}"?</p>
         <div className="flex justify-end space-x-3">
@@ -477,11 +485,71 @@ function EventoDetalleContent() {
         title={`Inscripción como Invitado: ${evento?.nombre_evento || ''}`}
       >
         <form onSubmit={(e) => { e.preventDefault(); handleGuestRegistrationSubmit(); }} className="space-y-4">
-          <Input label="Nombre completo *" name="nombre_completo" value={guestData.nombre_completo} onChange={handleGuestInputChange} required error={formErrors.nombre_completo} className="bg-gray-700 border-gray-600 focus:border-green-500"/>
-          <Input label="Correo electrónico *" type="email" name="correo_electronico" value={guestData.correo_electronico} onChange={handleGuestInputChange} required error={formErrors.correo_electronico} className="bg-gray-700 border-gray-600 focus:border-green-500"/>
-          <Input label="Número de teléfono *" name="numero_telefono" value={guestData.numero_telefono} onChange={handleGuestInputChange} required placeholder="10 dígitos" error={formErrors.numero_telefono} className="bg-gray-700 border-gray-600 focus:border-green-500"/>
-          <Select label="Carrera *" name="carrera" value={guestData.carrera} onChange={handleGuestInputChange} options={carreras.map(c => ({ value: c, label: c }))} placeholder="Selecciona tu carrera" required error={formErrors.carrera} classNameForSelect="bg-gray-700 border-gray-600 focus:border-green-500"/>
-          <Select label="Semestre *" name="semestre" value={guestData.semestre} onChange={handleGuestInputChange} options={semestres} placeholder="Selecciona tu semestre" required error={formErrors.semestre} classNameForSelect="bg-gray-700 border-gray-600 focus:border-green-500"/>
+          <Input 
+            label="Nombre completo *" 
+            name="nombre_completo" 
+            value={guestData.nombre_completo} 
+            onChange={handleGuestInputChange} 
+            required 
+            error={formErrors.nombre_completo} 
+            className="bg-gray-700 border-gray-600 focus:border-green-500"
+            icon={<UserPlus size={16} className="text-gray-400"/>}
+          />
+          <Input 
+            label="Correo electrónico *" 
+            type="email" 
+            name="correo_electronico" 
+            value={guestData.correo_electronico} 
+            onChange={handleGuestInputChange} 
+            required 
+            error={formErrors.correo_electronico} 
+            className="bg-gray-700 border-gray-600 focus:border-green-500"
+          />
+          <Input 
+            label="Número de teléfono *" 
+            name="numero_telefono" 
+            value={guestData.numero_telefono} 
+            onChange={handleGuestInputChange} 
+            required 
+            placeholder="10 dígitos" 
+            error={formErrors.numero_telefono} 
+            className="bg-gray-700 border-gray-600 focus:border-green-500"
+          />
+          <Input 
+            label="Escuela/Institución *" 
+            name="escuela_institucion" 
+            value={guestData.escuela_institucion} 
+            onChange={handleGuestInputChange} 
+            required 
+            error={formErrors.escuela_institucion} 
+            className="bg-gray-700 border-gray-600 focus:border-green-500"
+            icon={<Building size={16} className="text-gray-400"/>}
+          />
+          <Input 
+            label="Carrera/Bachillerato *" 
+            name="carrera" 
+            value={guestData.carrera} 
+            onChange={handleGuestInputChange} 
+            required 
+            error={formErrors.carrera} 
+            className="bg-gray-700 border-gray-600 focus:border-green-500"
+            icon={<BookOpen size={16} className="text-gray-400"/>}
+          />
+           <div className="mb-4">
+            <label className="block text-gray-300 text-sm font-medium mb-2">Semestre *</label>
+            <select
+              name="semestre"
+              value={guestData.semestre}
+              onChange={handleGuestInputChange}
+              required
+              className="w-full p-2.5 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-none transition"
+            >
+              <option value="">Selecciona tu semestre</option>
+              {semestres.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+            {formErrors.semestre && <p className="text-red-400 text-xs mt-1">{formErrors.semestre}</p>}
+          </div>
+          
           <div className="flex justify-end space-x-3 pt-3">
             <Button type="button" onClick={() => { setShowGuestFormModal(false); setFormErrors({}); }} variant="secondary" disabled={actionLoading}>Cancelar</Button>
             <Button type="submit" variant="primary" loading={actionLoading} disabled={actionLoading}>{actionLoading ? "Inscribiendo..." : "Confirmar Inscripción"}</Button>
@@ -489,23 +557,20 @@ function EventoDetalleContent() {
         </form>
       </Modal>
 
-      {/* --- Modal para ver imagen completa --- */}
       <Modal 
         isOpen={showImageModal} 
         onClose={() => setShowImageModal(false)} 
         title={evento?.nombre_evento || "Vista de Imagen"}
-        // Considera añadir una prop 'size' a tu Modal si necesitas controlar su ancho, ej: size="xl"
-        // o ajusta los estilos de tu Modal para que se adapte bien a una imagen grande.
       >
-        <div className="flex justify-center items-center p-2 md:p-4 bg-black bg-opacity-50"> {/* Fondo oscuro para el contenido del modal */}
+        <div className="flex justify-center items-center p-2 md:p-4 bg-black bg-opacity-50">
             {selectedImageUrl ? (
                 <div style={{ maxWidth: '90vw', maxHeight: '85vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
                     <Image
                         src={selectedImageUrl}
                         alt="Imagen del evento en tamaño completo"
-                        width={1200} // Un valor grande; objectFit se encargará del escalado
-                        height={800} // Un valor grande
-                        objectFit="contain" // Esencial para que la imagen se escale sin cortarse y quepa
+                        width={1200} 
+                        height={800} 
+                        style={{objectFit: 'contain'}}
                         className="rounded-md" 
                     />
                 </div>
@@ -513,19 +578,101 @@ function EventoDetalleContent() {
                 <p className="text-gray-300">No se pudo cargar la imagen.</p>
             )}
         </div>
-        <div className="flex justify-end p-3 md:p-4 border-t border-gray-700 mt-0"> {/* Quitado margen superior si el contenido ya tiene padding */}
+        <div className="flex justify-end p-3 md:p-4 border-t border-gray-700 mt-0">
             <Button onClick={() => setShowImageModal(false)} variant="secondary">
                 Cerrar
             </Button>
         </div>
       </Modal>
-      {/* --- Fin Modal para ver imagen completa --- */}
+
+      {/* Modal de Éxito para Invitado */}
+      <AnimatePresence>
+        {showGuestRegistrationSuccess && (
+          <Modal
+            isOpen={showGuestRegistrationSuccess}
+            onClose={() => setShowGuestRegistrationSuccess(false)}
+            title="¡Inscripción Exitosa!"
+            size="md" 
+            hideHeader={false}
+          >
+            <motion.div
+              className="text-center p-6 flex flex-col items-center"
+              initial={{ opacity: 0, scale: 0.7 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.7 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+            >
+              <PartyPopper size={64} className="text-green-400 mb-6 animate-bounce" />
+              <h3 className="text-2xl font-bold text-white mb-3">
+                ¡Felicidades, {guestData.nombre_completo || 'Invitado'}!
+              </h3>
+              <p className="text-gray-300 mb-1">
+                Te has inscrito correctamente al evento:
+              </p>
+              <p className="text-green-300 font-semibold text-lg mb-6">
+                {evento?.nombre_evento}
+              </p>
+              <p className="text-sm text-gray-400 mb-6">
+                Hemos enviado un correo de confirmación a <span className="font-medium text-gray-200">{guestData.correo_electronico}</span> con los detalles.
+              </p>
+              <Button 
+                onClick={() => setShowGuestRegistrationSuccess(false)} 
+                variant="primary"
+                className="w-full"
+              >
+                Entendido
+              </Button>
+            </motion.div>
+          </Modal>
+        )}
+      </AnimatePresence>
+      
+      {/* NUEVO: Modal de Éxito para Miembro */}
+      <AnimatePresence>
+        {showMemberRegistrationSuccess && user && (
+          <Modal
+            isOpen={showMemberRegistrationSuccess}
+            onClose={() => setShowMemberRegistrationSuccess(false)}
+            title="¡Inscripción Exitosa!"
+            size="md"
+            hideHeader={false}
+          >
+            <motion.div
+              className="text-center p-6 flex flex-col items-center"
+              initial={{ opacity: 0, scale: 0.7 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.7 }}
+              transition={{ duration: 0.3, ease: "easeOut" }}
+            >
+              <PartyPopper size={64} className="text-green-400 mb-6 animate-bounce" />
+              <h3 className="text-2xl font-bold text-white mb-3">
+                ¡Excelente, {user.nombre_completo || 'Miembro'}!
+              </h3>
+              <p className="text-gray-300 mb-1">
+                Tu inscripción al evento:
+              </p>
+              <p className="text-green-300 font-semibold text-lg mb-6">
+                {evento?.nombre_evento}
+              </p>
+              <p className="text-sm text-gray-400 mb-6">
+                ha sido confirmada. Hemos enviado los detalles a tu correo <span className="font-medium text-gray-200">{user.correo_electronico}</span>.
+              </p>
+              <Button 
+                onClick={() => setShowMemberRegistrationSuccess(false)} 
+                variant="primary"
+                className="w-full"
+              >
+                ¡Genial!
+              </Button>
+            </motion.div>
+          </Modal>
+        )}
+      </AnimatePresence>
 
     </motion.main>
   );
 }
 
-// Componente para las tarjetas de información (Horario, Cupos, Costo)
 const InfoCard = ({ icon, title, children }) => (
   <div className="bg-gray-700/50 p-4 rounded-xl border border-gray-600/50 shadow-lg">
     <h3 className="text-green-300 font-semibold mb-2 flex items-center text-sm md:text-base">

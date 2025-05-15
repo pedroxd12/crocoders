@@ -85,8 +85,17 @@ async function logoutUser() {
 
 async function registerUser(userData) {
   try {
-    if (!userData?.nombre_completo || !userData?.correo_electronico || !userData?.contrasena) {
-      throw new Error('Nombre, email y contraseña son requeridos');
+    // MODIFICADO: Añadir validación para los nuevos campos requeridos
+    if (
+      !userData?.nombre_completo || 
+      !userData?.correo_electronico || 
+      !userData?.contrasena ||
+      !userData?.numero_telefono || // Nuevo
+      !userData?.usuario_codeforces || // Nuevo
+      !userData?.usuario_vjudge || // Nuevo
+      !userData?.usuario_omegaup // Nuevo
+    ) {
+      throw new Error('Nombre, email, contraseña, teléfono y todos los usuarios de plataformas son requeridos.');
     }
 
     const response = await apiRequest('/api/auth/register', {
@@ -100,6 +109,7 @@ async function registerUser(userData) {
     throw error;
   }
 }
+
 
 async function getUserData() {
   try {

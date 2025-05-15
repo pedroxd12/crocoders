@@ -1,3 +1,4 @@
+// src/app/iniciar/page.js
 'use client';
 
 import { useState, useEffect, useCallback, Suspense } from 'react';
@@ -140,7 +141,11 @@ function AuthContent() {
       confirmar_contrasena,
       numero_telefono,
       semestre,
-      carrera
+      carrera,
+      // NUEVO: Campos de plataformas
+      usuario_codeforces,
+      usuario_vjudge,
+      usuario_omegaup
     } = registerData;
 
     if (!nombre_completo) newErrors.nombre_completo = 'Nombre completo es requerido';
@@ -157,11 +162,20 @@ function AuthContent() {
     } else if (contrasena !== confirmar_contrasena) {
       newErrors.confirmar_contrasena = 'Las contraseñas no coinciden';
     }
-    if (numero_telefono && !validatePhone(numero_telefono)) {
+    // MODIFICADO: Hacer teléfono requerido
+    if (!numero_telefono) {
+        newErrors.numero_telefono = 'Número de teléfono es requerido';
+    } else if (!validatePhone(numero_telefono)) {
       newErrors.numero_telefono = 'Teléfono no válido (10-15 dígitos)';
     }
     if (!semestre) newErrors.semestre = 'Semestre es requerido';
     if (!carrera) newErrors.carrera = 'Carrera es requerida';
+
+    // NUEVO: Validaciones para campos de plataformas
+    if (!usuario_codeforces) newErrors.usuario_codeforces = 'Usuario de Codeforces es requerido';
+    if (!usuario_vjudge) newErrors.usuario_vjudge = 'Usuario de VJudge es requerido';
+    if (!usuario_omegaup) newErrors.usuario_omegaup = 'Usuario de OmegaUp es requerido';
+
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -660,6 +674,7 @@ function AuthContent() {
             )}
           </div>
 
+          {/* MODIFICADO: Teléfono ahora es requerido */}
           <div className="group">
             <label className="block text-gray-300 mb-2 flex items-center">
               <FaPhone className="mr-2" /> Número de teléfono
@@ -671,9 +686,9 @@ function AuthContent() {
                 className={`w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border ${errors.numero_telefono ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
                 value={registerData.numero_telefono} 
                 onChange={handleRegisterChange}
-                placeholder="Opcional"
                 pattern="[0-9]{10,15}"
                 title="Número de teléfono (10-15 dígitos)"
+                required // NUEVO: Agregado
               />
               <FaPhone className="absolute left-3 top-3.5 text-gray-400 transition group-hover:text-green-400" />
             </div>
@@ -721,16 +736,17 @@ function AuthContent() {
               )}
             </div>
           </div>
-
+          
+          {/* MODIFICADO: Campos de plataformas ahora son requeridos */}
           <div className="space-y-4">
             <h3 className="text-gray-300 text-sm font-medium">Perfiles en plataformas de programación</h3>
             <p className="text-xs text-gray-400 -mt-3">
-              Estos datos nos ayudarán a hacer seguimiento de tu progreso...
-              Favor de crear una cuenta en estas plataformas de programación.
+              Estos datos nos ayudarán a hacer seguimiento de tu progreso.
+              Favor de crear una cuenta en estas plataformas de programación. <span className="text-red-400">* Requerido</span>
             </p>
             
             <div className="group">
-              <label className="block text-gray-300 mb-2">Codeforces</label>
+              <label className="block text-gray-300 mb-2">Codeforces <span className="text-red-400">*</span></label>
               <input 
                 type="text" 
                 name="usuario_codeforces"
@@ -738,6 +754,7 @@ function AuthContent() {
                 value={registerData.usuario_codeforces} 
                 onChange={handleRegisterChange}
                 placeholder="Usuario de Codeforces"
+                required // NUEVO: Agregado
               />
               {errors.usuario_codeforces && (
                 <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.usuario_codeforces}</p>
@@ -745,7 +762,7 @@ function AuthContent() {
             </div>
 
             <div className="group">
-              <label className="block text-gray-300 mb-2">VJudge</label>
+              <label className="block text-gray-300 mb-2">VJudge <span className="text-red-400">*</span></label>
               <input 
                 type="text" 
                 name="usuario_vjudge"
@@ -753,6 +770,7 @@ function AuthContent() {
                 value={registerData.usuario_vjudge} 
                 onChange={handleRegisterChange}
                 placeholder="Usuario de VJudge"
+                required // NUEVO: Agregado
               />
               {errors.usuario_vjudge && (
                 <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.usuario_vjudge}</p>
@@ -760,7 +778,7 @@ function AuthContent() {
             </div>
 
             <div className="group">
-              <label className="block text-gray-300 mb-2">OmegaUp</label>
+              <label className="block text-gray-300 mb-2">OmegaUp <span className="text-red-400">*</span></label>
               <input 
                 type="text" 
                 name="usuario_omegaup"
@@ -768,6 +786,7 @@ function AuthContent() {
                 value={registerData.usuario_omegaup} 
                 onChange={handleRegisterChange}
                 placeholder="Usuario de OmegaUp"
+                required // NUEVO: Agregado
               />
               {errors.usuario_omegaup && (
                 <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.usuario_omegaup}</p>

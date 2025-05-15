@@ -1,3 +1,4 @@
+// src/app/api/auth/register/route.js
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
 import bcrypt from 'bcryptjs';
@@ -10,31 +11,46 @@ export async function POST(request) {
       correo_electronico,
       contrasena,
       confirmar_contrasena,
-      numero_telefono,
-      usuario_codeforces,
-      usuario_vjudge,
-      usuario_omegaup,
+      numero_telefono, // Ya se recibía, ahora será validado como requerido
+      usuario_codeforces, // Ya se recibía, ahora será validado como requerido
+      usuario_vjudge, // Ya se recibía, ahora será validado como requerido
+      usuario_omegaup, // Ya se recibía, ahora será validado como requerido
       semestre,
       carrera
     } = await request.json();
 
-    // Validaciones básicas
+    // Validaciones básicas (existencia y coincidencia de contraseñas)
     if (!nombre_completo || !correo_electronico || !contrasena || !confirmar_contrasena) {
       return NextResponse.json(
-        { success: false, error: 'Todos los campos son requeridos' },
+        { success: false, error: 'Nombre, correo y contraseñas son requeridos.' },
         { status: 400 }
       );
     }
 
-    // Validar que las contraseñas coincidan
     if (contrasena !== confirmar_contrasena) {
       return NextResponse.json(
-        { success: false, error: 'Las contraseñas no coinciden' },
+        { success: false, error: 'Las contraseñas no coinciden.' },
         { status: 400 }
       );
     }
+    
+    // NUEVO: Validar campos ahora requeridos
+    if (!numero_telefono || !usuario_codeforces || !usuario_vjudge || !usuario_omegaup) {
+        return NextResponse.json(
+            { success: false, error: 'Número de teléfono y usuarios de plataformas (Codeforces, VJudge, OmegaUp) son requeridos.' },
+            { status: 400 }
+        );
+    }
+    
+    // Validar formato del número de teléfono (ejemplo: 10-15 dígitos)
+    if (!/^[0-9]{10,15}$/.test(numero_telefono)) {
+        return NextResponse.json(
+            { success: false, error: 'El número de teléfono no es válido (debe tener entre 10 y 15 dígitos).' },
+            { status: 400 }
+        );
+    }
 
-    // Validar semestre y carrera
+
     if (!semestre || !carrera) {
       return NextResponse.json(
         { success: false, error: 'Semestre y carrera son requeridos' },
@@ -78,7 +94,7 @@ export async function POST(request) {
           nombre_completo, 
           correo_electronico, 
           hashedPassword, 
-          numero_telefono || null, 
+          numero_telefono, // Ahora siempre presente 
           'usuario',
           semestre,
           carrera
@@ -88,36 +104,22 @@ export async function POST(request) {
       const user = newUser.rows[0];
 
       // Insertar datos en tablas relacionadas (si existen)
-      const platformInserts = [];
+      // Los campos de plataformas ahora son requeridos, por lo que siempre se intentará insertar
+      const platformInserts = [
+        client.query(
+          'INSERT INTO codeforces (id_miembro, usuario) VALUES ($1, $2)',
+          [user.id_miembro, usuario_codeforces]
+        ),
+        client.query(
+          'INSERT INTO vjudge (id_miembro, usuario) VALUES ($1, $2)',
+          [user.id_miembro, usuario_vjudge]
+        ),
+        client.query(
+          'INSERT INTO omegaup (id_miembro, usuario) VALUES ($1, $2)',
+          [user.id_miembro, usuario_omegaup]
+        )
+      ];
       
-      if (usuario_codeforces) {
-        platformInserts.push(
-          client.query(
-            'INSERT INTO codeforces (id_miembro, usuario) VALUES ($1, $2)',
-            [user.id_miembro, usuario_codeforces]
-          )
-        );
-      }
-
-      if (usuario_vjudge) {
-        platformInserts.push(
-          client.query(
-            'INSERT INTO vjudge (id_miembro, usuario) VALUES ($1, $2)',
-            [user.id_miembro, usuario_vjudge]
-          )
-        );
-      }
-
-      if (usuario_omegaup) {
-        platformInserts.push(
-          client.query(
-            'INSERT INTO omegaup (id_miembro, usuario) VALUES ($1, $2)',
-            [user.id_miembro, usuario_omegaup]
-          )
-        );
-      }
-
-      // Ejecutar todas las inserciones en paralelo
       await Promise.all(platformInserts);
 
       // Crear token JWT con los datos del usuario
