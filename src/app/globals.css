@@ -1,0 +1,205 @@
+@import "tailwindcss";
+
+:root {
+  --background: #1a1a1a;
+  --foreground: #e0e0e0;
+  --highlight: #1ef184;
+  --highlight1: #1ef184;
+  --highlight2: #f6922c;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Fira Code', monospace; /* Fuente de código */
+}
+
+html, body {
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+.main-container {
+  scroll-snap-type: y mandatory;
+}
+
+section {
+  scroll-snap-align: start;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Fira Code', monospace;
+}
+
+button {
+  font-family: 'Fira Code', monospace;
+}
+
+.typewriter-text {
+  display: inline-block;
+  font-size: 1.5rem;
+  color: var(--highlight);
+  border-right: 3px solid var(--highlight);
+  padding-right: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  animation: typing 1s steps(30) 1s 1 normal both, blink 0.75s step-end infinite;
+}
+
+@keyframes typing {
+  0% {
+    width: 0;
+  }
+  100% {
+    width: 100%;
+  }
+}
+
+@keyframes blink {
+  50% {
+    border-color: transparent;
+  }
+}
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(-15%);
+    animation-timing-function: cubic-bezier(0.8,0,1,1);
+  }
+  50% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0,0,0.2,1);
+  }
+}
+
+.animate-bounce {
+  animation: bounce 1s infinite;
+}
+
+
+.typewriter-text1 {
+  display: inline-block;
+  font-size: 2.5rem;
+  color: var(--highlight);
+  border-right: 3px solid var(--highlight);
+  padding-right: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  animation: typing 1s steps(30) 1s 1 normal both, blink 0.75s step-end infinite;
+}
+
+@keyframes typing1 {
+  0% {
+    width: 0;
+  }
+  100% {
+    width: 100%;
+  }
+}
+
+@keyframes blink1 {
+  50% {
+    border-color: transparent;
+  }
+}
+
+html, body {
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+/* Animaciones para los globos mejorados */
+@keyframes balloon-float {
+  0% { 
+    transform: translateY(10px) rotate(0deg) scale(0.9);
+    opacity: 0; 
+  }
+  10% { 
+    opacity: 0.8; 
+    transform: translateY(5px) rotate(2deg) scale(1);
+  }
+  50% { 
+    transform: translateY(-40vh) rotate(-5deg) scale(0.95);
+    opacity: 0.6; 
+  }
+  90% { 
+    opacity: 0.3; 
+    transform: translateY(-70vh) rotate(3deg) scale(0.85);
+  }
+  100% { 
+    transform: translateY(-100vh) rotate(-2deg) scale(0.8);
+    opacity: 0; 
+  }
+}
+
+@keyframes balloon-float-alternate {
+  0% { 
+    transform: translateY(10px) rotate(5deg) scale(0.8);
+    opacity: 0; 
+  }
+  10% { 
+    opacity: 0.7; 
+    transform: translateY(5px) rotate(-3deg) scale(0.9);
+  }
+  50% { 
+    transform: translateY(-50vh) rotate(7deg) scale(0.85);
+    opacity: 0.5; 
+  }
+  90% { 
+    opacity: 0.2; 
+    transform: translateY(-85vh) rotate(-4deg) scale(0.75);
+  }
+  100% { 
+    transform: translateY(-110vh) rotate(2deg) scale(0.7);
+    opacity: 0; 
+  }
+}
+
+@keyframes balloon-string {
+  0%, 100% { transform: translateX(-50%) rotate(1deg); }
+  50% { transform: translateX(-50%) rotate(-1deg); }
+}
+
+/* Otras animaciones */
+@keyframes gradient-x {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes fadeIn {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.animate-balloon-float { 
+  animation: balloon-float 20s infinite linear; 
+  will-change: transform, opacity;
+}
+
+.animate-balloon-float-alternate { 
+  animation: balloon-float-alternate 25s infinite linear;
+  will-change: transform, opacity;
+}
+
+.animate-gradient-x { 
+  background-size: 200% 200%; 
+  animation: gradient-x 10s ease infinite; 
+}
+
+.animate-fadeIn { 
+  animation: fadeIn 0.5s ease-out; 
+}
+
+/* Estilos para el indicador de desplazamiento */
+.animate-bounce {
+  animation: bounce 2s infinite;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(-25%) translateX(-50%); }
+  50% { transform: translateY(0) translateX(-50%); }
+}
+.animate-balloon-float-alternate { animation: balloon-float-alternate 25s infinite linear; }
+.animate-scrollDown { animation: scrollDown 1.5s infinite ease-in-out; }
+.animate-gradient-x { background-size: 200% 200%; animation: gradient-x 10s ease infinite; }
+.animate-fadeIn { animation: fadeIn 0.5s ease-out; }

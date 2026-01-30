@@ -1,0 +1,42 @@
+import { NextResponse } from 'next/server';
+import { sql } from '@/lib/db-server';
+
+export async function GET(request, context) {
+  try {
+    const { id } = await context.params; // ✅ Alternativa recomendada
+
+    if (!id || isNaN(Number(id))) {
+      return NextResponse.json(
+        { error: 'ID de evento es requerido y debe ser un número válido' },
+        { status: 400 }
+      );
+    }
+
+    const imagenes = await sql`
+      SELECT 
+        id_evidencia as id_imagen,
+        id_evento,
+        nombre as nombre_archivo,
+        imagen_url as ruta,
+        fecha as fecha_subida
+      FROM evidencias
+      WHERE id_evento = ${id}
+      ORDER BY fecha DESC
+    `;
+
+    const imagenesFormateadas = imagenes.map((img) => ({
+      ...img,
+      fecha_subida: img.fecha_subida instanceof Date
+        ? img.fecha_subida.toISOString()
+        : img.fecha_subida
+    }));
+
+    return NextResponse.json(imagenesFormateadas);
+  } catch (error) {
+    console.error('Error en GET /api/eventos/[id]/imagenes:', error);
+    return NextResponse.json(
+      { error: 'Error al obtener imágenes del evento: ' + error.message },
+      { status: 500 }
+    );
+  }
+}
