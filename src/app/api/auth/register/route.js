@@ -1,28 +1,31 @@
-// src/app/api/auth/register/route.js
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
 import bcrypt from 'bcryptjs';
-import { createToken } from '@/lib/auth';
 
 export async function POST(request) {
   try {
     const { 
-      nombre_completo,
+      nombre,
+      apellido_paterno,
+      apellido_materno,
       correo_electronico,
       contrasena,
       confirmar_contrasena,
-      numero_telefono, // Ya se recibía, ahora será validado como requerido
-      usuario_codeforces, // Ya se recibía, ahora será validado como requerido
-      usuario_vjudge, // Ya se recibía, ahora será validado como requerido
-      usuario_omegaup, // Ya se recibía, ahora será validado como requerido
+      numero_telefono,
+      usuario_codeforces,
+      usuario_vjudge,
+      usuario_omegaup,
       semestre,
-      carrera
+      carrera,
+      es_computer_society,
+      es_club_programacion,
+      numero_ieee
     } = await request.json();
 
-    // Validaciones básicas (existencia y coincidencia de contraseñas)
-    if (!nombre_completo || !correo_electronico || !contrasena || !confirmar_contrasena) {
+    // Validaciones básicas
+    if (!nombre || !apellido_paterno || !correo_electronico || !contrasena || !confirmar_contrasena) {
       return NextResponse.json(
-        { success: false, error: 'Nombre, correo y contraseñas son requeridos.' },
+        { success: false, error: 'Nombre, apellido paterno, correo y contraseñas son requeridos.' },
         { status: 400 }
       );
     }
@@ -34,7 +37,6 @@ export async function POST(request) {
       );
     }
     
-    // NUEVO: Validar campos ahora requeridos
     if (!numero_telefono || !usuario_codeforces || !usuario_vjudge || !usuario_omegaup) {
         return NextResponse.json(
             { success: false, error: 'Número de teléfono y usuarios de plataformas (Codeforces, VJudge, OmegaUp) son requeridos.' },
@@ -42,129 +44,162 @@ export async function POST(request) {
         );
     }
     
-    // Validar formato del número de teléfono (ejemplo: 10-15 dígitos)
-    if (!/^[0-9]{10,15}$/.test(numero_telefono)) {
-        return NextResponse.json(
-            { success: false, error: 'El número de teléfono no es válido (debe tener entre 10 y 15 dígitos).' },
-            { status: 400 }
-        );
-    }
-
-
+    // Validación de semestre y carrera
     if (!semestre || !carrera) {
       return NextResponse.json(
         { success: false, error: 'Semestre y carrera son requeridos' },
         { status: 400 }
       );
     }
+    
+    // Validación de Afiliación
+    if (!es_club_programacion && !es_computer_society) {
+        return NextResponse.json(
+            { success: false, error: 'Debe seleccionar al menos una afiliación: Club de Programación o Computer Society.' },
+            { status: 400 }
+        );
+    }
+
+    if (es_computer_society && !numero_ieee) {
+        return NextResponse.json(
+            { success: false, error: 'El número IEEE es requerido para miembros de Computer Society.' },
+            { status: 400 }
+        );
+    }
 
     const client = await pool.connect();
 
     try {
-      // Verificar si el usuario ya existe
+      await client.query('BEGIN');
+
+      // 1. Verificar si el usuario ya existe
       const existingUser = await client.query(
         'SELECT id_miembro FROM miembro WHERE correo_electronico = $1',
         [correo_electronico]
       );
 
       if (existingUser.rows.length > 0) {
+        await client.query('ROLLBACK');
         return NextResponse.json(
           { success: false, error: 'El correo electrónico ya está registrado' },
           { status: 400 }
         );
       }
 
-      // Hash de la contraseña
+      // 2. Obtener IDs de catálogos necesarios
+      
+      // Carrera: buscar por nombre o código (case insensitive)
+      let idCarrera;
+      const carreraRes = await client.query(
+        'SELECT id_carrera FROM catalogo_carrera WHERE nombre ILIKE $1 OR codigo ILIKE $1',
+        [carrera]
+      );
+      
+      if (carreraRes.rows.length > 0) {
+        idCarrera = carreraRes.rows[0].id_carrera;
+      } else {
+        await client.query('ROLLBACK');
+        return NextResponse.json(
+            { success: false, error: 'La carrera seleccionada no es válida. Use el nombre completo o las siglas (ej. ISC, Ingeniería en Sistemas Computacionales).' },
+            { status: 400 }
+        );
+      }
+
+      // Plataformas
+      const plataformasRes = await client.query(
+        'SELECT id_plataforma, nombre FROM catalogo_plataforma WHERE nombre IN (\'Codeforces\', \'OmegaUp\', \'VJudge\')'
+      );
+      
+      const plataformasMap = {};
+      plataformasRes.rows.forEach(p => {
+        plataformasMap[p.nombre] = p.id_plataforma;
+      });
+
+      // 3. Preparar datos del miembro
       const saltRounds = 10;
       const hashedPassword = await bcrypt.hash(contrasena, saltRounds);
+      
+      // Calcular periodo ingreso
+      const mesActual = new Date().getMonth() + 1;
+      const periodoIngreso = mesActual >= 1 && mesActual <= 7 ? 'enero-julio' : 'agosto-diciembre';
 
-      // Insertar nuevo usuario
-      const newUser = await client.query(
+      // 4. Insertar miembro
+      const nuevoMiembroRes = await client.query(
         `INSERT INTO miembro (
-          nombre_completo,
+          nombre,
+          apellido_paterno,
+          apellido_materno,
           correo_electronico,
           contrasena,
           numero_telefono,
-          tipo,
-          semestre,
-          carrera
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING id_miembro, nombre_completo, correo_electronico, tipo, semestre, carrera`,
+          id_carrera,
+          semestre_ingreso,
+          semestre_actual,
+          periodo_ingreso,
+          estado,
+          rol,
+          es_club_programacion,
+          es_computer_society,
+          numero_ieee
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'activo', 'usuario', $11, $12, $13)
+        RETURNING id_miembro, nombre, apellido_paterno, correo_electronico, rol`,
         [
-          nombre_completo, 
+          nombre, 
+          apellido_paterno,
+          apellido_materno || null,
           correo_electronico, 
           hashedPassword, 
-          numero_telefono, // Ahora siempre presente 
-          'usuario',
+          numero_telefono, 
+          idCarrera,
+          semestre, 
           semestre,
-          carrera
+          periodoIngreso,
+          es_club_programacion || false,
+          es_computer_society || false,
+          es_computer_society ? numero_ieee : null
         ]
       );
-
-      const user = newUser.rows[0];
-
-      // Insertar datos en tablas relacionadas (si existen)
-      // Los campos de plataformas ahora son requeridos, por lo que siempre se intentará insertar
-      const platformInserts = [
-        client.query(
-          'INSERT INTO codeforces (id_miembro, usuario) VALUES ($1, $2)',
-          [user.id_miembro, usuario_codeforces]
-        ),
-        client.query(
-          'INSERT INTO vjudge (id_miembro, usuario) VALUES ($1, $2)',
-          [user.id_miembro, usuario_vjudge]
-        ),
-        client.query(
-          'INSERT INTO omegaup (id_miembro, usuario) VALUES ($1, $2)',
-          [user.id_miembro, usuario_omegaup]
-        )
-      ];
       
-      await Promise.all(platformInserts);
+      const nuevoIdMiembro = nuevoMiembroRes.rows[0].id_miembro;
 
-      // Crear token JWT con los datos del usuario
-      const token = await createToken({
-        id: user.id_miembro,
-        email: user.correo_electronico,
-        name: user.nombre_completo,
-        role: user.tipo,
-        semester: user.semestre,
-        career: user.carrera
-      });
+      // 5. Insertar cuentas de plataformas
+      const cuentasAInsertar = [
+        { nombre: 'Codeforces', usuario: usuario_codeforces },
+        { nombre: 'OmegaUp', usuario: usuario_omegaup },
+        { nombre: 'VJudge', usuario: usuario_vjudge }
+      ];
 
-      // Configurar la respuesta
-      const response = NextResponse.json({
+      for (const cuenta of cuentasAInsertar) {
+        if (cuenta.usuario && plataformasMap[cuenta.nombre]) {
+          await client.query(
+            `INSERT INTO cuenta_plataforma (id_miembro, id_plataforma, usuario, activo)
+             VALUES ($1, $2, $3, true)`,
+            [nuevoIdMiembro, plataformasMap[cuenta.nombre], cuenta.usuario]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+
+      return NextResponse.json({
         success: true,
-        message: 'Registro exitoso. Redirigiendo...',
-        user: {
-          id: user.id_miembro,
-          name: user.nombre_completo,
-          email: user.correo_electronico,
-          role: user.tipo,
-          semester: user.semestre,
-          career: user.carrera
-        },
-        redirectTo: '/dashboard'
+        message: 'Registro exitoso. Por favor inicie sesión.'
       });
 
-      // Establecer cookie HTTP-only segura
-      response.cookies.set('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: 60 * 60 * 24 * 7, // 7 días
-        priority: 'high'
-      });
-
-      return response;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error interno en registro:', error);
+      return NextResponse.json(
+        { success: false, error: 'Error al registrar usuario: ' + error.message },
+        { status: 500 }
+      );
     } finally {
       client.release();
     }
   } catch (error) {
-    console.error('Error en registro:', error);
+    console.error("Error general en registro:", error);
     return NextResponse.json(
-      { success: false, error: 'Error en el servidor. Por favor, intente nuevamente.' },
+      { success: false, error: 'Error en el servidor' },
       { status: 500 }
     );
   }

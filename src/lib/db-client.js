@@ -87,7 +87,8 @@ async function registerUser(userData) {
   try {
     // MODIFICADO: Añadir validación para los nuevos campos requeridos
     if (
-      !userData?.nombre_completo || 
+      !userData?.nombre || 
+      !userData?.apellido_paterno ||
       !userData?.correo_electronico || 
       !userData?.contrasena ||
       !userData?.numero_telefono || // Nuevo
@@ -95,7 +96,7 @@ async function registerUser(userData) {
       !userData?.usuario_vjudge || // Nuevo
       !userData?.usuario_omegaup // Nuevo
     ) {
-      throw new Error('Nombre, email, contraseña, teléfono y todos los usuarios de plataformas son requeridos.');
+      throw new Error('Nombre, apellido paterno, email, contraseña, teléfono y todos los usuarios de plataformas son requeridos.');
     }
 
     const response = await apiRequest('/api/auth/register', {

@@ -21,9 +21,9 @@ export async function POST(request) {
 
     // Guardar en la base de datos
     const [nuevaEvidencia] = await sql`
-      INSERT INTO evidencias (id_evento, nombre, imagen_url, imagen_key)
-      VALUES (${id_evento}, ${nombreEvidencia}, ${imagen_url}, ${imagen_key})
-      RETURNING *
+      INSERT INTO evidencia (id_evento, titulo, url, storage_key, tipo, fecha_captura, publica, orden)
+      VALUES (${id_evento}, ${nombreEvidencia}, ${imagen_url}, ${imagen_key}, 'imagen', NOW(), true, 0)
+      RETURNING id_evidencia, id_evento, titulo as nombre, url as imagen_url, storage_key as imagen_key, fecha_captura as fecha
     `;
 
     return NextResponse.json(nuevaEvidencia);

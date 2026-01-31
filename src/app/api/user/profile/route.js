@@ -18,19 +18,16 @@ export async function GET(request) {
     const userData = await sql`
       SELECT 
         m.id_miembro,
-        m.nombre_completo,
+        m.nombre,
+        m.apellido_paterno,
+        m.apellido_materno,
         m.correo_electronico as email,
         m.numero_telefono,
-        m.tipo as role,
-        m.semestre,
-        m.carrera,
-        cf.usuario as usuario_codeforces,
-        vj.usuario as usuario_vjudge,
-        ou.usuario as usuario_omegaup
+        'usuario' as role,
+        m.semestre_actual as semestre,
+        c.nombre as carrera
       FROM miembro m
-      LEFT JOIN codeforces cf ON m.id_miembro = cf.id_miembro
-      LEFT JOIN vjudge vj ON m.id_miembro = vj.id_miembro
-      LEFT JOIN omegaup ou ON m.id_miembro = ou.id_miembro
+      LEFT JOIN catalogo_carrera c ON m.id_carrera = c.id_carrera
       WHERE m.id_miembro = ${decoded.id}
     `;
 
@@ -41,22 +38,36 @@ export async function GET(request) {
       );
     }
 
+    // Obtener cuentas de plataformas
+    const plataformasResult = await sql`
+        SELECT p.nombre, cp.usuario
+        FROM cuenta_plataforma cp
+        JOIN catalogo_plataforma p ON cp.id_plataforma = p.id_plataforma
+        WHERE cp.id_miembro = ${decoded.id} AND cp.activo = true
+    `;
+    
+    const plataformasMap = {};
+    plataformasResult.forEach(row => {
+        plataformasMap[row.nombre] = row.usuario;
+    });
+
     const user = userData[0];
+    const nombreCompleto = `${user.nombre} ${user.apellido_paterno} ${user.apellido_materno || ''}`.trim();
 
     return NextResponse.json({
       success: true,
       user: {
         id: user.id_miembro,
-        name: user.nombre_completo,
-        nombre_completo: user.nombre_completo,
+        name: nombreCompleto,
+        nombre_completo: nombreCompleto,
         email: user.email,
         numero_telefono: user.numero_telefono,
         role: user.role,
         semestre: user.semestre,
         carrera: user.carrera,
-        usuario_codeforces: user.usuario_codeforces || null,
-        usuario_vjudge: user.usuario_vjudge || null,
-        usuario_omegaup: user.usuario_omegaup || null
+        usuario_codeforces: plataformasMap['Codeforces'] || null,
+        usuario_vjudge: plataformasMap['VJudge'] || null,
+        usuario_omegaup: plataformasMap['OmegaUp'] || null
       }
     });
   } catch (error) {
@@ -85,75 +96,118 @@ export async function PUT(request) {
     await sql`BEGIN`;
 
     try {
-      // Actualizar datos básicos
+      // 1. Obtener usuario actual para conservar datos no enviados
+      const currentRes = await sql`SELECT * FROM miembro WHERE id_miembro = ${decoded.id}`;
+      if (currentRes.length === 0) throw new Error("Usuario no existe");
+      const currentUser = currentRes[0];
+
+      // 2. Preparar datos
+      
+      // Separar nombre si se proporciona
+      let nuevoNombre = currentUser.nombre;
+      let nuevoApellidoP = currentUser.apellido_paterno;
+      let nuevoApellidoM = currentUser.apellido_materno;
+      
+      if (data.nombre_completo) {
+          const partesNombre = data.nombre_completo.split(' ');
+          if (partesNombre.length > 1) {
+             nuevoApellidoP = partesNombre.pop();
+             nuevoNombre = partesNombre.join(' ');
+          } else {
+             nuevoNombre = partesNombre[0];
+             nuevoApellidoP = '.'; // Fallback
+          }
+      }
+
+      // Resolver carrera si se proporciona
+      let idCarrera = currentUser.id_carrera;
+      if (data.carrera) {
+          const carreraResult = await sql`
+            SELECT id_carrera FROM catalogo_carrera 
+            WHERE nombre ILIKE ${data.carrera} OR codigo ILIKE ${data.carrera}
+          `;
+          if (carreraResult.length > 0) {
+              idCarrera = carreraResult[0].id_carrera;
+          }
+      }
+
+      // Actualizar miembro
       await sql`
-        UPDATE miembro SET
-          nombre_completo = ${data.nombre_completo},
-          numero_telefono = ${data.numero_telefono || null},
-          semestre = ${data.semestre || null},
-          carrera = ${data.carrera || null}
-        WHERE id_miembro = ${decoded.id}
-      `;
+            UPDATE miembro SET
+                nombre = ${nuevoNombre},
+                apellido_paterno = ${nuevoApellidoP},
+                apellido_materno = ${nuevoApellidoM},
+                numero_telefono = ${data.numero_telefono !== undefined ? data.numero_telefono : currentUser.numero_telefono},
+                semestre_actual = ${data.semestre !== undefined ? data.semestre : currentUser.semestre_actual},
+                id_carrera = ${idCarrera},
+                updated_at = NOW()
+            WHERE id_miembro = ${decoded.id}
+         `;
 
       // Actualizar plataformas
-      if (data.usuario_codeforces !== undefined) {
-        await sql`
-          INSERT INTO codeforces (id_miembro, usuario)
-          VALUES (${decoded.id}, ${data.usuario_codeforces || null})
-          ON CONFLICT (id_miembro) DO UPDATE
-          SET usuario = ${data.usuario_codeforces || null}
-        `;
-      }
+      const updatePlatform = async (pName, usuario) => {
+          if (usuario === undefined) return; 
+          
+          const pRes = await sql`SELECT id_plataforma FROM catalogo_plataforma WHERE nombre = ${pName}`;
+          if (pRes.length === 0) return;
+          const pid = pRes[0].id_plataforma;
 
-      if (data.usuario_vjudge !== undefined) {
-        await sql`
-          INSERT INTO vjudge (id_miembro, usuario)
-          VALUES (${decoded.id}, ${data.usuario_vjudge || null})
-          ON CONFLICT (id_miembro) DO UPDATE
-          SET usuario = ${data.usuario_vjudge || null}
-        `;
-      }
+          const existing = await sql`
+             SELECT id_cuenta FROM cuenta_plataforma 
+             WHERE id_miembro = ${decoded.id} AND id_plataforma = ${pid}
+          `;
+          
+          if (existing.length > 0) {
+              if (usuario && usuario.trim() !== '') {
+                   await sql`UPDATE cuenta_plataforma SET usuario = ${usuario}, activo = true, updated_at = NOW() WHERE id_cuenta = ${existing[0].id_cuenta}`;
+              } else {
+                   await sql`UPDATE cuenta_plataforma SET usuario = '', activo = false, updated_at = NOW() WHERE id_cuenta = ${existing[0].id_cuenta}`;
+              }
+          } else if (usuario && usuario.trim() !== '') {
+              await sql`INSERT INTO cuenta_plataforma (id_miembro, id_plataforma, usuario) VALUES (${decoded.id}, ${pid}, ${usuario})`;
+          }
+      };
 
-      if (data.usuario_omegaup !== undefined) {
-        await sql`
-          INSERT INTO omegaup (id_miembro, usuario)
-          VALUES (${decoded.id}, ${data.usuario_omegaup || null})
-          ON CONFLICT (id_miembro) DO UPDATE
-          SET usuario = ${data.usuario_omegaup || null}
-        `;
-      }
+      await updatePlatform('Codeforces', data.usuario_codeforces);
+      await updatePlatform('VJudge', data.usuario_vjudge);
+      await updatePlatform('OmegaUp', data.usuario_omegaup);
 
       await sql`COMMIT`;
 
-      // Obtener datos actualizados
-      const updatedUser = await sql`
+      // Return updated logic (Reuse GET logic parts)
+      const updatedData = await sql`
         SELECT 
-          m.nombre_completo,
-          m.numero_telefono,
-          m.semestre,
-          m.carrera,
-          cf.usuario as usuario_codeforces,
-          vj.usuario as usuario_vjudge,
-          ou.usuario as usuario_omegaup
+            m.id_miembro, m.nombre, m.apellido_paterno, m.apellido_materno, m.correo_electronico, m.numero_telefono, m.semestre_actual,
+            c.nombre as carrera
         FROM miembro m
-        LEFT JOIN codeforces cf ON m.id_miembro = cf.id_miembro
-        LEFT JOIN vjudge vj ON m.id_miembro = vj.id_miembro
-        LEFT JOIN omegaup ou ON m.id_miembro = ou.id_miembro
+        LEFT JOIN catalogo_carrera c ON m.id_carrera = c.id_carrera
         WHERE m.id_miembro = ${decoded.id}
       `;
+      
+      const upUser = updatedData[0];
+      const upNombreCompleto = `${upUser.nombre} ${upUser.apellido_paterno} ${upUser.apellido_materno || ''}`.trim();
+      
+      const upPlats = await sql`
+        SELECT p.nombre, cp.usuario
+        FROM cuenta_plataforma cp
+        JOIN catalogo_plataforma p ON cp.id_plataforma = p.id_plataforma
+        WHERE cp.id_miembro = ${decoded.id} AND cp.activo = true
+      `;
+      const upPlatsMap = {};
+      upPlats.forEach(r => upPlatsMap[r.nombre] = r.usuario);
 
       return NextResponse.json({ 
         success: true,
         message: 'Perfil actualizado correctamente',
         user: {
-          name: updatedUser[0].nombre_completo,
-          nombre_completo: updatedUser[0].nombre_completo,
-          numero_telefono: updatedUser[0].numero_telefono,
-          semestre: updatedUser[0].semestre,
-          carrera: updatedUser[0].carrera,
-          usuario_codeforces: updatedUser[0].usuario_codeforces || null,
-          usuario_vjudge: updatedUser[0].usuario_vjudge || null,
-          usuario_omegaup: updatedUser[0].usuario_omegaup || null
+          name: upNombreCompleto,
+          nombre_completo: upNombreCompleto,
+          numero_telefono: upUser.numero_telefono,
+          semestre: upUser.semestre_actual,
+          carrera: upUser.carrera,
+          usuario_codeforces: upPlatsMap['Codeforces'] || null,
+          usuario_vjudge: upPlatsMap['VJudge'] || null,
+          usuario_omegaup: upPlatsMap['OmegaUp'] || null
         }
       });
     } catch (error) {

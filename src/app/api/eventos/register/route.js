@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { sql } from '@/lib/db-server';
+import pool from '@/lib/db-server';
 
 export async function POST(request) {
+  const client = await pool.connect();
   try {
     const data = await request.json();
     const { eventoId, userId, tipo } = data;
@@ -28,116 +29,97 @@ export async function POST(request) {
       );
     }
 
-    // Verificar si el usuario existe según el tipo
-    let userExists;
-    if (tipo === 'miembro') {
-      const [user] = await sql`
-        SELECT id_miembro FROM miembro WHERE id_miembro = ${userId} LIMIT 1
-      `;
-      userExists = user?.id_miembro;
-    } else {
-      const [user] = await sql`
-        SELECT id_invitado FROM invitado WHERE id_invitado = ${userId} LIMIT 1
-      `;
-      userExists = user?.id_invitado;
-    }
+    await client.query('BEGIN');
+
+    // Verificar si el evento existe y tiene cupos
+    const eventoRes = await client.query(
+      'SELECT id_evento, cupos_disponibles, estado FROM evento WHERE id_evento = $1 FOR UPDATE',
+      [eventoId]
+    );
     
-    if (!userExists) {
-      return NextResponse.json(
-        { success: false, error: 'Usuario no encontrado' },
-        { status: 404 }
-      );
-    }
-    
-    // Verificar si el evento existe
-    const [evento] = await sql`
-      SELECT 
-        e.id_evento,
-        e.cupos,
-        COUNT(DISTINCT am.id_miembro) + COUNT(DISTINCT ai.id_invitado) as asistentes_count
-      FROM evento e
-      LEFT JOIN asistencia_miembro am ON e.id_evento = am.id_evento
-      LEFT JOIN asistencia_invitado ai ON e.id_evento = ai.id_evento
-      WHERE e.id_evento = ${eventoId}
-      GROUP BY e.id_evento
-    `;
-    
-    if (!evento) {
+    if (eventoRes.rows.length === 0) {
+      await client.query('ROLLBACK');
       return NextResponse.json(
         { success: false, error: 'Evento no encontrado' },
         { status: 404 }
       );
     }
     
-    // Verificar cupos disponibles
-    if (evento.cupos !== null && (evento.asistentes_count >= evento.cupos)) {
+    const evento = eventoRes.rows[0];
+
+    // Verificar estado
+    if (!['publicado', 'en_curso'].includes(evento.estado)) {
+        await client.query('ROLLBACK');
+        return NextResponse.json(
+          { success: false, error: 'El evento no está disponible para registros.' },
+          { status: 400 }
+        );
+    }
+    
+    // Verificar cupos
+    if (evento.cupos_disponibles <= 0) {
+      await client.query('ROLLBACK');
       return NextResponse.json(
         { success: false, error: 'No hay cupos disponibles para este evento' },
         { status: 400 }
       );
     }
     
-    // Verificar si el usuario ya está registrado
-    const checkQuery = tipo === 'miembro' 
-      ? sql`SELECT 1 FROM asistencia_miembro WHERE id_evento = ${eventoId} AND id_miembro = ${userId} LIMIT 1`
-      : sql`SELECT 1 FROM asistencia_invitado WHERE id_evento = ${eventoId} AND id_invitado = ${userId} LIMIT 1`;
+    // Verificar si ya está registrado
+    let checkQuery = '';
+    let checkParams = [eventoId, userId];
     
-    const [alreadyRegistered] = await checkQuery;
+    if (tipo === 'miembro') {
+        checkQuery = 'SELECT 1 FROM inscripcion_evento WHERE id_evento = $1 AND id_miembro = $2';
+    } else {
+        checkQuery = 'SELECT 1 FROM inscripcion_evento WHERE id_evento = $1 AND id_invitado = $2';
+    }
     
-    if (alreadyRegistered) {
+    const checkRes = await client.query(checkQuery, checkParams);
+    
+    if (checkRes.rows.length > 0) {
+      await client.query('ROLLBACK');
       return NextResponse.json(
         { success: false, error: 'El usuario ya está registrado en este evento' },
         { status: 400 }
       );
     }
     
-    // Registrar según el tipo
+    // Registrar
+    // Nota: El trigger actualizará cupos_disponibles si estado = 'confirmada'
+    // Establecemos estado 'confirmada' por defecto si no requiere pago, o 'pendiente' si requiere.
+    // Para simplificar y mantener compatibilidad con codigo viejo (que no manejaba pagos), pondremos 'confirmada'.
+    
+    let insertQuery = '';
     if (tipo === 'miembro') {
-      await sql`
-        INSERT INTO asistencia_miembro (id_evento, id_miembro)
-        VALUES (${eventoId}, ${userId})
-      `;
+        insertQuery = `
+            INSERT INTO inscripcion_evento (id_evento, id_miembro, estado, fecha_inscripcion)
+            VALUES ($1, $2, 'confirmada', NOW())
+        `;
     } else {
-      await sql`
-        INSERT INTO asistencia_invitado (id_evento, id_invitado)
-        VALUES (${eventoId}, ${userId})
-      `;
+        insertQuery = `
+            INSERT INTO inscripcion_evento (id_evento, id_invitado, estado, fecha_inscripcion)
+            VALUES ($1, $2, 'confirmada', NOW())
+        `;
     }
     
-    // Obtener datos actualizados del evento
-    const [updatedEvent] = await sql`
-      SELECT 
-        e.id_evento,
-        e.nombre_evento,
-        e.fecha,
-        e.hora_inicio,
-        COUNT(DISTINCT am.id_miembro) + COUNT(DISTINCT ai.id_invitado) as asistentes_count,
-        CASE 
-          WHEN e.cupos IS NULL THEN NULL 
-          ELSE e.cupos - (COUNT(DISTINCT am.id_miembro) + COUNT(DISTINCT ai.id_invitado))
-        END as cupos_disponibles
-      FROM evento e
-      LEFT JOIN asistencia_miembro am ON e.id_evento = am.id_evento
-      LEFT JOIN asistencia_invitado ai ON e.id_evento = ai.id_evento
-      WHERE e.id_evento = ${eventoId}
-      GROUP BY e.id_evento
-    `;
+    await client.query(insertQuery, [eventoId, userId]);
+
+    await client.query('COMMIT');
     
-    return NextResponse.json({ 
+    return NextResponse.json({
       success: true,
-      message: 'Registro exitoso',
-      event: {
-        ...updatedEvent,
-        fecha: updatedEvent.fecha.toISOString().split('T')[0],
-        asistentes_count: Number(updatedEvent.asistentes_count) || 0,
-        cupos_disponibles: updatedEvent.cupos_disponibles !== null ? Number(updatedEvent.cupos_disponibles) : null
-      }
+      message: 'Registro exitoso'
     });
+
   } catch (error) {
-    console.error('Error en POST /api/eventos/register:', error);
+    await client.query('ROLLBACK');
+    console.error('Error en registro:', error);
     return NextResponse.json(
-      { success: false, error: 'Error interno del servidor' },
+      { success: false, error: 'Error al registrarse en el evento: ' + error.message },
       { status: 500 }
     );
+  } finally {
+    client.release();
   }
 }

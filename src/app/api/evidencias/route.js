@@ -25,10 +25,16 @@ export async function GET(request) {
       }
 
       const evidencias = await sql`
-        SELECT id_evidencia, id_evento, nombre, imagen_url, imagen_key, fecha
-        FROM evidencias
-        WHERE id_evento = ${Number(eventoIdParam)}
-        ORDER BY fecha DESC
+        SELECT 
+          id_evidencia, 
+          id_evento, 
+          titulo as nombre, 
+          url as imagen_url, 
+          storage_key as imagen_key, 
+          fecha_captura as fecha
+        FROM evidencia
+        WHERE id_evento = ${Number(eventoIdParam)} AND publica = true
+        ORDER BY fecha_captura DESC
       `;
       console.log(`[API /api/evidencias] Encontradas ${evidencias.length} evidencias para el evento ${eventoIdParam}.`);
       return NextResponse.json(evidencias);
@@ -40,16 +46,18 @@ export async function GET(request) {
       const eventsWithEvidencias = await sql`
         SELECT 
           e.id_evento, 
-          e.nombre_evento, 
-          e.fecha,
-          e.descripcion,
-          e.hermandad,   -- Campo importante para tu lógica de frontend
-          e.tipo,        -- Campo que también usas
-          -- e.lugar, -- Columna eliminada porque no existe en la tabla 'evento'
-          (SELECT COUNT(*) FROM evidencias ev WHERE ev.id_evento = e.id_evento) as num_evidencias
+          e.nombre as nombre_evento, 
+          e.fecha_inicio as fecha,
+          e.descripcion_html as descripcion,
+          a.nombre as hermandad,
+          t.nombre as tipo,
+          e.ubicacion as lugar,
+          (SELECT COUNT(*) FROM evidencia ev WHERE ev.id_evento = e.id_evento AND ev.publica = true) as num_evidencias
         FROM evento e
-        WHERE (SELECT COUNT(*) FROM evidencias ev WHERE ev.id_evento = e.id_evento) > 0
-        ORDER BY e.fecha DESC
+        LEFT JOIN catalogo_alcance_evento a ON e.id_alcance = a.id_alcance
+        LEFT JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
+        WHERE (SELECT COUNT(*) FROM evidencia ev WHERE ev.id_evento = e.id_evento AND ev.publica = true) > 0
+        ORDER BY e.fecha_inicio DESC
       `;
       console.log(`[API /api/evidencias] Encontrados ${eventsWithEvidencias.length} eventos con evidencias.`);
       return NextResponse.json(eventsWithEvidencias);
@@ -82,10 +90,11 @@ export async function POST(request) {
     }
     const nombreEvidencia = nombre || 'Evidencia sin nombre'; // Nombre por defecto si no se provee
     
+    // Se asume tipo imagen por defecto, y orden 0
     const [nuevaEvidencia] = await sql`
-      INSERT INTO evidencias (id_evento, nombre, imagen_url, imagen_key)
-      VALUES (${id_evento}, ${nombreEvidencia}, ${imagen_url}, ${imagen_key})
-      RETURNING * -- Devuelve el registro insertado
+      INSERT INTO evidencia (id_evento, titulo, url, storage_key, tipo, fecha_captura, publica, orden)
+      VALUES (${id_evento}, ${nombreEvidencia}, ${imagen_url}, ${imagen_key}, 'imagen', NOW(), true, 0)
+      RETURNING id_evidencia, id_evento, titulo as nombre, url as imagen_url, storage_key as imagen_key, fecha_captura as fecha
     `;
     console.log(`[API /api/evidencias] POST Exitoso. ID de nueva evidencia: ${nuevaEvidencia?.id_evidencia}`);
     return NextResponse.json(nuevaEvidencia, { status: 201 }); // 201 Created es más apropiado

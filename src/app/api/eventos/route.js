@@ -1,59 +1,62 @@
 import { NextResponse } from 'next/server';
-import { sql } from '@/lib/db-server';
+import pool from '@/lib/db-server';
 
 export async function GET() {
+  const client = await pool.connect();
   try {
-    const now = new Date();
-    const today = now.toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0];
     
-    const eventos = await sql`
+    // Usamos JOINs para recuperar los nombres de catálogos y aliamos para mantener compatibilidad
+    // con el frontend tanto como sea posible
+    const query = `
       SELECT 
         e.id_evento,
-        e.nombre_evento,
-        e.descripcion,
-        e.tipo,
-        e.hermandad,
-        e.fecha,
+        e.nombre as nombre_evento,
+        e.descripcion_html as descripcion,
+        t.nombre as tipo,
+        a.nombre as hermandad, -- Compatibilidad con frontend anterior que usaba 'hermandad'
+        e.fecha_inicio as fecha,
         e.hora_inicio,
+        e.fecha_fin,
         e.hora_fin,
         e.costo,
         e.cupos,
-        e.imagen_url,
-        COUNT(DISTINCT am.id_miembro) + COUNT(DISTINCT ai.id_invitado) as asistentes_count,
-        CASE 
-          WHEN e.cupos IS NULL THEN NULL 
-          ELSE e.cupos - (COUNT(DISTINCT am.id_miembro) + COUNT(DISTINCT ai.id_invitado))
-        END as cupos_disponibles,
-        CASE
-          WHEN e.fecha < ${today} THEN 'past'
-          WHEN e.fecha = ${today} THEN 'today'
-          ELSE 'future'
-        END as estado
+        e.ubicacion,
+        e.cupos_disponibles,
+        e.imagen_flyer_url as imagen_url,
+        e.estado
       FROM evento e
-      LEFT JOIN asistencia_miembro am ON e.id_evento = am.id_evento
-      LEFT JOIN asistencia_invitado ai ON e.id_evento = ai.id_evento
-      GROUP BY e.id_evento
+      JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
+      JOIN catalogo_alcance_evento a ON e.id_alcance = a.id_alcance
+      WHERE e.estado IN ('publicado', 'en_curso')
       ORDER BY 
-        CASE 
-          WHEN e.fecha < ${today} THEN 2 
-          WHEN e.fecha = ${today} THEN 1 
-          ELSE 0 
-        END,
-        e.fecha ASC,
+        e.fecha_inicio ASC,
         e.hora_inicio ASC
     `;
     
-    const eventosConFechasFormateadas = eventos.map(evento => ({
-      ...evento,
-      fecha: new Date(evento.fecha).toISOString().split('T')[0]
-    }));
+    const result = await client.query(query);
     
-    return NextResponse.json(eventosConFechasFormateadas);
+    const eventos = result.rows.map(evento => {
+        // Determinar estado de tiempo para UI (past/today/future)
+        let estadoTiempo = 'future';
+        if (evento.fecha < today) estadoTiempo = 'past';
+        else if (evento.fecha === today) estadoTiempo = 'today';
+
+        return {
+            ...evento,
+            estado: estadoTiempo, // Sobrescribir estado DB con estado visual
+            fecha: new Date(evento.fecha).toISOString().split('T')[0]
+        };
+    });
+    
+    return NextResponse.json(eventos);
   } catch (error) {
     console.error('Error en GET /api/eventos:', error);
     return NextResponse.json(
       { error: 'Error al obtener eventos: ' + error.message },
       { status: 500 }
     );
+  } finally {
+    client.release();
   }
 }

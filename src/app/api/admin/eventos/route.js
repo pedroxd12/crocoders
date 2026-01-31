@@ -1,36 +1,53 @@
-// src/app/api/admin/eventos/route.js
 import { NextResponse } from 'next/server';
-import { sql } from '@/lib/db-server';
-// Remove: import { uploadFile } from '@/lib/storage-server'; // No longer needed for direct upload here
+import pool from '@/lib/db-server';
 
 export async function GET() {
+  const client = await pool.connect();
   try {
-    const eventos = await sql`
+    const query = `
       SELECT 
-        e.*,
+        e.id_evento,
+        e.nombre as nombre_evento,
+        e.descripcion_html as descripcion,
+        t.nombre as tipo,
+        a.nombre as hermandad, 
+        e.fecha_inicio as fecha,
+        e.hora_inicio,
+        e.hora_fin,
+        e.fecha_fin,
+        e.cupos,
+        e.cupos_disponibles,
+        e.costo,
+        e.ubicacion,
+        e.imagen_flyer_url as imagen_url,
+        e.imagen_flyer_key as imagen_key,
+        e.estado,
         (
-          SELECT COUNT(*) FROM asistencia_miembro 
-          WHERE id_evento = e.id_evento
-        ) + (
-          SELECT COUNT(*) FROM asistencia_invitado 
+          SELECT COUNT(*) FROM inscripcion_evento 
           WHERE id_evento = e.id_evento
         ) as asistentes_count
       FROM evento e
-      ORDER BY e.fecha DESC, e.hora_inicio DESC
+      JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
+      JOIN catalogo_alcance_evento a ON e.id_alcance = a.id_alcance
+      ORDER BY e.fecha_inicio DESC, e.hora_inicio DESC
     `;
-    return NextResponse.json(eventos);
+    const result = await client.query(query);
+    return NextResponse.json(result.rows);
   } catch (error) {
     console.error('Error en GET /api/admin/eventos:', error);
     return NextResponse.json(
       { error: 'Error al obtener eventos' },
       { status: 500 }
     );
+  } finally {
+    client.release();
   }
 }
 
 export async function POST(request) {
+  const client = await pool.connect();
   try {
-    const formData = await request.json(); // Expecting JSON data now
+    const formData = await request.json();
     
     const requiredFields = ['nombre_evento', 'descripcion', 'tipo', 'fecha', 'hora_inicio', 'hora_fin'];
     const missingFields = requiredFields.filter(field => !formData[field]);
@@ -42,48 +59,85 @@ export async function POST(request) {
       );
     }
 
-    const eventoData = {
-      nombre_evento: formData.nombre_evento,
-      descripcion: formData.descripcion,
-      tipo: formData.tipo,
-      hermandad: formData.hermandad || 'club de programación',
-      fecha: formData.fecha,
-      hora_inicio: formData.hora_inicio,
-      hora_fin: formData.hora_fin,
-      cupos: parseInt(formData.cupos) || 0,
-      costo: parseFloat(formData.costo) || 0,
-      imagen_url: formData.imagen_url || null, // From UploadThing
-      imagen_key: formData.imagen_key || null  // From UploadThing
-    };
+    await client.query('BEGIN');
 
-    const inicio = new Date(`${eventoData.fecha}T${eventoData.hora_inicio}`);
-    const fin = new Date(`${eventoData.fecha}T${eventoData.hora_fin}`);
-    
-    if (inicio >= fin) {
-      return NextResponse.json(
-        { error: 'La hora de fin debe ser posterior a la hora de inicio' },
-        { status: 400 }
-      );
+    // 1. Obtener ID Tipo Evento
+    const tipoRes = await client.query(
+      'SELECT id_tipo_evento FROM catalogo_tipo_evento WHERE nombre ILIKE $1',
+      [formData.tipo]
+    );
+    let idTipoEvento;
+    if (tipoRes.rows.length > 0) {
+        idTipoEvento = tipoRes.rows[0].id_tipo_evento;
+    } else {
+        // Fallback o error. Para robustez, buscaremos 'Conferencia' por defecto o crearemos error
+        const defaultTipo = await client.query("SELECT id_tipo_evento FROM catalogo_tipo_evento LIMIT 1");
+        idTipoEvento = defaultTipo.rows[0].id_tipo_evento;
     }
 
-    // Insert the event with imagen_url and imagen_key
-    const result = await sql`
-      INSERT INTO evento 
-        (nombre_evento, descripcion, tipo, hermandad, fecha, hora_inicio, hora_fin, cupos, costo, imagen_url, imagen_key)
-      VALUES
-        (${eventoData.nombre_evento}, ${eventoData.descripcion}, ${eventoData.tipo}, 
-         ${eventoData.hermandad}, ${eventoData.fecha}, ${eventoData.hora_inicio}, 
-         ${eventoData.hora_fin}, ${eventoData.cupos}, ${eventoData.costo}, 
-         ${eventoData.imagen_url}, ${eventoData.imagen_key})
-      RETURNING *
-    `;
+    // 2. Obtener ID Alcance (Hermandad)
+    let alcanceNombre = formData.hermandad || 'Abierto';
+    // Mapeo simple de lo que enviaba el frontend viejo a lo nuevo
+    if (alcanceNombre.toLowerCase().includes('club')) alcanceNombre = 'Solo Club de Programación';
+    else if (alcanceNombre.toLowerCase().includes('society')) alcanceNombre = 'Solo Computer Society';
+    else if (alcanceNombre.toLowerCase().includes('tecnológico')) alcanceNombre = 'Solo Tecnológico';
+    else alcanceNombre = 'Abierto';
 
-    return NextResponse.json(result[0], { status: 201 });
+    const alcanceRes = await client.query(
+      'SELECT id_alcance FROM catalogo_alcance_evento WHERE nombre ILIKE $1',
+      [alcanceNombre]
+    );
+    let idAlcance;
+    if (alcanceRes.rows.length > 0) {
+        idAlcance = alcanceRes.rows[0].id_alcance;
+    } else {
+        const defaultAlcance = await client.query("SELECT id_alcance FROM catalogo_alcance_evento WHERE nombre = 'Abierto'");
+        idAlcance = defaultAlcance.rows[0].id_alcance;
+    }
+
+    const { 
+        nombre_evento, descripcion, fecha, hora_inicio, hora_fin, 
+        cupos, costo, imagen_url, imagen_key, ubicacion 
+    } = formData;
+
+    // Insertar Evento
+    const insertQuery = `
+      INSERT INTO evento 
+        (nombre, descripcion_html, id_tipo_evento, id_alcance, fecha_inicio, fecha_fin, hora_inicio, hora_fin, cupos, cupos_disponibles, costo, imagen_flyer_url, imagen_flyer_key, ubicacion, estado)
+      VALUES
+        ($1, $2, $3, $4, $5, $5, $6, $7, $8, $8, $9, $10, $11, $12, 'publicado')
+      RETURNING id_evento, nombre
+    `;
+    
+    // Asumimos fecha_fin = fecha_inicio para simplificar ya que el frontend envía solo 'fecha'
+    // cupos_disponibles = cupos (inicialmente)
+
+    const result = await client.query(insertQuery, [
+        nombre_evento,
+        descripcion,
+        idTipoEvento,
+        idAlcance,
+        fecha,
+        hora_inicio,
+        hora_fin,
+        parseInt(cupos) || 0,
+        parseFloat(costo) || 0,
+        imagen_url,
+        imagen_key,
+        ubicacion || ''
+    ]);
+
+    await client.query('COMMIT');
+    return NextResponse.json(result.rows[0], { status: 201 });
+
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Error en POST /api/admin/eventos:', error);
     return NextResponse.json(
       { error: 'Error al crear evento: ' + error.message },
       { status: 500 }
     );
+  } finally {
+    client.release();
   }
 }

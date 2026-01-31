@@ -16,7 +16,9 @@ function AuthContent() {
   
   // Estados para registro
   const [registerData, setRegisterData] = useState({
-    nombre_completo: '',
+    nombre: '',
+    apellido_paterno: '',
+    apellido_materno: '',
     correo_electronico: '',
     contrasena: '',
     confirmar_contrasena: '',
@@ -25,7 +27,10 @@ function AuthContent() {
     usuario_vjudge: '',
     usuario_omegaup: '',
     semestre: '',
-    carrera: ''
+    carrera: '',
+    es_computer_society: false,
+    es_club_programacion: false,
+    numero_ieee: ''
   });
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
   const [showRegisterConfirmPassword, setShowRegisterConfirmPassword] = useState(false);
@@ -135,20 +140,24 @@ function AuthContent() {
   const validateForm = () => {
     const newErrors = {};
     const { 
-      nombre_completo, 
+      nombre,
+      apellido_paterno,
       correo_electronico, 
       contrasena, 
       confirmar_contrasena,
       numero_telefono,
       semestre,
       carrera,
-      // NUEVO: Campos de plataformas
       usuario_codeforces,
       usuario_vjudge,
-      usuario_omegaup
+      usuario_omegaup,
+      es_computer_society,
+      numero_ieee,
+      es_club_programacion
     } = registerData;
 
-    if (!nombre_completo) newErrors.nombre_completo = 'Nombre completo es requerido';
+    if (!nombre) newErrors.nombre = 'Nombre es requerido';
+    if (!apellido_paterno) newErrors.apellido_paterno = 'Apellido paterno es requerido';
     if (!correo_electronico) {
       newErrors.correo_electronico = 'Email es requerido';
     } else if (!validateEmail(correo_electronico)) {
@@ -162,7 +171,6 @@ function AuthContent() {
     } else if (contrasena !== confirmar_contrasena) {
       newErrors.confirmar_contrasena = 'Las contraseñas no coinciden';
     }
-    // MODIFICADO: Hacer teléfono requerido
     if (!numero_telefono) {
         newErrors.numero_telefono = 'Número de teléfono es requerido';
     } else if (!validatePhone(numero_telefono)) {
@@ -171,11 +179,17 @@ function AuthContent() {
     if (!semestre) newErrors.semestre = 'Semestre es requerido';
     if (!carrera) newErrors.carrera = 'Carrera es requerida';
 
-    // NUEVO: Validaciones para campos de plataformas
     if (!usuario_codeforces) newErrors.usuario_codeforces = 'Usuario de Codeforces es requerido';
     if (!usuario_vjudge) newErrors.usuario_vjudge = 'Usuario de VJudge es requerido';
     if (!usuario_omegaup) newErrors.usuario_omegaup = 'Usuario de OmegaUp es requerido';
 
+    if (es_computer_society && !numero_ieee) {
+      newErrors.numero_ieee = 'Número IEEE es requerido para miembros de Computer Society';
+    }
+
+    if (!es_club_programacion && !es_computer_society) {
+      newErrors.afiliacion = 'Debes seleccionar al menos una afiliación (Club de Programación o Computer Society)';
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -191,7 +205,9 @@ function AuthContent() {
 
   const resetForm = () => {
     setRegisterData({
-      nombre_completo: '',
+      nombre: '',
+      apellido_paterno: '',
+      apellido_materno: '',
       correo_electronico: '',
       contrasena: '',
       confirmar_contrasena: '',
@@ -200,7 +216,10 @@ function AuthContent() {
       usuario_vjudge: '',
       usuario_omegaup: '',
       semestre: '',
-      carrera: ''
+      carrera: '',
+      es_computer_society: false,
+      es_club_programacion: false,
+      numero_ieee: ''
     });
     setErrors({});
     setPasswordStrength(0);
@@ -259,14 +278,24 @@ function AuthContent() {
         throw new Error(result.error || 'Error al registrarse');
       }
 
-      toast.success('¡Registro exitoso! Se ha enviado un correo de confirmación a tu dirección de email.');
+      toast.success(result.message || '¡Registro exitoso! Por favor inicia sesión.');
       resetForm();
       
       const registerEvent = searchParams.get('registerEvent');
-      if (registerEvent) {
-        await handlePostLoginRegistration(registerEvent);
+      
+      if (result.user) {
+        // Auto-login exitoso
+        if (registerEvent) {
+          await handlePostLoginRegistration(registerEvent);
+        } else {
+          window.location.href = result.redirectTo || '/dashboard';
+        }
       } else {
-        window.location.href = result.redirectTo || '/dashboard';
+        // Registro exitoso pero requiere login manual
+        setIsLogin(true); // Cambiar a vista de login
+        if (registerEvent) {
+          toast.info('Por favor inicia sesión para completar tu registro al evento');
+        }
       }
     } catch (err) {
       toast.error(err.message || 'Error al registrarse');
@@ -426,13 +455,18 @@ function AuthContent() {
   };
 
   const handleRegisterChange = (e) => {
-    const { name, value } = e.target;
+    const { name, value, type, checked } = e.target;
     setRegisterData(prev => ({
       ...prev,
-      [name]: value
+      [name]: type === 'checkbox' ? checked : value
     }));
-    if (errors[name]) {
-      setErrors(prev => ({ ...prev, [name]: '' }));
+    if (errors[name] || errors.afiliacion) {
+      setErrors(prev => {
+         const newErrors = { ...prev };
+         delete newErrors[name];
+         delete newErrors.afiliacion;
+         return newErrors;
+      });
     }
   };
 
@@ -556,29 +590,50 @@ function AuthContent() {
         </form>
       ) : (
         <form className="space-y-4" onSubmit={handleRegister}>
-          <div className="bg-blue-500/10 border border-blue-500 rounded-lg p-3 text-sm text-blue-300 flex items-start">
-            <FaInfoCircle className="mr-2 mt-0.5 flex-shrink-0" />
-            <span>Por favor completa todos los campos para registrarte en nuestra plataforma.</span>
-          </div>
-
           <div className="group">
-            <label className="block text-gray-300 mb-2 flex items-center">
-              <FaUser className="mr-2" /> Nombre completo
-            </label>
+            <label className="block text-gray-300 mb-2">Nombre</label>
             <div className="relative">
               <input 
                 type="text" 
-                name="nombre_completo"
-                className={`w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border ${errors.nombre_completo ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
-                value={registerData.nombre_completo} 
+                name="nombre"
+                className={`w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border ${errors.nombre ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                value={registerData.nombre} 
                 onChange={handleRegisterChange}
                 required 
               />
               <FaUser className="absolute left-3 top-3.5 text-gray-400 transition group-hover:text-green-400" />
             </div>
-            {errors.nombre_completo && (
-              <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.nombre_completo}</p>
+            {errors.nombre && (
+              <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.nombre}</p>
             )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="group">
+              <label className="block text-gray-300 mb-2">Apellido Paterno</label>
+              <input 
+                type="text" 
+                name="apellido_paterno"
+                className={`w-full p-3 rounded-lg bg-gray-700 text-white border ${errors.apellido_paterno ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                value={registerData.apellido_paterno} 
+                onChange={handleRegisterChange}
+                required 
+              />
+              {errors.apellido_paterno && (
+                <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.apellido_paterno}</p>
+              )}
+            </div>
+
+            <div className="group">
+              <label className="block text-gray-300 mb-2">Apellido Materno</label>
+              <input 
+                type="text" 
+                name="apellido_materno"
+                className={`w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                value={registerData.apellido_materno} 
+                onChange={handleRegisterChange}
+              />
+            </div>
           </div>
 
           <div className="group">
@@ -738,7 +793,7 @@ function AuthContent() {
           </div>
           
           {/* MODIFICADO: Campos de plataformas ahora son requeridos */}
-          <div className="space-y-4">
+          <div className="space-y-4 border-t border-gray-700 pt-4">
             <h3 className="text-gray-300 text-sm font-medium">Perfiles en plataformas de programación</h3>
             <p className="text-xs text-gray-400 -mt-3">
               Estos datos nos ayudarán a hacer seguimiento de tu progreso.
@@ -792,6 +847,63 @@ function AuthContent() {
                 <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.usuario_omegaup}</p>
               )}
             </div>
+          </div>
+
+          <div className="space-y-4 border-t border-gray-700 pt-4 mt-4">
+             <h3 className="text-gray-300 text-sm font-medium">Afiliación</h3>
+             {errors.afiliacion && (
+                <div className="p-2 bg-red-500/20 border border-red-500 rounded text-red-300 text-xs">
+                    {errors.afiliacion}
+                </div>
+             )}
+
+             <div className="flex items-center space-x-2">
+                <input
+                    type="checkbox"
+                    id="es_club_programacion"
+                    name="es_club_programacion"
+                    checked={registerData.es_club_programacion}
+                    onChange={handleRegisterChange}
+                    className="w-4 h-4 text-green-600 bg-gray-700 border-gray-600 rounded focus:ring-green-600 focus:ring-2"
+                />
+                <label htmlFor="es_club_programacion" className="text-gray-300 text-sm select-none cursor-pointer">
+                    Soy miembro del Club de Programación
+                </label>
+             </div>
+
+             <div className="flex flex-col space-y-3">
+                <div className="flex items-center space-x-2">
+                    <input
+                        type="checkbox"
+                        id="es_computer_society"
+                        name="es_computer_society"
+                        checked={registerData.es_computer_society}
+                        onChange={handleRegisterChange}
+                        className="w-4 h-4 text-green-600 bg-gray-700 border-gray-600 rounded focus:ring-green-600 focus:ring-2"
+                    />
+                    <label htmlFor="es_computer_society" className="text-gray-300 text-sm select-none cursor-pointer">
+                        Soy miembro de Computer Society
+                    </label>
+                </div>
+
+                {registerData.es_computer_society && (
+                    <div className="ml-6 group animate-fade-in">
+                        <label className="block text-gray-300 mb-2 text-sm">Número IEEE <span className="text-red-400">*</span></label>
+                        <input
+                            type="text"
+                            name="numero_ieee"
+                            className={`w-full p-2 rounded-lg bg-gray-700 text-white border ${errors.numero_ieee ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none`}
+                            value={registerData.numero_ieee}
+                            onChange={handleRegisterChange}
+                            placeholder="Ej. IEEE-123456"
+                            required
+                        />
+                         {errors.numero_ieee && (
+                            <p className="mt-1 text-sm text-red-400">{errors.numero_ieee}</p>
+                         )}
+                    </div>
+                )}
+             </div>
           </div>
 
           <button 

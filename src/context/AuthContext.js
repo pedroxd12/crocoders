@@ -22,12 +22,18 @@ export function AuthProvider({ children }) {
   const normalizeUser = useCallback((userData) => {
     if (!userData) return null;
     
+    // Construir nombre completo basado en los datos disponibles
+    let nombreCompleto = userData.nombre_completo || userData.name || '';
+    if (!nombreCompleto && userData.nombre) {
+      nombreCompleto = `${userData.nombre} ${userData.apellido_paterno || ''} ${userData.apellido_materno || ''}`.trim();
+    }
+
     return {
       ...userData,
       id: userData.id_miembro || userData.id,
       id_miembro: userData.id_miembro || userData.id,
-      nombre_completo: userData.nombre_completo || '',
-      correo_electronico: userData.correo_electronico || '',
+      nombre_completo: nombreCompleto,
+      correo_electronico: userData.correo_electronico || userData.email || '',
       role: userData.role || userData.tipo || ROLES.MEMBER,
       tipo: userData.tipo || userData.role || ROLES.MEMBER,
       numero_telefono: userData.numero_telefono || '',
@@ -94,11 +100,15 @@ export function AuthProvider({ children }) {
     try {
       const response = await registerUser(userData);
 
-      if (response?.success && response.user) {
-        const normalizedUser = normalizeUser(response.user);
-        setUser(normalizedUser);
-        redirectUser(normalizedUser);
-        return { success: true, user: normalizedUser };
+      if (response?.success) {
+        if (response.user) {
+          const normalizedUser = normalizeUser(response.user);
+          setUser(normalizedUser);
+          redirectUser(normalizedUser);
+          return { success: true, user: normalizedUser };
+        }
+        // Caso: Registro exitoso pero requiere login manual
+        return { success: true, message: response.message };
       } else {
         throw new Error(response?.error || 'Error en el registro');
       }

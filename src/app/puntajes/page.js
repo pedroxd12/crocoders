@@ -27,6 +27,11 @@ const PuntajesPage = () => {
         const res = await fetch("/api/puntajes");
         
         if (!res.ok) {
+          if (res.status === 404) {
+            setPuntajes([]);
+            setLoading(false);
+            return;
+          }
           throw new Error('Error al obtener puntajes');
         }
 

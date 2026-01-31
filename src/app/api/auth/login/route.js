@@ -1,6 +1,5 @@
-// api/auth/login/route.js
 import { NextResponse } from 'next/server';
-import { sql } from '@/lib/db-server';
+import pool, { sql } from '@/lib/db-server';
 import bcrypt from 'bcryptjs';
 import { createToken } from '@/lib/auth';
 
@@ -18,26 +17,39 @@ export async function POST(request) {
       );
     }
 
-    const user = await sql`
-      SELECT 
-        id_miembro as id,
-        nombre_completo, 
-        correo_electronico, 
-        contrasena, 
-        tipo as role 
-      FROM miembro 
-      WHERE correo_electronico = ${correo_electronico}
-      LIMIT 1
-    `;
+    const client = await pool.connect();
+    let userData = null;
 
-    if (!user || user.length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'Credenciales inválidas' },
-        { status: 200 }
-      );
+    try {
+      // Buscar usuario en la nueva tabla miembro
+      // Nota: El rol/tipo ya no existe en la tabla miembro segun el nuevo esquema.
+      // Se asignará 'usuario' por defecto, o se podría implementar una lógica basada en una lista de administradores.
+      const result = await client.query(`
+        SELECT 
+          id_miembro,
+          nombre, 
+          apellido_paterno,
+          correo_electronico, 
+          contrasena,
+          rol
+        FROM miembro 
+        WHERE correo_electronico = $1
+        LIMIT 1
+      `, [correo_electronico]);
+
+      if (result.rows.length === 0) {
+        return NextResponse.json(
+          { success: false, error: 'Credenciales inválidas' },
+          { status: 200 }
+        );
+      }
+      
+      userData = result.rows[0];
+
+    } finally {
+      client.release();
     }
 
-    const userData = user[0];
     const passwordMatch = await bcrypt.compare(contrasena, userData.contrasena);
 
     if (!passwordMatch) {
@@ -47,12 +59,19 @@ export async function POST(request) {
       );
     }
 
-    const normalizedRole = userData.role === 'administrador' ? 'administrador' : 'usuario';
+    let normalizedRole = userData.rol || 'usuario';
+    
+    // Configuración de administradores (Fallback opcional o migración)
+    // Si la base de datos ya tiene el rol, esto es redundante pero seguro durante la transición
+    const ADMIN_EMAILS = ['admin@crocoders.com', 'admin@local.com'];
+    if (ADMIN_EMAILS.includes(userData.correo_electronico)) normalizedRole = 'administrador';
+
+    const nombreCompleto = `${userData.nombre} ${userData.apellido_paterno}`.trim();
 
     const token = await createToken({
-      id: userData.id,
+      id: userData.id_miembro,
       email: userData.correo_electronico,
-      name: userData.nombre_completo,
+      name: nombreCompleto,
       role: normalizedRole
     });
 
@@ -60,8 +79,8 @@ export async function POST(request) {
       success: true,
       message: 'Inicio de sesión exitoso',
       user: {
-        id: userData.id,
-        name: userData.nombre_completo,
+        id: userData.id_miembro,
+        name: nombreCompleto,
         email: userData.correo_electronico,
         role: normalizedRole
       },
@@ -80,7 +99,7 @@ export async function POST(request) {
 
     return response;
   } catch (error) {
-    // No exponer errores en producción
+    console.error("Error login:", error);
     return NextResponse.json(
       {
         success: false,
