@@ -4,8 +4,8 @@
     padding: 0;
     height: 100vh;
     overflow-y: auto;
-    scroll-snap-type: y proximity;
-    scroll-behavior: smooth;
+    /* scroll-snap-type: y proximity; Removed to fix scrolling fluidity */
+    /* scroll-behavior: smooth; Removed to avoid conflict */
     color: #e0e0e0;
     background: #1a1a1a;
     position: relative;
@@ -49,7 +49,7 @@
     height: 100vh;
     display: flex;
     align-items: center;
-    scroll-snap-align: center;
+    /* scroll-snap-align: center; Removed */
 }
 
 .heroText {

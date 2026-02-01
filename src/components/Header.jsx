@@ -97,7 +97,9 @@ export default function Header() {
   }, []);
 
   const toggleMenu = () => {
-    if (!tl.current || tl.current.isActive()) return; // Prevent spamming
+    // Check if timeline exists but remove the isActive check for click responsiveness
+    // if (!tl.current || tl.current.isActive()) return; 
+    if (!tl.current) return;
     
     const nextState = !isOpen;
     setIsOpen(nextState);
@@ -109,9 +111,19 @@ export default function Header() {
     }
   };
 
+  const handleLinkClick = () => {
+      // Direct state set instead of toggle logic which might depend on async timeline
+      if (isOpen) {
+        setIsOpen(false);
+        if (tl.current) {
+            tl.current.reverse();
+        }
+      }
+  };
+
   const handleLogout = async (e) => {
       e.preventDefault();
-      toggleMenu();
+      handleLinkClick();
       if (logout) await logout();
   };
 
@@ -139,17 +151,17 @@ export default function Header() {
                 <div className={styles.menuContainer}>
                     <div className={styles.wrapper}>
                         <div className={styles.menuItem}>
-                             <Link href="/" onClick={toggleMenu}>
+                             <Link href="/" onClick={handleLinkClick}>
                                 <span>I</span> Inicio
                              </Link>
                         </div>
                         <div className={styles.menuItem}>
-                             <Link href="/capitulo" onClick={toggleMenu}>
+                             <Link href="/capitulo" onClick={handleLinkClick}>
                                 <span>II</span> Computer Society
                              </Link>
                         </div>
                         <div className={styles.menuItem}>
-                             <Link href="/eventos" onClick={toggleMenu}>
+                             <Link href="/eventos" onClick={handleLinkClick}>
                                 <span>III</span> Eventos
                              </Link>
                         </div>
@@ -162,26 +174,26 @@ export default function Header() {
                     <div className={styles.wrapper}>
                         <div className={styles.menuItem}>
                             {isMounted && user ? (
-                                <Link href={user.role === 'administrador' ? '/admin' : '/dashboard'} onClick={toggleMenu}>
+                                <Link href={user.role === 'administrador' ? '/admin' : '/dashboard'} onClick={handleLinkClick}>
                                     Mi Perfil
                                 </Link>
                             ) : (
-                                <Link href="/iniciar" onClick={toggleMenu}>
+                                <Link href="/iniciar" onClick={handleLinkClick}>
                                     Iniciar Sesión
                                 </Link>
                             )}
                         </div>
                         
                         <div className={styles.menuItem}>
-                             <Link href="/puntajes" onClick={toggleMenu}>Puntajes</Link>
+                             <Link href="/puntajes" onClick={handleLinkClick}>Puntajes</Link>
                         </div>
                         
                          <div className={styles.menuItem}>
-                             <Link href="/evidencias" onClick={toggleMenu}>Evidencias</Link>
+                             <Link href="/evidencias" onClick={handleLinkClick}>Evidencias</Link>
                         </div>
 
                         <div className={styles.menuItem}>
-                             <Link href="/contacto" onClick={toggleMenu}>Contacto</Link>
+                             <Link href="/contacto" onClick={handleLinkClick}>Contacto</Link>
                         </div>
                          {isMounted && user && (
                              <div className={styles.menuItem}>
