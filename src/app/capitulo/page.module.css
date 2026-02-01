@@ -159,13 +159,14 @@
   }
 
   .marqueeContainer {
-    width: 300%; /* Aumentado para mejor fluidez */
-    height: 30vh; /* Altura relativa para que se vea más imagen en móvil */
-    min-height: 200px;
+    width: 250%; 
+    height: 180px; 
+    min-height: auto;
+    margin-bottom: 0.5em;
   }
 
   .offsetEven {
-      left: -35%;
+      left: -20%;
   }
 
   .itemWithText {
@@ -173,6 +174,6 @@
   }
 
   .item h1 {
-    font-size: 60px;
+    font-size: 40px;
   }
 }

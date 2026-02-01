@@ -207,7 +207,7 @@ export default function AnimationPage() {
               </div>
               <div className={styles.item}>
                 <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-                    <Image src="/capitulo/img8.jpg" alt="" fill style={{objectFit: 'cover'}} sizes="(max-width: 768px) 50vw, 25vw" />
+                    <Image src="/capitulo/img8.jpeg" alt="" fill style={{objectFit: 'cover'}} sizes="(max-width: 768px) 50vw, 25vw" />
                 </div>
               </div>
             </div>
@@ -246,10 +246,10 @@ export default function AnimationPage() {
         <section className={styles.participaSection}>
           <AnimatedSection className="w-full max-w-6xl mx-auto">
             <div className="flex flex-col md:flex-row items-center justify-center gap-4 md:gap-12">
-              <div className="flex-1 text-center md:text-left w-full max-w-md">
-                <h1 className={`${styles.noOffset} text-3xl md:text-6xl font-bold leading-tight`}>Qué esperas,</h1>
-                <h1 className={`${styles.noOffset} text-3xl md:text-6xl font-bold leading-tight`}>inicia ahora.</h1>
-                <p className={`${styles.heroDescription} text-base md:text-xl mt-4`}>Unéte a nuestra comunidad y crece con nosotros.</p>
+              <div className="flex-1 text-center md:text-left w-full max-w-md px-4">
+                <h1 className={`${styles.noOffset} text-2xl md:text-6xl font-bold leading-tight break-words`}>Qué esperas,</h1>
+                <h1 className={`${styles.noOffset} text-2xl md:text-6xl font-bold leading-tight break-words`}>inicia ahora.</h1>
+                <p className={`${styles.heroDescription} text-sm md:text-xl mt-4 break-words`}>Unéte a nuestra comunidad y crece con nosotros.</p>
               </div>
               <div className="flex-1 w-full h-[300px] md:h-[500px] max-w-lg">
                 <BongoCatKeyboard />

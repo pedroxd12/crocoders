@@ -18,7 +18,7 @@ export default function RootLayout({ children }) {
   const pathname = usePathname();
   
   return (
-    <html lang="es" className="scroll-smooth">
+    <html lang="es">
       <body className={`${poppins.className} bg-gray-900 min-h-screen flex flex-col font-sans`}>
         <AuthProvider>
           <Header />

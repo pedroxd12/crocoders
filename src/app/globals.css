@@ -14,17 +14,11 @@ body {
 }
 
 html, body {
-  scroll-behavior: smooth;
+  /* scroll-behavior: smooth; Disabled to prevent conflict with Lenis */
   overflow-x: hidden;
 }
 
-.main-container {
-  scroll-snap-type: y mandatory;
-}
-
-section {
-  scroll-snap-align: start;
-}
+/* Removed unused main-container and scroll-snap rules to prevent Lenis conflicts */
 
 .typewriter-text {
   display: inline-block;

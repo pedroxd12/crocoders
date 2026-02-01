@@ -44,14 +44,14 @@ export default function BongoCatKeyboard() {
 
         if (keyboard) {
             if (isMobile) {
-                // Configuración MÓVIL - Optimizada para evitar cortes
-                 keyboard.scale.x = 0.1; 
-                 keyboard.scale.y = 0.1;
-                 keyboard.scale.z = 0.1;
+                // Configuración MÓVIL - Aún más pequeña y ajustada
+                 keyboard.scale.x = 0.07; 
+                 keyboard.scale.y = 0.07;
+                 keyboard.scale.z = 0.07;
                  
-                 // Centrado más preciso
+                 // Centrado y levantado ligeramente
                  keyboard.position.x = 0;
-                 keyboard.position.y = 15; // Un poco más arriba para que quepa el footer/texto si hay
+                 keyboard.position.y = 5; 
                  keyboard.position.z = 0;
             } else {
                  // Configuración DESKTOP
@@ -103,7 +103,7 @@ export default function BongoCatKeyboard() {
     try {
         spline.addEventListener("keyDown", (e) => handleKeyPress(e, spline));
     } catch (err) {
-        console.log("keyDown event not available");
+        // console.log("keyDown event not available");
     }
 
     startBongoAnimation(spline);
@@ -133,7 +133,7 @@ export default function BongoCatKeyboard() {
   const handleKeyPress = (e, spline) => {
     if (!spline) return;
     
-    console.log("Key pressed:", e.target.name); // Para debug
+    // console.log("Key pressed:", e.target.name); // Para debug
     
     const skill = SKILLS[e.target.name];
     if (skill) {

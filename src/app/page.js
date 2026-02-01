@@ -30,7 +30,7 @@ export default function Home() {
       <main className={styles.container}>
         <section className={styles.hero}>
           <AnimatedSection className="w-full">
-            <div className="flex flex-row items-center gap-6 md:gap-8 justify-center">
+            <div className="flex flex-col md:flex-row items-center gap-6 md:gap-8 justify-center text-center md:text-left">
               <div className="flex-1">
                 <h1 className={`${styles.noOffset} ${styles.heroText} text-green-500`}>
                   Crocoders
@@ -44,7 +44,7 @@ export default function Home() {
                 alt="Crocoders Logo" 
                 width={300} 
                 height={300}
-                className="w-50 h-50 md:w-100 md:h-100 object-contain flex-shrink-0"
+                className="w-40 h-40 md:w-100 md:h-100 object-contain flex-shrink-0"
               />
             </div>
           </AnimatedSection>
