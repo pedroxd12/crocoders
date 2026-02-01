@@ -38,76 +38,72 @@ export default function BongoCatKeyboard() {
   const onLoad = (spline) => {
     setSplineApp(spline);
     
-    // Configurar la vista "Projects" (Teclado inclinado con gato)
-    const keyboard = spline.findObjectByName("keyboard");
-    
-    // Detectar si es móvil
-    const isMobile = window.matchMedia("(max-width: 768px)").matches;
+    const updateLayout = () => {
+        const keyboard = spline.findObjectByName("keyboard");
+        const isMobile = window.matchMedia("(max-width: 768px)").matches;
 
-    if (keyboard) {
-        if (isMobile) {
-            // Configuración MÓVIL - Optimizada para verse completo
-             keyboard.scale.x = 0.13; // Más pequeño para caber en pantalla
-             keyboard.scale.y = 0.13;
-             keyboard.scale.z = 0.13;
-             
-             // Centrado
-             keyboard.position.x = 0;
-             keyboard.position.y = -10; // Ligeramente bajo el centro
-             keyboard.position.z = 0;
-        } else {
-             // Configuración DESKTOP
-             keyboard.scale.x = 0.18;
-             keyboard.scale.y = 0.18;
-             keyboard.scale.z = 0.18;
-             
-             keyboard.position.x = 0;
-             keyboard.position.y = 20; 
-             keyboard.position.z = 0;
+        if (keyboard) {
+            if (isMobile) {
+                // Configuración MÓVIL - Optimizada para evitar cortes
+                 keyboard.scale.x = 0.1; 
+                 keyboard.scale.y = 0.1;
+                 keyboard.scale.z = 0.1;
+                 
+                 // Centrado más preciso
+                 keyboard.position.x = 0;
+                 keyboard.position.y = 15; // Un poco más arriba para que quepa el footer/texto si hay
+                 keyboard.position.z = 0;
+            } else {
+                 // Configuración DESKTOP
+                 keyboard.scale.x = 0.18;
+                 keyboard.scale.y = 0.18;
+                 keyboard.scale.z = 0.18;
+                 
+                 keyboard.position.x = 0;
+                 keyboard.position.y = 20; 
+                 keyboard.position.z = 0;
+            }
+            
+            keyboard.rotation.x = Math.PI;
+            keyboard.rotation.y = Math.PI / 3;
+            keyboard.rotation.z = Math.PI;
         }
+
+        // Asegurar visibilidad de objetos
+        const allObjects = spline.getAllObjects();
+        const desktopKeyCaps = allObjects.filter((obj) => obj.name === "keycap-desktop");
+        const mobileKeyCaps = allObjects.filter((obj) => obj.name === "keycap-mobile");
         
-        keyboard.rotation.x = Math.PI;
-        keyboard.rotation.y = Math.PI / 3;
-        keyboard.rotation.z = Math.PI;
-    }
+        if (isMobile) {
+            desktopKeyCaps.forEach(k => k.visible = false);
+            mobileKeyCaps.forEach(k => k.visible = true);
+        } else {
+            desktopKeyCaps.forEach(k => k.visible = true);
+            mobileKeyCaps.forEach(k => k.visible = false);
+        }
 
-    // Asegurar visibilidad de objetos
-    const allObjects = spline.getAllObjects();
-    
-    const desktopKeyCaps = allObjects.filter((obj) => obj.name === "keycap-desktop");
-    const mobileKeyCaps = allObjects.filter((obj) => obj.name === "keycap-mobile");
-    
-    if (isMobile) {
-        desktopKeyCaps.forEach(k => k.visible = false); // Ocultar desktop
-        mobileKeyCaps.forEach(k => k.visible = true);   // Mostrar móvil
-    } else {
-        desktopKeyCaps.forEach(k => k.visible = true);  // Mostrar desktop
-        mobileKeyCaps.forEach(k => k.visible = false);  // Ocultar móvil
-    }
+        // Asegurar que las teclas base sean visibles siempre
+        const keycaps = allObjects.filter((obj) => obj.name === "keycap");
+        keycaps.forEach(k => k.visible = true);
+    };
 
-    const keycaps = allObjects.filter((obj) => obj.name === "keycap");
-    keycaps.forEach(k => k.visible = true);
+    // Ejecutar layout inicial
+    updateLayout();
+
+    // Escuchar cambios de tamaño
+    window.addEventListener('resize', updateLayout);
+    // Guardar referencia para limpiar listener si fuera necesario (aunque onLoad es único del componente spline)
+    spline._resizeHandler = updateLayout;
 
     // Habilitar interacción
     spline.addEventListener("mouseHover", (e) => handleMouseHover(e, spline));
     spline.addEventListener("mouseDown", (e) => handleKeyPress(e, spline));
-    spline.addEventListener("mouseUp", (e) => {
-        console.log("Mouse up on:", e.target.name);
-    });
     
     // Habilitar eventos de teclado si existen en spline
     try {
         spline.addEventListener("keyDown", (e) => handleKeyPress(e, spline));
     } catch (err) {
         console.log("keyDown event not available");
-    }
-    
-    // Asegurar que el canvas acepte eventos de pointer
-    const canvas = spline._canvas || document.querySelector('canvas');
-    if (canvas) {
-        canvas.style.pointerEvents = "auto";
-        canvas.style.touchAction = "none"; // Cambiado a "none" para mejor interacción
-        canvas.style.cursor = "pointer";
     }
 
     startBongoAnimation(spline);
@@ -199,8 +195,13 @@ export default function BongoCatKeyboard() {
   
   React.useEffect(() => {
       return () => {
-          if (splineApp && splineApp._bongoInterval) {
-              clearInterval(splineApp._bongoInterval);
+          if (splineApp) {
+              if (splineApp._bongoInterval) {
+                  clearInterval(splineApp._bongoInterval);
+              }
+              if (splineApp._resizeHandler) {
+                  window.removeEventListener('resize', splineApp._resizeHandler);
+              }
           }
       };
   }, [splineApp]);

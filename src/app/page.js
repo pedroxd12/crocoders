@@ -5,8 +5,8 @@ import BongoCatKeyboard from '@/components/BongoCatKeyboard';
 import AnimatedSection from '@/components/AnimatedSection';
 
 export const metadata = {
-  title: 'Kinetic Scroll Demo',
-  description: 'A scroll animation demo converted to Next.js',
+  title: 'Crocoders - Club de Algoritmia',
+  description: 'Club de algoritmia del ITLAC.',
 };
 
 export default function Home() {
