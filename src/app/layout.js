@@ -1,25 +1,32 @@
 "use client";
 
-import { Inter } from 'next/font/google';
+import { Poppins } from 'next/font/google';
 import './globals.css';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { AuthProvider } from '@/context/AuthContext';
+import { usePathname } from 'next/navigation';
 
-const inter = Inter({ subsets: ['latin'] });
+const poppins = Poppins({ 
+  subsets: ['latin'],
+  weight: ['100', '200', '300', '400', '500', '600', '700', '800', '900'],
+  variable: '--font-poppins'
+});
 
 
 export default function RootLayout({ children }) {
+  const pathname = usePathname();
+  
   return (
     <html lang="es" className="scroll-smooth">
-      <body className={`${inter.className} bg-gray-900 min-h-screen flex flex-col`}>
+      <body className={`${poppins.className} bg-gray-900 min-h-screen flex flex-col font-sans`}>
         <AuthProvider>
           <Header />
           <link rel="icon" href="/img/logo.png" />
-          <main className="flex-grow pt-20">  {/* Añade pt-20 (o el valor que coincida con la altura de tu header) */}
+          <main className="flex-grow">
             {children}
           </main>
-          <Footer />
+          {pathname !== '/' && <Footer />}
         </AuthProvider>
       </body>
     </html>

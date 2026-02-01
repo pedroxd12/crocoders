@@ -30,7 +30,7 @@ export async function POST(request) {
       subject: `Nuevo mensaje de contacto: ${subject}`,
       text: `Nombre: ${name}\nEmail: ${email}\n\nMensaje:\n${message}`,
       html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; border-radius: 8px;">
+        <div style="font-family: 'Poppins', sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; border-radius: 8px;">
           <h1 style="color: #333; border-bottom: 2px solid #1ef184; padding-bottom: 10px;">Nuevo mensaje de contacto</h1>
           <p><strong>Asunto:</strong> ${subject}</p>
           <p><strong>Nombre:</strong> ${name}</p>

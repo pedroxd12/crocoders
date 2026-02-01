@@ -15,7 +15,7 @@ export async function POST(request) {
 
     // Buscar usuario por email
     const [user] = await sql`
-      SELECT id_miembro, nombre_completo, correo_electronico 
+      SELECT id_miembro, nombre, apellido_paterno, correo_electronico 
       FROM miembro 
       WHERE correo_electronico = ${email}
     `;
@@ -27,8 +27,10 @@ export async function POST(request) {
       );
     }
 
+    const nombreCompleto = `${user.nombre} ${user.apellido_paterno || ''}`.trim();
+
     // Enviar email de recuperación
-    await sendRecoveryEmail(user.correo_electronico, user.nombre_completo, user.id_miembro);
+    await sendRecoveryEmail(user.correo_electronico, nombreCompleto, user.id_miembro);
 
     return NextResponse.json({
       success: true,

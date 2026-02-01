@@ -1,0 +1,211 @@
+.headerContainer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 50; 
+  pointer-events: none; /* Let clicks pass through when menu is closed */
+}
+
+.toggleBtn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 100px;
+  height: 100px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 1em;
+  z-index: 52; /* Above overlay */
+  cursor: pointer;
+  pointer-events: auto; /* Enable clicking the button */
+}
+
+.btnOutline {
+  position: absolute;
+  width: 100px;
+  height: 100px;
+  border: 1px solid rgba(255, 255, 255, 0.4); /* Made visible on dark bg */
+}
+
+.btnOutline1 {
+  border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+  animation: morph 4s linear infinite;
+}
+
+.btnOutline2 {
+  border-radius: 53% 47% 43% 57% / 51% 39% 61% 49%;
+}
+
+@keyframes morph {
+  0% { border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%; }
+  50% { border-radius: 30% 60% 70% 40% / 50% 60% 30% 60%; }
+  100% { border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%; }
+}
+
+.hamburger {
+  position: relative;
+  height: 20px;
+  width: 20px;
+  z-index: 2;
+}
+
+.hamburger span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%); /* Correct centering */
+  display: inline-block;
+  width: 24px;
+  height: 1.5px;
+  background: #ffffff;
+  transition: transform 0.25s;
+}
+
+.hamburger span::before {
+  position: absolute;
+  right: 0;
+  display: inline-block;
+  content: " ";
+  width: 18px;
+  height: 1.5px;
+  background: #ffffff;
+  transform: translateY(-6px);
+  transition: transform 0.25s;
+}
+
+/* overlay */
+.overlay {
+  position: fixed;
+  width: 100vw;
+  height: 100vh;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  pointer-events: none;
+}
+
+.overlay svg {
+  width: 100%;
+  height: 100%;
+}
+
+.overlay svg path {
+  fill: #000000; /* Black overlay for menu animation */
+}
+
+/* menu items */
+.menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  visibility: hidden;
+  opacity: 0; /* Init opacity 0 */
+  z-index: 51;
+  pointer-events: auto; /* Enable interaction when visible */
+}
+
+/* Layout for menu content */
+.primaryMenu {
+  flex: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.secondaryMenu {
+  flex: 2; /* Adjusted for better balance */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background-color: #141414; /* Subtle contrast with main menu */
+}
+
+.menuContainer {
+  width: 70%;
+  height: 60%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.wrapper {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Links */
+.menuItem {
+  position: relative;
+  overflow: hidden;
+}
+
+.menuItem a {
+  position: relative;
+  display: block;
+  transform: translateY(100px); /* Changed from top: 100px for performance */
+  line-height: 1.2;
+  text-decoration: none;
+  color: #e2e2dc;
+  font-size: 3rem; /* Adjusted for Poppins */
+  font-weight: 300;
+  transition: color 0.3s;
+}
+
+.menuItem a:hover {
+  color: #1ef184;
+}
+
+.menuItem a span {
+  font-size: 1rem;
+  margin-right: 1.5em;
+  color: #f6922c;
+  vertical-align: middle;
+}
+
+.secondaryMenu .menuItem a {
+  font-size: 1.5rem;
+}
+
+.secondaryMenu .menuItem a:hover {
+  color: #f6922c;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+  .menu {
+    flex-direction: column;
+  }
+  
+  .primaryMenu, .secondaryMenu {
+    flex: 1;
+    width: 100%;
+  }
+
+  .menuItem a {
+    font-size: 2rem;
+  }
+
+  .secondaryMenu .menuItem a {
+    font-size: 1.2rem;
+  }
+  
+  .toggleBtn {
+     width: 80px;
+     height: 80px;
+     margin: 0.5em;
+  }
+  
+  .btnOutline {
+     width: 80px;
+     height: 80px;
+  }
+}

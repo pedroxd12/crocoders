@@ -81,7 +81,7 @@ export async function POST(request) {
       to: email,
       subject: `Confirmación de registro: ${eventDetails.nombre_evento}`,
       html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+        <div style="font-family: 'Poppins', sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
           <div style="background-color: #1a1a1a; padding: 20px; text-align: center;">
             <h1 style="color: #1ef184; margin: 0;">Club Crocoders</h1>
           </div>

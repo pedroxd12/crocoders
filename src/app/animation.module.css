@@ -1,0 +1,178 @@
+.pageWrapper {
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    overflow-y: auto;
+    scroll-snap-type: y proximity;
+    scroll-behavior: smooth;
+    color: #e0e0e0;
+    background: #1a1a1a;
+    position: relative;
+    scrollbar-width: thin;
+}
+
+.pageWrapper::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    --dot-color: rgba(255, 255, 255, 0.15);
+    --spacing: 24px;
+    --dot-size: 1.5px;
+
+    background-image: radial-gradient(var(--dot-color) var(--dot-size), transparent var(--dot-size));
+    background-size: var(--spacing) var(--spacing);
+    background-position: top left;
+    background-repeat: repeat;
+
+    mask-image: radial-gradient(circle at top left, #000 0%, transparent 75%);
+    mask-size: 100% 100%;
+    mask-repeat: no-repeat;
+    pointer-events: none;
+}
+
+.container {
+    width: 100%;
+    max-width: 1024px;
+    padding: 0 16px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 1;
+}
+
+.noOffset {
+    margin: 0;
+}
+
+.hero {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    scroll-snap-align: center;
+}
+
+.heroText {
+    font-size: clamp(3.5rem, 10vw, 8rem);
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+.heroDescription {
+    font-size: clamp(1.25rem, 4vw, 2rem);
+    font-weight: 400;
+    margin-top: 16px;
+}
+
+.listContainer {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 48px;
+    padding-block: 30vh; /* More space between sections */
+}
+
+@media (max-width: 768px) {
+    .container {
+        padding: 0 12px; /* Reduce padding on mobile */
+    }
+
+    .listContainer {
+        grid-template-columns: minmax(80px, auto) 1fr; /* Keep two columns */
+        column-gap: 16px; /* Reduce gap */
+        padding-block: 15vh;
+        height: auto;
+    }
+    
+    .listText {
+        position: sticky;
+        top: calc(50% - 0.5lh);
+        font-size: 1.5rem; /* Smaller on mobile */
+        margin: 0;
+        min-width: auto;
+        writing-mode: horizontal-tb; /* Keep horizontal */
+    }
+
+    .hero {
+        height: auto;
+        min-height: 100vh;
+        padding-top: 80px;
+        padding-bottom: 40px;
+    }
+    
+    .list {
+        font-size: 1.5rem; /* Smaller to fit better */
+    }
+    
+    .list li {
+        scroll-snap-align: none;
+    }
+    
+    .heroText {
+        font-size: clamp(2.5rem, 10vw, 4rem); /* Smaller on mobile */
+    }
+}
+
+.listText {
+    font-size: clamp(2rem, 6vw, 6rem);
+    font-weight: 600;
+    position: sticky;
+    top: calc(50% - 0.5lh);
+    align-self: flex-start;
+    min-width: max-content;
+    margin: 0;
+    line-height: 1.25; /* Match list items for better alignment */
+}
+
+.list {
+    font-size: clamp(2rem, 6vw, 6rem);
+
+    font-weight: 600;
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+
+.list li {
+    line-height: 1.25;
+    scroll-snap-align: center;
+    transition: color 0.3s ease;
+}
+
+/* Color logic */
+.list li {
+    --count: 15;
+    --end: 360;
+    --step: calc(var(--end) / var(--count));
+    color: oklch(65% 0.3 calc(var(--i) * var(--step)));
+}
+
+@supports (animation-timeline: scroll()) and (animation-range: 0% 100%) {
+    .list li:first-of-type {
+        --start-opacity: 1;
+    }
+
+    .list li:last-of-type {
+        --end-opacity: 1;
+    }
+
+    .list li {
+        opacity: 0.2;
+        animation-name: brighten;
+        animation-fill-mode: both;
+        animation-timing-function: linear;
+        animation-timeline: view();
+        animation-range: cover calc(50% - 1lh) calc(50% + 1lh);
+    }
+
+    @keyframes brighten {
+        0% { opacity: var(--start-opacity, 0.2); }
+        50% { opacity: 1; }
+        100% { opacity: var(--end-opacity, 0.2); }
+    }
+}
+
+@media (max-width: 600px) {
+    .listContainer {
+        column-gap: 12px;
+    }
+}

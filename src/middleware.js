@@ -35,7 +35,7 @@ const PUBLIC_PATHS = [
 
 export const config = {
   matcher: [
-    '/((?!api|_next/static|_next/image|favicon.ico|img/|fonts/).*)',
+    '/((?!api|_next/static|_next/image|favicon.ico|img/|fonts/|teclado/|evidencia/).*)',
   ]
 };
 
@@ -50,6 +50,8 @@ export async function middleware(request) {
     pathname.startsWith('/uploads/') ||
     pathname.startsWith('/public/') ||
     pathname.startsWith('/fonts/') ||
+    pathname.startsWith('/teclado/') ||
+    pathname.startsWith('/evidencia/') ||
     pathname.startsWith('/api/')
   ) {
     return NextResponse.next();

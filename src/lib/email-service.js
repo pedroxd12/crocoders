@@ -44,7 +44,7 @@ export async function sendRecoveryEmail(email, name, userId) {
       to: email,
       subject: 'Restablece tu contraseña',
       html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+        <div style="font-family: 'Poppins', sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
           <div style="text-align: center; margin-bottom: 20px;">
             <img src="cid:logo" alt="Club Crocoders" style="max-width: 150px; height: auto;" />
           </div>
