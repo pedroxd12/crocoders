@@ -1,12 +1,13 @@
-// src/app/iniciar/page.js
 'use client';
 
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { FaUser, FaLock, FaEnvelope, FaPhone, FaCheck, FaTimes, FaShieldAlt, FaGlobeAmericas, FaInfoCircle, FaArrowLeft, FaEye, FaEyeSlash } from 'react-icons/fa';
+import { User, Lock, Mail, Phone, Check, X, Shield, Globe, Info, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import Image from 'next/image';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'react-toastify';
+import { motion, AnimatePresence } from 'framer-motion';
+import styles from './page.module.css';
 
 function AuthContent() {
   // Estados para login
@@ -52,6 +53,7 @@ function AuthContent() {
   const [passwordStrength, setPasswordStrength] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
+  const [successMessage, setSuccessMessage] = useState('');
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -183,12 +185,16 @@ function AuthContent() {
     if (!usuario_vjudge) newErrors.usuario_vjudge = 'Usuario de VJudge es requerido';
     if (!usuario_omegaup) newErrors.usuario_omegaup = 'Usuario de OmegaUp es requerido';
 
-    if (es_computer_society && !numero_ieee) {
-      newErrors.numero_ieee = 'Número IEEE es requerido para miembros de Computer Society';
+    if (es_computer_society) {
+      if (!numero_ieee) {
+        newErrors.numero_ieee = 'Número IEEE es requerido para miembros de Computer Society';
+      } else if (!/^\d+$/.test(numero_ieee)) {
+        newErrors.numero_ieee = 'El número IEEE debe contener solo números';
+      }
     }
 
     if (!es_club_programacion && !es_computer_society) {
-      newErrors.afiliacion = 'Debes seleccionar al menos una afiliación (Club de Programación o Computer Society)';
+      newErrors.afiliacion = 'Debes seleccionar una opción: Club, Capítulo o ambos.';
     }
 
     setErrors(newErrors);
@@ -242,6 +248,8 @@ function AuthContent() {
 
       const result = await login(email, password);
       
+      setSuccessMessage(''); // Limpiar mensaje de éxito previo
+      
       if (!result.success) {
         throw new Error(result.error || 'Contraseña incorrecta o usuario no encontrado');
       }
@@ -293,6 +301,8 @@ function AuthContent() {
       } else {
         // Registro exitoso pero requiere login manual
         setIsLogin(true); // Cambiar a vista de login
+        setSuccessMessage('¡Cuenta creada exitosamente! Por favor inicia sesión.');
+        
         if (registerEvent) {
           toast.info('Por favor inicia sesión para completar tu registro al evento');
         }
@@ -456,6 +466,12 @@ function AuthContent() {
 
   const handleRegisterChange = (e) => {
     const { name, value, type, checked } = e.target;
+
+    // Validación inmediata para número IEEE (solo números)
+    if (name === 'numero_ieee' && !/^\d*$/.test(value)) {
+      return;
+    }
+
     setRegisterData(prev => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : value
@@ -493,17 +509,17 @@ function AuthContent() {
   };
 
   const renderAuthView = () => (
-    <>
-      <div className="flex justify-center mb-6">
-        <div className="flex space-x-1 bg-gray-700 p-1 rounded-full">
+    <div className="w-full">
+      <div className="flex justify-center mb-8">
+        <div className="flex space-x-1 bg-white/5 p-1 rounded-full border border-white/10 backdrop-blur-sm">
           <button 
-            className={`px-6 py-2 rounded-full transition-all ${isLogin ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg' : 'text-gray-300 hover:text-white'}`}
+            className={`px-6 py-2 rounded-full text-sm font-medium transition-all duration-300 ${isLogin ? 'bg-green-500 text-black shadow-lg shadow-green-500/20' : 'text-gray-400 hover:text-white'}`}
             onClick={() => { setIsLogin(true); setErrors({}); }}
           >
             Iniciar sesión
           </button>
           <button 
-            className={`px-6 py-2 rounded-full transition-all ${!isLogin ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg' : 'text-gray-300 hover:text-white'}`}
+            className={`px-6 py-2 rounded-full text-sm font-medium transition-all duration-300 ${!isLogin ? 'bg-green-500 text-black shadow-lg shadow-green-500/20' : 'text-gray-400 hover:text-white'}`}
             onClick={() => { setIsLogin(false); setErrors({}); }}
           >
             Registrarte
@@ -511,54 +527,84 @@ function AuthContent() {
         </div>
       </div>
 
-      <h2 className="text-2xl font-bold text-center mb-6 text-green-400">
-        {isLogin ? 'Inicia sesión en tu cuenta' : 'Crea una nueva cuenta'}
-      </h2>
+      <div className="text-center mb-8">
+        <h2 className={styles.title}>
+            {isLogin ? 'Bienvenido' : 'Crear Cuenta'}
+        </h2>
+        <p className={styles.subtitle}>
+          {isLogin ? 'Inicia sesión para continuar' : 'Únete a la comunidad de Crocoders'}
+        </p>
+      </div>
 
       {errors.general && (
-        <div className="mb-4 p-3 bg-red-500/20 border border-red-500 rounded-lg text-red-300 text-sm flex items-center animate-fade-in">
-          <FaTimes className="mr-2 flex-shrink-0" />
+        <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-xl text-red-400 text-sm flex items-center gap-3"
+        >
+          <X size={18} />
           {errors.general}
-        </div>
+        </motion.div>
       )}
 
-      {isLogin ? (
-        <form className="space-y-4" onSubmit={handleLogin}>
-          <div className="group">
-            <label className="block text-gray-300 mb-2 flex items-center">
-              <FaEnvelope className="mr-2" /> Email
+      <AnimatePresence mode="wait">
+        {isLogin ? (
+          <motion.form 
+            key="login"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            className={styles.form} 
+            onSubmit={handleLogin}
+          >
+          {successMessage && (
+             <motion.div 
+               initial={{ opacity: 0, y: -10 }}
+               animate={{ opacity: 1, y: 0 }}
+               className="mb-6 p-4 bg-green-500/10 border border-green-500/50 rounded-xl text-green-400 text-sm flex items-center gap-3"
+             >
+               <Check size={18} />
+               {successMessage}
+             </motion.div>
+          )}
+
+          <div className={styles.formGroup}>
+            <label className={styles.label}>
+              <Mail size={16} /> Email
             </label>
-            <div className="relative">
+            <div className={styles.inputWrapper}>
               <input 
                 type="email" 
-                className={`w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border ${errors.general ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.general ? styles.inputError : ''}`}
                 value={email} 
                 onChange={(e) => setEmail(e.target.value)} 
                 required 
+                placeholder="tu@email.com"
               />
-              <FaEnvelope className="absolute left-3 top-3.5 text-gray-400 transition group-hover:text-green-400" />
+              <Mail className={styles.inputIcon} size={18} />
             </div>
           </div>
 
-          <div className="group">
-            <label className="block text-gray-300 mb-2 flex items-center">
-              <FaLock className="mr-2" /> Contraseña
+          <div className={styles.formGroup}>
+            <label className={styles.label}>
+              <Lock size={16} /> Contraseña
             </label>
-            <div className="relative">
+            <div className={styles.inputWrapper}>
               <input 
                 type={showPassword ? "text" : "password"} 
-                className={`w-full p-3 pl-10 pr-10 rounded-lg bg-gray-700 text-white border ${errors.general ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.general ? styles.inputError : ''}`}
                 value={password} 
                 onChange={(e) => setPassword(e.target.value)} 
                 required 
+                placeholder="••••••••"
               />
-              <FaLock className="absolute left-3 top-3.5 text-gray-400 transition group-hover:text-green-400" />
+              <Lock className={styles.inputIcon} size={18} />
               <button 
                 type="button"
-                className="absolute right-3 top-3.5 text-gray-400 hover:text-green-400 transition"
+                className={styles.passwordToggle}
                 onClick={() => setShowPassword(!showPassword)}
               >
-                {showPassword ? <FaEyeSlash /> : <FaEye />}
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </div>
@@ -567,474 +613,482 @@ function AuthContent() {
             <button 
               type="button"
               onClick={() => setView('recovery')}
-              className="text-sm text-green-400 hover:text-green-300 transition hover:underline flex items-center"
+              className="text-sm text-green-500 hover:text-green-400 transition hover:underline flex items-center gap-1"
             >
-              <FaLock className="mr-1" /> ¿Olvidaste tu contraseña?
+              ¿Olvidaste tu contraseña?
             </button>
           </div>
 
           <button 
-            className={`w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 shadow-lg hover:shadow-green-500/30 flex items-center justify-center ${isLoading ? 'opacity-75 cursor-not-allowed' : 'hover:brightness-110 hover:scale-[1.01]'}`}
+            className={styles.submitButton}
             type="submit"
             disabled={isLoading}
           >
-            {isLoading ? (
-              <div className="flex items-center justify-center">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                Procesando...
-              </div>
-            ) : (
-              'Iniciar sesión'
-            )}
+            {isLoading ? 'Procesando...' : 'Iniciar Sesión'}
           </button>
-        </form>
+        </motion.form>
       ) : (
-        <form className="space-y-4" onSubmit={handleRegister}>
-          <div className="group">
-            <label className="block text-gray-300 mb-2">Nombre</label>
-            <div className="relative">
+        <motion.form 
+            key="register"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            className="space-y-4" 
+            onSubmit={handleRegister}
+        >
+          <div className={styles.formGroup}>
+            <label className={styles.label}>Nombre</label>
+            <div className={styles.inputWrapper}>
               <input 
                 type="text" 
                 name="nombre"
-                className={`w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border ${errors.nombre ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.nombre ? styles.inputError : ''}`}
                 value={registerData.nombre} 
                 onChange={handleRegisterChange}
                 required 
+                placeholder="Juan"
               />
-              <FaUser className="absolute left-3 top-3.5 text-gray-400 transition group-hover:text-green-400" />
+              <User className={styles.inputIcon} size={18} />
             </div>
             {errors.nombre && (
-              <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.nombre}</p>
+              <p className={styles.errorText}>{errors.nombre}</p>
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="group">
-              <label className="block text-gray-300 mb-2">Apellido Paterno</label>
+          <div className={styles.grid}>
+            <div className={styles.formGroup}>
+              <label className={styles.label}>Apellido Paterno</label>
               <input 
                 type="text" 
                 name="apellido_paterno"
-                className={`w-full p-3 rounded-lg bg-gray-700 text-white border ${errors.apellido_paterno ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.apellido_paterno ? styles.inputError : ''}`}
+                style={{ paddingLeft: '1rem' }}
                 value={registerData.apellido_paterno} 
                 onChange={handleRegisterChange}
                 required 
+                placeholder="Pérez"
               />
               {errors.apellido_paterno && (
-                <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.apellido_paterno}</p>
+                <p className={styles.errorText}>{errors.apellido_paterno}</p>
               )}
             </div>
 
-            <div className="group">
-              <label className="block text-gray-300 mb-2">Apellido Materno</label>
+            <div className={styles.formGroup}>
+              <label className={styles.label}>Apellido Materno</label>
               <input 
                 type="text" 
                 name="apellido_materno"
-                className={`w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={styles.input}
+                style={{ paddingLeft: '1rem' }}
                 value={registerData.apellido_materno} 
                 onChange={handleRegisterChange}
+                placeholder="García"
               />
             </div>
           </div>
 
-          <div className="group">
-            <label className="block text-gray-300 mb-2 flex items-center">
-              <FaEnvelope className="mr-2" /> Email
+          <div className={styles.formGroup}>
+            <label className={styles.label}>
+              <Mail size={16} /> Email
             </label>
-            <div className="relative">
+            <div className={styles.inputWrapper}>
               <input 
                 type="email" 
                 name="correo_electronico"
-                className={`w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border ${errors.correo_electronico ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.correo_electronico ? styles.inputError : ''}`}
                 value={registerData.correo_electronico} 
                 onChange={handleRegisterChange}
                 required 
+                placeholder="tu@email.com"
               />
-              <FaEnvelope className="absolute left-3 top-3.5 text-gray-400 transition group-hover:text-green-400" />
+              <Mail className={styles.inputIcon} size={18} />
             </div>
             {errors.correo_electronico && (
-              <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.correo_electronico}</p>
+              <p className={styles.errorText}>{errors.correo_electronico}</p>
             )}
           </div>
 
-          <div className="group">
-            <label className="block text-gray-300 mb-2 flex items-center">
-              <FaLock className="mr-2" /> Contraseña
+          <div className={styles.formGroup}>
+            <label className={styles.label}>
+              <Lock size={16} /> Contraseña
             </label>
-            <div className="relative">
+            <div className={styles.inputWrapper}>
               <input 
                 type={showRegisterPassword ? "text" : "password"} 
                 name="contrasena"
-                className={`w-full p-3 pl-10 pr-10 rounded-lg bg-gray-700 text-white border ${errors.contrasena ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.contrasena ? styles.inputError : ''}`}
                 value={registerData.contrasena} 
                 onChange={handleRegisterChange}
                 required 
                 minLength={8}
+                placeholder="Mínimo 8 caracteres"
               />
-              <FaLock className="absolute left-3 top-3.5 text-gray-400 transition group-hover:text-green-400" />
+              <Lock className={styles.inputIcon} size={18} />
               <button 
                 type="button"
-                className="absolute right-3 top-3.5 text-gray-400 hover:text-green-400 transition"
+                className={styles.passwordToggle}
                 onClick={() => setShowRegisterPassword(!showRegisterPassword)}
               >
-                {showRegisterPassword ? <FaEyeSlash /> : <FaEye />}
+                {showRegisterPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
-            <div className="mt-2">
-              <div className="w-full bg-gray-700 rounded-full h-2">
-                <div 
-                  className={`h-2 rounded-full ${getPasswordStrengthColor(passwordStrength)} transition-all duration-300`} 
-                  style={{ width: `${(passwordStrength / 4) * 100}%` }}
-                ></div>
-              </div>
-              <div className="flex justify-between text-xs text-gray-400 mt-1">
+            <div className={styles.strengthMeter}>
+              <div 
+                className={styles.strengthBar}
+                style={{ 
+                    width: `${(passwordStrength / 4) * 100}%`,
+                    backgroundColor: ['#6b7280', '#ef4444', '#eab308', '#3b82f6', '#22c55e'][passwordStrength] || '#6b7280'
+                }}
+              ></div>
+            </div>
+            <div className={styles.strengthText}>
                 <span>Seguridad:</span>
-                <span className={`${passwordStrength >= 3 ? 'text-green-400' : passwordStrength >= 2 ? 'text-yellow-400' : 'text-red-400'}`}>
+                <span style={{ color: ['#6b7280', '#ef4444', '#eab308', '#3b82f6', '#22c55e'][passwordStrength] }}>
                   {getPasswordStrengthText(passwordStrength)}
                 </span>
-              </div>
             </div>
             {errors.contrasena && (
-              <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.contrasena}</p>
+              <p className={styles.errorText}>{errors.contrasena}</p>
             )}
           </div>
 
-          <div className="group">
-            <label className="block text-gray-300 mb-2 flex items-center">
-              <FaLock className="mr-2" /> Confirmar contraseña
+          <div className={styles.formGroup}>
+            <label className={styles.label}>
+              <Lock size={16} /> Confirmar contraseña
             </label>
-            <div className="relative">
+            <div className={styles.inputWrapper}>
               <input 
                 type={showRegisterConfirmPassword ? "text" : "password"} 
                 name="confirmar_contrasena"
-                className={`w-full p-3 pl-10 pr-10 rounded-lg bg-gray-700 text-white border ${errors.confirmar_contrasena ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.confirmar_contrasena ? styles.inputError : ''}`}
                 value={registerData.confirmar_contrasena} 
                 onChange={handleRegisterChange}
                 required 
                 minLength={8}
+                placeholder="Repite la contraseña"
               />
-              <FaLock className="absolute left-3 top-3.5 text-gray-400 transition group-hover:text-green-400" />
+              <Lock className={styles.inputIcon} size={18} />
               <button 
                 type="button"
-                className="absolute right-3 top-3.5 text-gray-400 hover:text-green-400 transition"
+                className={styles.passwordToggle}
                 onClick={() => setShowRegisterConfirmPassword(!showRegisterConfirmPassword)}
               >
-                {showRegisterConfirmPassword ? <FaEyeSlash /> : <FaEye />}
+                {showRegisterConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
             {!passwordsMatch && (
-              <p className="mt-1 text-sm text-red-400 animate-fade-in">Las contraseñas no coinciden</p>
+              <p className={styles.errorText}>Las contraseñas no coinciden</p>
             )}
             {errors.confirmar_contrasena && (
-              <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.confirmar_contrasena}</p>
+              <p className={styles.errorText}>{errors.confirmar_contrasena}</p>
             )}
           </div>
 
-          {/* MODIFICADO: Teléfono ahora es requerido */}
-          <div className="group">
-            <label className="block text-gray-300 mb-2 flex items-center">
-              <FaPhone className="mr-2" /> Número de teléfono
+          <div className={styles.formGroup}>
+            <label className={styles.label}>
+              <Phone size={16} /> Número de teléfono
             </label>
-            <div className="relative">
+            <div className={styles.inputWrapper}>
               <input 
                 type="tel" 
                 name="numero_telefono"
-                className={`w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border ${errors.numero_telefono ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.numero_telefono ? styles.inputError : ''}`}
                 value={registerData.numero_telefono} 
                 onChange={handleRegisterChange}
                 pattern="[0-9]{10,15}"
                 title="Número de teléfono (10-15 dígitos)"
-                required // NUEVO: Agregado
+                required
+                placeholder="1234567890"
               />
-              <FaPhone className="absolute left-3 top-3.5 text-gray-400 transition group-hover:text-green-400" />
+              <Phone className={styles.inputIcon} size={18} />
             </div>
             {errors.numero_telefono && (
-              <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.numero_telefono}</p>
+              <p className={styles.errorText}>{errors.numero_telefono}</p>
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="group">
-              <label className="block text-gray-300 mb-2">Semestre</label>
+          <div className={styles.grid}>
+            <div className={styles.formGroup}>
+              <label className={styles.label}>Semestre</label>
               <select
                 name="semestre"
-                className={`w-full p-3 rounded-lg bg-gray-700 text-white border ${errors.semestre ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.semestre ? styles.inputError : ''}`}
+                style={{ paddingLeft: '1rem' }}
                 value={registerData.semestre}
                 onChange={handleRegisterChange}
                 required
               >
-                <option value="">Selecciona...</option>
+                <option value="" style={{ color: 'black' }}>Selecciona...</option>
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(sem => (
-                  <option key={sem} value={sem}>{sem}</option>
+                  <option key={sem} value={sem} style={{ color: 'black' }}>{sem}</option>
                 ))}
               </select>
               {errors.semestre && (
-                <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.semestre}</p>
+                <p className={styles.errorText}>{errors.semestre}</p>
               )}
             </div>
 
-            <div className="group">
-              <label className="block text-gray-300 mb-2">Carrera</label>
+            <div className={styles.formGroup}>
+              <label className={styles.label}>Carrera</label>
               <select
                 name="carrera"
-                className={`w-full p-3 rounded-lg bg-gray-700 text-white border ${errors.carrera ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.carrera ? styles.inputError : ''}`}
+                style={{ paddingLeft: '1rem' }}
                 value={registerData.carrera}
                 onChange={handleRegisterChange}
                 required
               >
-                <option value="">Selecciona...</option>
+                <option value="" style={{ color: 'black' }}>Selecciona...</option>
                 {carreras.map(carrera => (
-                  <option key={carrera} value={carrera}>{carrera}</option>
+                  <option key={carrera} value={carrera} style={{ color: 'black' }}>{carrera}</option>
                 ))}
               </select>
               {errors.carrera && (
-                <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.carrera}</p>
+                <p className={styles.errorText}>{errors.carrera}</p>
               )}
             </div>
           </div>
           
           {/* MODIFICADO: Campos de plataformas ahora son requeridos */}
-          <div className="space-y-4 border-t border-gray-700 pt-4">
+          <div className="border-t border-white/10 pt-4 space-y-4">
             <h3 className="text-gray-300 text-sm font-medium">Perfiles en plataformas de programación</h3>
-            <p className="text-xs text-gray-400 -mt-3">
-              Estos datos nos ayudarán a hacer seguimiento de tu progreso.
-              Favor de crear una cuenta en estas plataformas de programación. <span className="text-red-400">* Requerido</span>
+            <p className="text-xs text-gray-400">
+              Crea una cuenta en estas plataformas si no tienes una. <span className="text-red-400">* Requerido</span>
             </p>
             
-            <div className="group">
-              <label className="block text-gray-300 mb-2">Codeforces <span className="text-red-400">*</span></label>
+            <div className={styles.formGroup}>
+              <label className={styles.label}>Codeforces <span className="text-red-400">*</span></label>
               <input 
                 type="text" 
                 name="usuario_codeforces"
-                className={`w-full p-3 rounded-lg bg-gray-700 text-white border ${errors.usuario_codeforces ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.usuario_codeforces ? styles.inputError : ''}`}
+                style={{ paddingLeft: '1rem' }}
                 value={registerData.usuario_codeforces} 
                 onChange={handleRegisterChange}
                 placeholder="Usuario de Codeforces"
-                required // NUEVO: Agregado
+                required 
               />
               {errors.usuario_codeforces && (
-                <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.usuario_codeforces}</p>
+                <p className={styles.errorText}>{errors.usuario_codeforces}</p>
               )}
             </div>
 
-            <div className="group">
-              <label className="block text-gray-300 mb-2">VJudge <span className="text-red-400">*</span></label>
+            <div className={styles.formGroup}>
+              <label className={styles.label}>VJudge <span className="text-red-400">*</span></label>
               <input 
                 type="text" 
                 name="usuario_vjudge"
-                className={`w-full p-3 rounded-lg bg-gray-700 text-white border ${errors.usuario_vjudge ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.usuario_vjudge ? styles.inputError : ''}`}
+                style={{ paddingLeft: '1rem' }}
                 value={registerData.usuario_vjudge} 
                 onChange={handleRegisterChange}
                 placeholder="Usuario de VJudge"
-                required // NUEVO: Agregado
+                required 
               />
               {errors.usuario_vjudge && (
-                <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.usuario_vjudge}</p>
+                <p className={styles.errorText}>{errors.usuario_vjudge}</p>
               )}
             </div>
 
-            <div className="group">
-              <label className="block text-gray-300 mb-2">OmegaUp <span className="text-red-400">*</span></label>
+            <div className={styles.formGroup}>
+              <label className={styles.label}>OmegaUp <span className="text-red-400">*</span></label>
               <input 
                 type="text" 
                 name="usuario_omegaup"
-                className={`w-full p-3 rounded-lg bg-gray-700 text-white border ${errors.usuario_omegaup ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.usuario_omegaup ? styles.inputError : ''}`}
+                style={{ paddingLeft: '1rem' }}
                 value={registerData.usuario_omegaup} 
                 onChange={handleRegisterChange}
                 placeholder="Usuario de OmegaUp"
-                required // NUEVO: Agregado
+                required 
               />
               {errors.usuario_omegaup && (
-                <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.usuario_omegaup}</p>
+                <p className={styles.errorText}>{errors.usuario_omegaup}</p>
               )}
             </div>
           </div>
 
-          <div className="space-y-4 border-t border-gray-700 pt-4 mt-4">
+          <div className="border-t border-white/10 pt-4 mt-4 space-y-4">
              <h3 className="text-gray-300 text-sm font-medium">Afiliación</h3>
              {errors.afiliacion && (
-                <div className="p-2 bg-red-500/20 border border-red-500 rounded text-red-300 text-xs">
+                <div className="p-2 bg-red-500/10 border border-red-500/50 rounded text-red-400 text-xs">
                     {errors.afiliacion}
                 </div>
              )}
 
-             <div className="flex items-center space-x-2">
+             <label className={styles.checkboxGroup}>
                 <input
                     type="checkbox"
                     id="es_club_programacion"
                     name="es_club_programacion"
                     checked={registerData.es_club_programacion}
                     onChange={handleRegisterChange}
-                    className="w-4 h-4 text-green-600 bg-gray-700 border-gray-600 rounded focus:ring-green-600 focus:ring-2"
+                    className={styles.checkbox}
                 />
-                <label htmlFor="es_club_programacion" className="text-gray-300 text-sm select-none cursor-pointer">
+                <span className="text-gray-300 text-sm select-none">
                     Soy miembro del Club de Programación
-                </label>
-             </div>
+                </span>
+             </label>
 
              <div className="flex flex-col space-y-3">
-                <div className="flex items-center space-x-2">
+                <label className={styles.checkboxGroup}>
                     <input
                         type="checkbox"
                         id="es_computer_society"
                         name="es_computer_society"
                         checked={registerData.es_computer_society}
                         onChange={handleRegisterChange}
-                        className="w-4 h-4 text-green-600 bg-gray-700 border-gray-600 rounded focus:ring-green-600 focus:ring-2"
+                        className={styles.checkbox}
                     />
-                    <label htmlFor="es_computer_society" className="text-gray-300 text-sm select-none cursor-pointer">
+                    <span className="text-gray-300 text-sm select-none">
                         Soy miembro de Computer Society
-                    </label>
-                </div>
+                    </span>
+                </label>
 
                 {registerData.es_computer_society && (
-                    <div className="ml-6 group animate-fade-in">
-                        <label className="block text-gray-300 mb-2 text-sm">Número IEEE <span className="text-red-400">*</span></label>
-                        <input
-                            type="text"
-                            name="numero_ieee"
-                            className={`w-full p-2 rounded-lg bg-gray-700 text-white border ${errors.numero_ieee ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none`}
-                            value={registerData.numero_ieee}
-                            onChange={handleRegisterChange}
-                            placeholder="Ej. IEEE-123456"
-                            required
-                        />
-                         {errors.numero_ieee && (
-                            <p className="mt-1 text-sm text-red-400">{errors.numero_ieee}</p>
-                         )}
-                    </div>
+                    <motion.div 
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        className="ml-6"
+                    >
+                        <div className={styles.formGroup}>
+                            <label className={styles.label}>Número IEEE <span className="text-red-400">*</span></label>
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                name="numero_ieee"
+                                className={`${styles.input} ${errors.numero_ieee ? styles.inputError : ''}`}
+                                style={{ paddingLeft: '1rem' }}
+                                value={registerData.numero_ieee}
+                                onChange={handleRegisterChange}
+                                placeholder="Ej. 12345678"
+                                required
+                            />
+                             {errors.numero_ieee && (
+                                <p className={styles.errorText}>{errors.numero_ieee}</p>
+                             )}
+                        </div>
+                    </motion.div>
                 )}
              </div>
           </div>
 
           <button 
-            className={`w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 shadow-lg hover:shadow-green-500/30 flex items-center justify-center ${isLoading ? 'opacity-75 cursor-not-allowed' : 'hover:brightness-110 hover:scale-[1.01]'}`}
+            className={styles.submitButton}
             type="submit"
             disabled={isLoading || !passwordsMatch}
+            style={{ width: '100%' }}
           >
-            {isLoading ? (
-              <div className="flex items-center justify-center">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                Procesando...
-              </div>
-            ) : (
-              'Registrarse'
-            )}
+            {isLoading ? 'Procesando...' : 'Registrarse'}
           </button>
-        </form>
+        </motion.form>
       )}
+      </AnimatePresence>
 
-      <div className="mt-6 text-center text-gray-400">
-        {isLogin ? '¿No tienes una cuenta?' : '¿Ya tienes una cuenta?'}{' '}
+      <div className={styles.toggleText}>
+        {isLogin ? '¿No tienes una cuenta?' : '¿Ya tienes una cuenta?'}
         <button 
           onClick={() => {
             setIsLogin(!isLogin);
             setErrors({});
           }}
-          className="text-green-400 hover:text-green-300 transition hover:underline font-medium"
+          className={styles.toggleLink}
         >
           {isLogin ? 'Regístrate' : 'Inicia sesión'}
         </button>
       </div>
-    </>
+    </div>
   );
 
   const renderRecoveryView = () => (
-    <div className="space-y-4">
+    <div className={styles.form}>
       <button 
         onClick={() => setView('auth')} 
-        className="flex items-center text-gray-400 hover:text-white transition"
+        className={styles.backButton}
       >
-        <FaArrowLeft className="mr-2" /> Volver al inicio
+        <ArrowLeft size={16} /> Volver
       </button>
 
-      <h2 className="text-2xl font-bold text-center mb-6 text-green-400">
-        Recuperar contraseña
-      </h2>
+      <div className={styles.header}>
+        <h2 className={styles.title} style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>
+          Recuperar Contraseña
+        </h2>
+        <p className={styles.subtitle}>
+          Ingresa tu email para recibir un código.
+        </p>
+      </div>
 
       {errors.general && (
-        <div className="mb-4 p-3 bg-red-500/20 border border-red-500 rounded-lg text-red-300 text-sm flex items-center animate-fade-in">
-          <FaTimes className="mr-2" />
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 text-sm flex items-center gap-2">
+          <X size={16} />
           {errors.general}
         </div>
       )}
 
-      <div className="bg-blue-500/10 border border-blue-500 rounded-lg p-3 text-sm text-blue-300 flex items-start mb-4">
-        <FaInfoCircle className="mr-2 mt-0.5 flex-shrink-0" />
-        <span>Ingresa tu dirección de correo electrónico registrada. Te enviaremos un código de verificación para restablecer tu contraseña.</span>
-      </div>
-
-      <div className="group">
-        <label className="block text-gray-300 mb-2 flex items-center">
-          <FaEnvelope className="mr-2" /> Email registrado
+      <div className={styles.formGroup}>
+        <label className={styles.label}>
+          <Mail size={16} /> Email registrado
         </label>
-        <div className="relative">
+        <div className={styles.inputWrapper}>
           <input 
             type="email" 
-            className={`w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border ${errors.recoveryEmail ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+            className={`${styles.input} ${errors.recoveryEmail ? styles.inputError : ''}`}
             value={recoveryEmail} 
             onChange={(e) => setRecoveryEmail(e.target.value)} 
             required 
+            placeholder="tu@email.com"
           />
-          <FaEnvelope className="absolute left-3 top-3.5 text-gray-400 transition group-hover:text-green-400" />
+          <Mail className={styles.inputIcon} size={18} />
         </div>
         {errors.recoveryEmail && (
-          <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.recoveryEmail}</p>
+          <p className={styles.errorText}>{errors.recoveryEmail}</p>
         )}
       </div>
 
       <button 
-        className={`w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 shadow-lg hover:shadow-green-500/30 flex items-center justify-center ${isLoading ? 'opacity-75 cursor-not-allowed' : 'hover:brightness-110 hover:scale-[1.01]'}`}
+        className={styles.submitButton}
         onClick={handleRecoveryRequest}
         disabled={isLoading}
       >
-        {isLoading ? (
-          <div className="flex items-center justify-center">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-            Procesando...
-          </div>
-        ) : (
-          'Enviar código de verificación'
-        )}
+        {isLoading ? 'Procesando...' : 'Enviar código'}
       </button>
     </div>
   );
 
   const renderVerifyCodeView = () => (
-    <div className="space-y-4">
+    <div className={styles.form}>
       <button 
         onClick={() => setView('recovery')} 
-        className="flex items-center text-gray-400 hover:text-white transition"
+        className={styles.backButton}
       >
-        <FaArrowLeft className="mr-2" /> Volver
+        <ArrowLeft size={16} /> Volver
       </button>
 
-      <h2 className="text-2xl font-bold text-center mb-6 text-green-400">
-        Verificar código
-      </h2>
+      <div className={styles.header}>
+        <h2 className={styles.title} style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Verificar Código</h2>
+        <p className={styles.subtitle}>Ingresa el código enviado a tu correo.</p>
+      </div>
 
       {errors.general && (
-        <div className="mb-4 p-3 bg-red-500/20 border border-red-500 rounded-lg text-red-300 text-sm flex items-center animate-fade-in">
-          <FaTimes className="mr-2" />
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 text-sm flex items-center gap-2">
+          <X size={16} />
           {errors.general}
         </div>
       )}
 
-      <div className="bg-blue-500/10 border border-blue-500 rounded-lg p-3 text-sm text-blue-300 flex items-start mb-4">
-        <FaInfoCircle className="mr-2 mt-0.5 flex-shrink-0" />
-        <span>Hemos enviado un código de 6 dígitos a tu correo electrónico. Por favor ingrésalo a continuación para verificar tu identidad.</span>
-      </div>
-
-      <div className="group">
-        <label className="block text-gray-300 mb-2 flex items-center">
-          <FaShieldAlt className="mr-2" /> Código de verificación
+      <div className={styles.formGroup}>
+        <label className={styles.label}>
+          <Shield size={16} /> Código
         </label>
-        <div className="relative">
+        <div className={styles.inputWrapper}>
           <input 
             type="text" 
             inputMode="numeric"
             pattern="[0-9]{6}"
             maxLength={6}
-            className={`w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border ${errors.verificationCode ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+            className={`${styles.input} ${errors.verificationCode ? styles.inputError : ''}`}
+            style={{ paddingLeft: '2.75rem', letterSpacing: '0.2rem', fontSize: '1.2rem' }}
             value={verificationCode} 
             onChange={(e) => {
               const value = e.target.value.replace(/\D/g, '').slice(0, 6);
@@ -1044,47 +1098,41 @@ function AuthContent() {
               }
             }}
             required 
+            placeholder="000000"
           />
-          <FaShieldAlt className="absolute left-3 top-3.5 text-gray-400 transition group-hover:text-green-400" />
+          <Shield className={styles.inputIcon} size={18} />
         </div>
         {errors.verificationCode && (
-          <p className="mt-1 text-sm text-red-400 animate-fade-in">{errors.verificationCode}</p>
+          <p className={styles.errorText}>{errors.verificationCode}</p>
         )}
       </div>
 
       <button 
-        className={`w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 shadow-lg hover:shadow-green-500/30 flex items-center justify-center ${isLoading ? 'opacity-75 cursor-not-allowed' : 'hover:brightness-110 hover:scale-[1.01]'}`}
+        className={styles.submitButton}
         onClick={handleVerifyCode}
         disabled={isLoading}
       >
-        {isLoading ? (
-          <div className="flex items-center justify-center">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-            Verificando...
-          </div>
-        ) : (
-          'Verificar código'
-        )}
+        {isLoading ? 'Verificando...' : 'Verificar'}
       </button>
     </div>
   );
 
   const renderResetView = () => (
-    <div className="space-y-4">
+    <div className={styles.form}>
       <button 
         onClick={() => setView('auth')} 
-        className="flex items-center text-gray-400 hover:text-white transition"
+        className={styles.backButton}
       >
-        <FaArrowLeft className="mr-2" /> Volver al inicio
+        <ArrowLeft size={16} /> Volver
       </button>
 
-      <h2 className="text-2xl font-bold text-center mb-6 text-green-400">
-        Restablecer contraseña
-      </h2>
+      <div className={styles.header}>
+        <h2 className={styles.title} style={{ fontSize: '1.5rem' }}>Restablecer Contraseña</h2>
+      </div>
 
       {errors.general && (
-        <div className="mb-4 p-3 bg-red-500/20 border border-red-500 rounded-lg text-red-300 text-sm flex items-center animate-fade-in">
-          <FaTimes className="mr-2" />
+        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 text-sm flex items-center gap-2">
+          <X size={16} />
           {errors.general}
         </div>
       )}
@@ -1095,137 +1143,115 @@ function AuthContent() {
         </div>
       ) : tokenVerified ? (
         <>
-          <div className="bg-blue-500/10 border border-blue-500 rounded-lg p-3 text-sm text-blue-300 flex items-start mb-4">
-            <FaInfoCircle className="mr-2 mt-0.5 flex-shrink-0" />
-            <span>Crea una nueva contraseña segura para tu cuenta.</span>
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 text-sm text-blue-300 flex items-start mb-4 gap-2">
+            <Info size={16} className="mt-0.5 flex-shrink-0" />
+            <span>Crea una nueva contraseña segura.</span>
           </div>
 
-          <div className="group">
-            <label className="block text-gray-300 mb-2 flex items-center">
-              <FaLock className="mr-2" /> Nueva contraseña
+          <div className={styles.formGroup}>
+            <label className={styles.label}>
+              <Lock size={16} /> Nueva contraseña
             </label>
-            <div className="relative">
+            <div className={styles.inputWrapper}>
               <input 
                 type={showNewPassword ? "text" : "password"} 
-                className={`w-full p-3 pl-10 pr-10 rounded-lg bg-gray-700 text-white border ${errors.newPassword ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.newPassword ? styles.inputError : ''}`}
                 value={newPassword} 
                 onChange={(e) => setNewPassword(e.target.value)} 
                 required 
+                placeholder="Nueva contraseña"
               />
-              <FaLock className="absolute left-3 top-3.5 text-gray-400 transition group-hover:text-green-400" />
+              <Lock className={styles.inputIcon} size={18} />
               <button 
                 type="button"
-                className="absolute right-3 top-3.5 text-gray-400 hover:text-green-400 transition"
+                className={styles.passwordToggle}
                 onClick={() => setShowNewPassword(!showNewPassword)}
               >
-                {showNewPassword ? <FaEyeSlash /> : <FaEye />}
+                {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
-            <div className="mt-2">
-              <div className="w-full bg-gray-700 rounded-full h-2">
+            
+             <div className={styles.strengthMeter}>
                 <div 
-                  className={`h-2 rounded-full ${getPasswordStrengthColor(checkPasswordStrength(newPassword))} transition-all duration-300`} 
-                  style={{ width: `${(checkPasswordStrength(newPassword) / 4) * 100}%` }}
+                  className={styles.strengthBar}
+                  style={{ 
+                    width: `${(checkPasswordStrength(newPassword) / 4) * 100}%`,
+                    backgroundColor: ['#6b7280', '#ef4444', '#eab308', '#3b82f6', '#22c55e'][checkPasswordStrength(newPassword)] || '#6b7280'
+                  }}
                 ></div>
-              </div>
-              <div className="flex justify-between text-xs text-gray-400 mt-1">
+            </div>
+            <div className={styles.strengthText}>
                 <span>Seguridad:</span>
-                <span className={`${checkPasswordStrength(newPassword) >= 3 ? 'text-green-400' : checkPasswordStrength(newPassword) >= 2 ? 'text-yellow-400' : 'text-red-400'}`}>
+                <span style={{ color: ['#6b7280', '#ef4444', '#eab308', '#3b82f6', '#22c55e'][checkPasswordStrength(newPassword)] }}>
                   {getPasswordStrengthText(checkPasswordStrength(newPassword))}
                 </span>
-              </div>
             </div>
           </div>
 
-          <div className="group">
-            <label className="block text-gray-300 mb-2 flex items-center">
-              <FaLock className="mr-2" /> Confirmar nueva contraseña
+          <div className={styles.formGroup}>
+            <label className={styles.label}>
+              <Lock size={16} /> Confirmar nueva contraseña
             </label>
-            <div className="relative">
+            <div className={styles.inputWrapper}>
               <input 
                 type={showConfirmNewPassword ? "text" : "password"} 
-                className={`w-full p-3 pl-10 pr-10 rounded-lg bg-gray-700 text-white border ${errors.confirmNewPassword ? 'border-red-500' : 'border-gray-600 focus:border-green-500'} focus:outline-none transition group-hover:shadow-lg group-hover:shadow-green-500/10`}
+                className={`${styles.input} ${errors.confirmNewPassword ? styles.inputError : ''}`}
                 value={confirmNewPassword} 
                 onChange={(e) => setConfirmNewPassword(e.target.value)} 
                 required 
+                placeholder="Repite la contraseña"
               />
-              <FaLock className="absolute left-3 top-3.5 text-gray-400 transition group-hover:text-green-400" />
+              <Lock className={styles.inputIcon} size={18} />
               <button 
                 type="button"
-                className="absolute right-3 top-3.5 text-gray-400 hover:text-green-400 transition"
+                className={styles.passwordToggle}
                 onClick={() => setShowConfirmNewPassword(!showConfirmNewPassword)}
               >
-                {showConfirmNewPassword ? <FaEyeSlash /> : <FaEye />}
+                {showConfirmNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </div>
 
           <button 
-            className={`w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 shadow-lg hover:shadow-green-500/30 flex items-center justify-center ${isLoading ? 'opacity-75 cursor-not-allowed' : 'hover:brightness-110 hover:scale-[1.01]'}`}
+            className={styles.submitButton}
             onClick={handlePasswordReset}
             disabled={isLoading}
           >
-            {isLoading ? (
-              <div className="flex items-center justify-center">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
-                Procesando...
-              </div>
-            ) : (
-              'Restablecer contraseña'
-            )}
+            {isLoading ? 'Procesando...' : 'Restablecer'}
           </button>
         </>
       ) : (
         <div className="text-center py-8">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-green-500 mx-auto mb-4"></div>
-          <p className="text-gray-300">Verificando tu código de recuperación...</p>
+          <p className="text-gray-300">Verificando tu código...</p>
         </div>
       )}
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white flex items-center justify-center p-4">
-      <div className="flex flex-col md:flex-row items-center justify-center w-full max-w-6xl gap-8">
-        {/* Panel de imagen (solo en desktop) */}
-        <div className="hidden md:flex flex-col items-center justify-center w-1/2">
-          <div className="relative w-full max-w-md aspect-square">
-            <Image 
-              src="/img/logo.png" 
-              alt="Cocodrilo programador" 
-              fill
-              className="rounded-lg object-contain animate-float"
-              priority
-            />
-          </div>
-          <h1 className="mt-6 text-4xl font-bold text-center text-green-400">
-            {view === 'auth' 
-              ? (isLogin ? 'Bienvenido de vuelta' : 'Únete a nuestra comunidad')
-              : (view === 'recovery' || view === 'verify-code' 
-                ? 'Recupera tu cuenta' 
-                : 'Restablece tu contraseña')}
-          </h1>
-          <p className="mt-4 text-gray-300 text-center text-lg max-w-md">
-            {view === 'auth' 
-              ? (isLogin 
-                ? 'Continúa tu viaje de programación competitiva' 
-                : 'Empieza tu viaje en la programación competitiva')
-              : (view === 'recovery'
-                ? 'Te ayudaremos a recuperar el acceso a tu cuenta'
-                : view === 'verify-code'
-                  ? 'Verifica tu identidad para continuar'
-                  : 'Crea una nueva contraseña segura')}
-          </p>
-        </div>
-
-        {/* Contenedor del formulario */}
-        <div className="bg-gray-800/90 backdrop-blur-sm p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700 transition-all duration-300 hover:shadow-green-500/20 hover:border-green-500/30">
-          {view === 'auth' ? renderAuthView() : 
-           view === 'recovery' ? renderRecoveryView() :
-           view === 'verify-code' ? renderVerifyCodeView() : 
-           renderResetView()}
-        </div>
-      </div>
+    <div className={styles.pageWrapper}>
+      <motion.div 
+        className={`${styles.authCard} ${!isLogin && view === 'auth' ? styles.wide : ''}`}
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.5 }}
+      >
+        <AnimatePresence mode="wait">
+            <motion.div
+                key={view}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+            >
+                {view === 'auth' ? renderAuthView() : 
+                view === 'recovery' ? renderRecoveryView() :
+                view === 'verify-code' ? renderVerifyCodeView() : 
+                renderResetView()}
+            </motion.div>
+        </AnimatePresence>
+      </motion.div>
     </div>
   );
 }

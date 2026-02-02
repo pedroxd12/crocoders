@@ -13,6 +13,24 @@ body {
   color: var(--foreground);
 }
 
+.dot-pattern {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  --dot-color: rgba(255, 255, 255, 0.15);
+  --spacing: 24px;
+  --dot-size: 1.5px;
+
+  background-image: radial-gradient(var(--dot-color) var(--dot-size), transparent var(--dot-size));
+  background-size: var(--spacing) var(--spacing);
+  background-position: top left;
+  background-repeat: repeat;
+
+  mask-image: radial-gradient(circle at center, #000 0%, transparent 85%);
+  mask-size: 100% 100%;
+  pointer-events: none;
+}
+
 html, body {
   /* scroll-behavior: smooth; Disabled to prevent conflict with Lenis */
   overflow-x: hidden;

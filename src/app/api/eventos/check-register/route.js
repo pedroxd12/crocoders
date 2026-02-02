@@ -21,7 +21,7 @@ export async function GET(request) {
     // Se asume que si llega un userId, es un id_miembro porque el frontend
     // solo llama a esta ruta con userId cuando el usuario está autenticado.
     const [registro] = await sql`
-      SELECT 1 FROM asistencia_miembro 
+      SELECT 1 FROM inscripcion_evento 
       WHERE id_evento = ${eventoId} AND id_miembro = ${userId}
       LIMIT 1
     `;

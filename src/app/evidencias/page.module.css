@@ -1,0 +1,431 @@
+.pageWrapper {
+  width: 100%;
+  min-height: 100vh;
+  font-family: inherit;
+  overflow-x: hidden;
+  background-color: #1a1a1a;
+  color: #e0e0e0;
+  position: relative;
+  padding-bottom: 4rem;
+}
+
+.pageWrapper::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  --circle-color: rgba(255, 255, 255, 0.03);
+  background-image: radial-gradient(var(--circle-color) 1px, transparent 1px);
+  background-size: 20px 20px;
+  pointer-events: none;
+}
+
+.container {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 8rem 1.5rem 0rem;
+}
+
+.header {
+  margin-bottom: 5rem;
+  /* text-align: center; */
+}
+
+.title {
+  font-size: clamp(3rem, 6vw, 5rem);
+  font-weight: 800;
+  line-height: 1.1;
+  margin: 0;
+  letter-spacing: -0.03em;
+  color: #fff;
+  background: linear-gradient(to right, #fff, #9ca3af);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.description {
+  font-size: clamp(1.1rem, 2vw, 1.25rem);
+  color: #9ca3af;
+  margin-top: 1.5rem;
+  max-width: 600px;
+  line-height: 1.6;
+}
+
+/* Timeline Layout */
+.timelineContainer {
+  position: relative;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.timelineLine {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.1) 10%, rgba(255, 255, 255, 0.05) 90%, transparent);
+  transform: translateX(-50%);
+}
+
+.timelineItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6rem;
+  position: relative;
+  width: 100%;
+}
+
+.timelineItem:nth-child(even) {
+  flex-direction: row-reverse;
+}
+
+.timelineContent {
+  width: 45%;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  padding: 2rem;
+  border-radius: 16px;
+  transition: all 0.3s ease;
+  position: relative;
+  cursor: pointer;
+}
+
+.timelineContent:hover {
+  transform: translateY(-5px);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+}
+
+.timelineDate {
+  width: 45%;
+  text-align: right;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 1.5rem;
+  color: #e0e0e0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+}
+
+.timelineItem:nth-child(even) .timelineDate {
+  text-align: left;
+  justify-content: flex-start;
+  flex-direction: row-reverse; /* To keep date next to line */
+}
+
+.dateBadge {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.5rem 1rem;
+  border-radius: 50px;
+  font-size: 0.9rem;
+  color: #9ca3af;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.timelineDot {
+  position: absolute;
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  background: #1a1a1a;
+  border: 2px solid #525252;
+  border-radius: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  transition: all 0.3s ease;
+}
+
+.timelineContent:hover ~ .timelineDot, 
+.timelineContent:hover + .timelineDot { /* Select dot when content is hovered */
+  background: #fff;
+  border-color: #fff;
+  box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+  transform: translateX(-50%) scale(1.2);
+}
+
+/* Event Card Styles inside Timeline */
+.eventTitle {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 0.75rem;
+  color: #fff;
+}
+
+.eventMeta {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  color: #9ca3af;
+  flex-wrap: wrap;
+}
+
+.metaItem {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.eventPreview {
+  width: 100%;
+  height: 180px;
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.previewImage {
+  object-fit: cover;
+  transition: transform 0.5s ease;
+}
+
+.timelineContent:hover .previewImage {
+  transform: scale(1.05);
+}
+
+.evidenceCount {
+  position: absolute;
+  bottom: 0.75rem;
+  right: 0.75rem;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  padding: 0.3rem 0.8rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.viewButton {
+  background: transparent;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.viewButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Gallery Modal */
+.galleryOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.9);
+  backdrop-filter: blur(10px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 2rem;
+}
+
+.galleryContainer {
+  width: 100%;
+  max-width: 1200px;
+  height: 90vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.closeButton {
+  position: absolute;
+  top: -1rem;
+  right: 0;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: #fff;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 60;
+  transition: background 0.2s;
+}
+
+.closeButton:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.galleryHeader {
+  margin-bottom: 2rem;
+}
+
+.galleryTitle {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.5rem;
+}
+
+.galleryDate {
+  color: #9ca3af;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.galleryGrid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 1.5rem;
+  overflow-y: auto;
+  padding-right: 1rem;
+}
+
+/* Scrollbar styles for gallery */
+.galleryGrid::-webkit-scrollbar {
+  width: 8px;
+}
+.galleryGrid::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+.galleryGrid::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+.galleryGrid::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+
+.galleryItem {
+  position: relative;
+  aspect-ratio: 16/9;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: zoom-in;
+  transition: transform 0.3s ease;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.galleryItem:hover {
+  transform: scale(1.02);
+  z-index: 2;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.galleryImage {
+  object-fit: cover;
+  transition: all 0.5s ease;
+}
+
+/* Lightbox/Expanded Image */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.95);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.lightboxImage {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+}
+
+/* Loader */
+.loaderContainer {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 60vh;
+  gap: 1.5rem;
+  color: #9ca3af;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .timelineLine {
+    left: 20px;
+  }
+  
+  .timelineItem {
+    flex-direction: column;
+    align-items: flex-start;
+    padding-left: 50px;
+    margin-bottom: 4rem;
+  }
+
+  .timelineItem:nth-child(even) {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .timelineDate {
+    width: 100%;
+    text-align: left;
+    justify-content: flex-start;
+    margin-bottom: 1rem;
+    order: -1;
+  }
+  
+  .timelineItem:nth-child(even) .timelineDate {
+    flex-direction: row;
+    justify-content: flex-start;
+  }
+
+  .timelineContent {
+    width: 100%;
+  }
+
+  .timelineDot {
+    left: 20px;
+    top: 5px; 
+    transform: translateX(-50%);
+  }
+  
+  .timelineContent:hover ~ .timelineDot, 
+  .timelineContent:hover + .timelineDot {
+    transform: translateX(-50%) scale(1.2);
+  }
+
+  .galleryGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .title {
+    font-size: 2.5rem;
+  }
+  .galleryGrid {
+    grid-template-columns: 1fr;
+  }
+}

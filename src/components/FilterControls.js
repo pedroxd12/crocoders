@@ -1,6 +1,7 @@
 'use client';
 import { useState } from 'react';
-import { ChevronDown, Filter, X } from 'lucide-react';
+import { ChevronDown, Filter, X, Sparkles } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const tiposEvento = [
   { value: 'todos', label: 'Todos los tipos' },
@@ -55,100 +56,202 @@ export default function FilterControls({ filters, onFilterChange }) {
   const activeFilters = getActiveFilters();
   
   return (
-    <div className="bg-gray-800 rounded-lg shadow-md overflow-hidden transition-all duration-300">
-      {/* Cabecera del filtro con toggle */}
-      <div 
-        className="flex items-center justify-between p-3 cursor-pointer"
-        onClick={() => setIsExpanded(!isExpanded)}
-      >
-        <div className="flex items-center space-x-2 text-white">
-          <Filter size={18} className="text-green-400" />
-          <h2 className="text-sm font-semibold">Filtros</h2>
-          {activeFilters.length > 0 && (
-            <span className="bg-green-500 text-xs rounded-full h-5 w-5 flex items-center justify-center">
-              {activeFilters.length}
-            </span>
-          )}
-        </div>
-        <ChevronDown 
-          size={18} 
-          className={`text-green-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} 
-        />
-      </div>
+    <motion.div 
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="relative w-full bg-gradient-to-br from-gray-900/80 via-gray-900/90 to-black/90 
+                 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-sm border border-gray-800/50"
+    >
+      {/* Glow effect */}
+      <div className="absolute -inset-0.5 bg-gradient-to-r from-green-500/20 to-emerald-500/20 
+                    rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
       
-      {/* Chips de filtros activos */}
-      {activeFilters.length > 0 && (
-        <div className="px-3 pb-2 flex flex-wrap gap-2">
-          {activeFilters.map((filter, index) => (
-            <div 
-              key={index} 
-              className="flex items-center bg-gray-700 text-xs text-white rounded-full px-3 py-1"
+      {/* Content wrapper */}
+      <div className="relative">
+        {/* Header */}
+        <motion.div 
+          className="flex items-center justify-between p-5 cursor-pointer group"
+          onClick={() => setIsExpanded(!isExpanded)}
+          whileHover={{ backgroundColor: 'rgba(31, 41, 55, 0.5)' }}
+          transition={{ duration: 0.2 }}
+        >
+          <div className="flex items-center gap-3">
+            <motion.div
+              className="flex items-center justify-center w-10 h-10 rounded-xl 
+                       bg-gradient-to-br from-green-500/20 to-emerald-500/20 
+                       border border-green-500/30"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
             >
-              <span>{filter.label}</span>
-              <X 
-                size={14} 
-                className="ml-1 cursor-pointer hover:text-red-400" 
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeFilter(filter.type);
-                }}
-              />
-            </div>
-          ))}
-        </div>
-      )}
-      
-      {/* Controles de filtro */}
-      {isExpanded && (
-        <div className="p-3 border-t border-gray-700">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1">Tipo de Evento</label>
-              <select
-                value={filters.tipo}
-                onChange={(e) => onFilterChange('tipo', e.target.value)}
-                className="w-full p-2 text-sm rounded-md bg-gray-700 text-white border border-gray-600 focus:border-green-400 focus:ring focus:ring-green-400 focus:ring-opacity-20 focus:outline-none"
-              >
-                {tiposEvento.map(tipo => (
-                  <option key={tipo.value} value={tipo.value}>
-                    {tipo.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+              <Filter size={20} className="text-green-400" />
+            </motion.div>
             
             <div>
-              <label className="block text-xs font-medium text-gray-400 mb-1">Estado</label>
-              <select
-                value={filters.estado}
-                onChange={(e) => onFilterChange('estado', e.target.value)}
-                className="w-full p-2 text-sm rounded-md bg-gray-700 text-white border border-gray-600 focus:border-green-400 focus:ring focus:ring-green-400 focus:ring-opacity-20 focus:outline-none"
-              >
-                {estadosEvento.map(estado => (
-                  <option key={estado.value} value={estado.value}>
-                    {estado.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            
-            <div className="sm:col-span-2 lg:col-span-1">
-              <label className="block text-xs font-medium text-gray-400 mb-1">Comunidades</label>
-              <select
-                value={filters.hermandad}
-                onChange={(e) => onFilterChange('hermandad', e.target.value)}
-                className="w-full p-2 text-sm rounded-md bg-gray-700 text-white border border-gray-600 focus:border-green-400 focus:ring focus:ring-green-400 focus:ring-opacity-20 focus:outline-none"
-              >
-                {hermandades.map(hermandad => (
-                  <option key={hermandad.value} value={hermandad.value}>
-                    {hermandad.label}
-                  </option>
-                ))}
-              </select>
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                Filtros de Búsqueda
+                {activeFilters.length > 0 && (
+                  <motion.span 
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="bg-gradient-to-r from-green-500 to-emerald-500 
+                             text-white text-xs font-bold rounded-full h-6 w-6 
+                             flex items-center justify-center shadow-lg"
+                  >
+                    {activeFilters.length}
+                  </motion.span>
+                )}
+              </h2>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {activeFilters.length === 0 ? 'Personaliza tu búsqueda' : `${activeFilters.length} filtro${activeFilters.length > 1 ? 's' : ''} activo${activeFilters.length > 1 ? 's' : ''}`}
+              </p>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+          
+          <motion.div
+            animate={{ rotate: isExpanded ? 180 : 0 }}
+            transition={{ duration: 0.3, ease: 'easeInOut' }}
+          >
+            <ChevronDown size={24} className="text-green-400" />
+          </motion.div>
+        </motion.div>
+        
+        {/* Active filters chips */}
+        <AnimatePresence>
+          {activeFilters.length > 0 && (
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="px-5 pb-3 flex flex-wrap gap-2"
+            >
+              {activeFilters.map((filter, index) => (
+                <motion.div 
+                  key={index}
+                  initial={{ scale: 0, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0, opacity: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className="flex items-center gap-2 bg-gradient-to-r from-green-500/20 to-emerald-500/20 
+                           border border-green-500/30 text-sm text-white rounded-full px-4 py-2
+                           backdrop-blur-sm shadow-lg hover:from-green-500/30 hover:to-emerald-500/30 
+                           transition-all duration-200"
+                >
+                  <Sparkles size={14} className="text-green-400" />
+                  <span className="font-medium">{filter.label}</span>
+                  <motion.button
+                    whileHover={{ scale: 1.2, rotate: 90 }}
+                    whileTap={{ scale: 0.9 }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeFilter(filter.type);
+                    }}
+                    className="ml-1 hover:text-red-400 transition-colors"
+                  >
+                    <X size={16} />
+                  </motion.button>
+                </motion.div>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
+        
+        {/* Filter controls */}
+        <AnimatePresence>
+          {isExpanded && (
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.3 }}
+              className="border-t border-gray-800/50 bg-gradient-to-b from-gray-900/50 to-transparent"
+            >
+              <div className="p-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Tipo de Evento */}
+                  <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.1 }}
+                  >
+                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                      Tipo de Evento
+                    </label>
+                    <select
+                      value={filters.tipo}
+                      onChange={(e) => onFilterChange('tipo', e.target.value)}
+                      className="w-full p-3 text-sm rounded-xl bg-gray-800/80 text-white 
+                               border border-gray-700/50 focus:border-green-500/50 
+                               focus:ring-2 focus:ring-green-500/20 focus:outline-none
+                               transition-all duration-200 cursor-pointer backdrop-blur-sm
+                               hover:border-green-500/30"
+                    >
+                      {tiposEvento.map(tipo => (
+                        <option key={tipo.value} value={tipo.value}>
+                          {tipo.label}
+                        </option>
+                      ))}
+                    </select>
+                  </motion.div>
+                  
+                  {/* Estado */}
+                  <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.15 }}
+                  >
+                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                      Estado
+                    </label>
+                    <select
+                      value={filters.estado}
+                      onChange={(e) => onFilterChange('estado', e.target.value)}
+                      className="w-full p-3 text-sm rounded-xl bg-gray-800/80 text-white 
+                               border border-gray-700/50 focus:border-green-500/50 
+                               focus:ring-2 focus:ring-green-500/20 focus:outline-none
+                               transition-all duration-200 cursor-pointer backdrop-blur-sm
+                               hover:border-green-500/30"
+                    >
+                      {estadosEvento.map(estado => (
+                        <option key={estado.value} value={estado.value}>
+                          {estado.label}
+                        </option>
+                      ))}
+                    </select>
+                  </motion.div>
+                  
+                  {/* Comunidades */}
+                  <motion.div
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="sm:col-span-2 lg:col-span-1"
+                  >
+                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                      Comunidades
+                    </label>
+                    <select
+                      value={filters.hermandad}
+                      onChange={(e) => onFilterChange('hermandad', e.target.value)}
+                      className="w-full p-3 text-sm rounded-xl bg-gray-800/80 text-white 
+                               border border-gray-700/50 focus:border-green-500/50 
+                               focus:ring-2 focus:ring-green-500/20 focus:outline-none
+                               transition-all duration-200 cursor-pointer backdrop-blur-sm
+                               hover:border-green-500/30"
+                    >
+                      {hermandades.map(hermandad => (
+                        <option key={hermandad.value} value={hermandad.value}>
+                          {hermandad.label}
+                        </option>
+                      ))}
+                    </select>
+                  </motion.div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.div>
   );
 }

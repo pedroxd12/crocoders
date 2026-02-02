@@ -68,7 +68,7 @@
     display: grid;
     grid-template-columns: auto 1fr;
     column-gap: 48px;
-    padding-block: 30vh; /* More space between sections */
+    padding-block: 10vh; /* Reduced from 30vh for less separation */
 }
 
 @media (max-width: 768px) {

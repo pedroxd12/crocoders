@@ -1,0 +1,126 @@
+.wrapper {
+    width: 100%;
+    /* display: flex; REMOVED Flex centering to allow it to sit in flow */
+    /* justify-content: center; */
+    /* align-items: center; */
+    /* background-color: #0c1016; REMOVED background since it's on the main page */
+    font-size: 20px;
+    margin: 0;
+    padding: 0;
+    color: #ffffff;
+    
+    display: flex;
+    justify-content: center;
+    padding: 4rem 0; /* Add some vertical padding */
+}
+
+.wrapper * {
+    box-sizing: border-box;
+}
+
+.container {
+    display: flex;
+    flex-direction: row;
+    width: 80%;
+    max-width: 30rem; /* Increased slightly for better visibility */
+    gap: 0.5rem;
+}
+
+.column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.item {
+    position: relative;
+    width: 100%;
+    border-radius: 0.5rem;
+    background-position: center center;
+    /* background-attachment: fixed; Removed because it breaks inside transformed elements (framer-motion) */
+    background-repeat: no-repeat;
+    background-size: cover;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+}
+
+/* Column 1 */
+.column1 .item1 {
+    height: 8rem;
+    animation: background 5s 150ms infinite ease-in-out;
+}
+
+.column1 .item2 {
+    height: 12rem;
+    animation: background 5s 274ms infinite ease-in-out;
+}
+
+.column1 .item3 {
+    height: 6rem;
+    animation: background 5s 350ms infinite ease-in-out;
+}
+
+/* Column 2 */
+.column2 .item1 {
+    height: 8rem;
+    animation: background 5s 150ms infinite ease-in-out;
+}
+
+.column2 .item2 {
+    height: 18rem;
+    animation: background 5s 274ms infinite ease-in-out;
+}
+
+.column2 .item3 {
+    height: 6rem;
+    animation: background 5s 350ms infinite ease-in-out;
+}
+
+/* Column 3 */
+.column3 .item1 {
+    height: 12rem;
+    animation: background 5s 280ms infinite ease-in-out;
+}
+
+.column3 .item2 {
+    height: 10rem;
+    animation: background 5s 95ms infinite ease-in-out;
+}
+
+.column3 .item3 {
+    height: 6rem;
+    animation: background 5s 350ms infinite ease-in-out;
+}
+
+@keyframes background {
+    0% {
+        background-image: var(--image-1);
+    }
+
+    30% {
+        background-image: var(--image-1);
+    }
+
+    33% {
+        background-image: var(--image-2);
+    }
+
+    63% {
+        background-image: var(--image-2);
+    }
+
+    66% {
+        background-image: var(--image-3);
+    }
+
+    96% {
+        background-image: var(--image-3);
+    }
+
+    100% {
+        background-image: var(--image-1);
+    }
+}

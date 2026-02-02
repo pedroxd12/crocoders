@@ -3,6 +3,7 @@ import Footer from '@/components/Footer';
 import Image from 'next/image';
 import BongoCatKeyboard from '@/components/BongoCatKeyboard';
 import AnimatedSection from '@/components/AnimatedSection';
+import ImageGrid from '@/components/ImageGrid';
 
 export const metadata = {
   title: 'Crocoders - Club de Algoritmia',

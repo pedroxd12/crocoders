@@ -1,0 +1,261 @@
+.pageWrapper {
+  width: 100%;
+  min-height: 100vh;
+  font-family: inherit;
+  overflow-x: hidden;
+  background-color: #1a1a1a;
+  color: #e0e0e0;
+  position: relative;
+}
+
+.pageWrapper::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  --dot-color: rgba(255, 255, 255, 0.15);
+  --spacing: 24px;
+  --dot-size: 1.5px;
+
+  background-image: radial-gradient(var(--dot-color) var(--dot-size), transparent var(--dot-size));
+  background-size: var(--spacing) var(--spacing);
+  background-position: top left;
+  background-repeat: repeat;
+
+  mask-image: radial-gradient(circle at top left, #000 0%, transparent 75%);
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  pointer-events: none;
+}
+
+.container {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 8rem 1.5rem 4rem;
+}
+
+.title {
+  font-size: clamp(3.5rem, 8vw, 6rem);
+  font-weight: 800;
+  line-height: 1.1;
+  margin: 0;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+
+.description {
+  font-size: clamp(1.1rem, 3vw, 1.5rem);
+  color: #9ca3af;
+  margin-top: 1.5rem;
+  max-width: 600px;
+  line-height: 1.6;
+}
+
+/* Leaderboard Styles */
+.leaderboardSection {
+  margin-top: 4rem;
+  margin-bottom: 4rem;
+}
+
+.leaderboardTitle {
+  font-size: 1.5rem;
+  margin-bottom: 2rem;
+  font-weight: 600;
+  color: #e0e0e0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.leaderboardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+}
+
+.leaderboardCard {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+  padding: 2rem;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.3s ease, background 0.3s ease;
+}
+
+.leaderboardCard:hover {
+  transform: translateY(-5px);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.rankBadge {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.25rem;
+  margin: 0 auto 1rem;
+  color: #1a1a1a;
+}
+
+.rank1 { background-color: #fbbf24; box-shadow: 0 0 20px rgba(251, 191, 36, 0.3); }
+.rank2 { background-color: #9ca3af; box-shadow: 0 0 20px rgba(156, 163, 175, 0.3); }
+.rank3 { background-color: #d97706; box-shadow: 0 0 20px rgba(217, 119, 6, 0.3); }
+
+.memberName {
+  font-size: 1.25rem;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 0.5rem;
+  color: #fff;
+}
+
+.totalSolved {
+  text-align: center;
+  font-size: 0.9rem;
+  color: #9ca3af;
+  margin-bottom: 1.5rem;
+}
+
+.platformStats {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.statItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 0.8rem;
+  color: #9ca3af;
+}
+
+.statValue {
+  font-weight: 600;
+  color: #e0e0e0;
+  font-size: 1rem;
+}
+
+/* Tabs */
+.tabsContainer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.tabButton {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.75rem 1.5rem;
+  border-radius: 50px;
+  color: #9ca3af;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.tabButton:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.activeTab {
+  background: #fff;
+  color: #000;
+  border-color: #fff;
+}
+
+.activeTab:hover {
+  background: #f0f0f0;
+  color: #000;
+}
+
+/* Table */
+.tableContainer {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+
+.table th {
+  text-align: left;
+  padding: 1.25rem 1.5rem;
+  font-weight: 600;
+  color: #9ca3af;
+  font-size: 0.9rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.table td {
+  padding: 1.25rem 1.5rem;
+  color: #e0e0e0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  transition: background 0.2s ease;
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.table tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.rankCell {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #9ca3af;
+}
+
+/* Loading & Empty States */
+.loaderContainer {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+  color: #9ca3af;
+  gap: 1rem;
+}
+
+.emptyState {
+  text-align: center;
+  padding: 4rem 1rem;
+  color: #6b7280;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 16px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 640px) {
+  .container {
+    padding-top: 6rem;
+  }
+  
+  .leaderboardGrid {
+    grid-template-columns: 1fr;
+  }
+}

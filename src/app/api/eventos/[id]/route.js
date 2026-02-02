@@ -15,16 +15,15 @@ export async function GET(request, context) {
     const [evento] = await sql`
       SELECT 
         e.*,
-        COUNT(DISTINCT am.id_miembro) + COUNT(DISTINCT ai.id_invitado) as asistentes_count,
-        CASE 
-          WHEN e.cupos IS NULL THEN NULL 
-          ELSE e.cupos - (COUNT(DISTINCT am.id_miembro) + COUNT(DISTINCT ai.id_invitado))
-        END as cupos_disponibles
+        t.nombre as tipo_nombre,
+        (
+          SELECT COUNT(*) 
+          FROM inscripcion_evento 
+          WHERE id_evento = e.id_evento
+        ) as asistentes_count
       FROM evento e
-      LEFT JOIN asistencia_miembro am ON e.id_evento = am.id_evento
-      LEFT JOIN asistencia_invitado ai ON e.id_evento = ai.id_evento
+      LEFT JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
       WHERE e.id_evento = ${id}
-      GROUP BY e.id_evento
     `;
 
     if (!evento) {
@@ -36,14 +35,22 @@ export async function GET(request, context) {
 
     const eventoFormateado = {
       ...evento,
-      fecha: evento.fecha instanceof Date ? evento.fecha.toISOString().split('T')[0] : evento.fecha,
+      // Mapeo para retrocompatibilidad con frontend que espera 'fecha'
+      fecha: evento.fecha_inicio instanceof Date ? evento.fecha_inicio.toISOString().split('T')[0] : evento.fecha_inicio,
+      fecha_fin: evento.fecha_fin instanceof Date ? evento.fecha_fin.toISOString().split('T')[0] : evento.fecha_fin,
       hora_inicio: evento.hora_inicio?.toString?.() ?? null,
       hora_fin: evento.hora_fin?.toString?.() ?? null,
-      tipo: evento.tipo || 'club',
+      tipo: evento.tipo_nombre || 'Evento',
       costo: evento.costo !== null ? Number(evento.costo) : null,
+      // Mapeo de descripción
+      descripcion: evento.descripcion_html,
+      // Alias si el frontend lo usa
+      nombre_evento: evento.nombre, 
       cupos: evento.cupos !== null ? Number(evento.cupos) : null,
+      // Usar columna directa de cupos_disponibles
       cupos_disponibles: evento.cupos_disponibles !== null ? Number(evento.cupos_disponibles) : null,
-      asistentes_count: Number(evento.asistentes_count) || 0
+      asistentes_count: Number(evento.asistentes_count) || 0,
+      imagen_url: evento.imagen_flyer_url // Alias si el front usa imagen_url
     };
 
     return NextResponse.json(eventoFormateado);

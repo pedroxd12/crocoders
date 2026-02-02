@@ -9,7 +9,6 @@ import Lenis from 'lenis';
 import styles from './page.module.css';
 import BongoCatKeyboard from '@/components/BongoCatKeyboard';
 import AnimatedSection from '@/components/AnimatedSection';
-import Footer from '@/components/Footer';
 
 // Register ScrollTrigger
 if (typeof window !== 'undefined') {
@@ -122,6 +121,7 @@ export default function AnimationPage() {
     <div className={styles.pageWrapper} ref={containerRef}>
       <div className={styles.container}>
         <section className={styles.hero}>
+          <h1 className={styles.heroText}>Computer Society</h1>
           <div className={styles.logosWrapper}>
             <div className={styles.logoContainer}>
               <Image 
@@ -251,13 +251,12 @@ export default function AnimationPage() {
                 <h1 className={`${styles.noOffset} text-2xl md:text-6xl font-bold leading-tight break-words`}>inicia ahora.</h1>
                 <p className={`${styles.heroDescription} text-sm md:text-xl mt-4 break-words`}>Unéte a nuestra comunidad y crece con nosotros.</p>
               </div>
-              <div className="flex-1 w-full h-[300px] md:h-[500px] max-w-lg">
+              <div className="flex-1 w-full h-[400px] md:h-[500px] max-w-lg">
                 <BongoCatKeyboard />
               </div>
             </div>
           </AnimatedSection>
         </section>
-        <Footer />
       </div>
     </div>
   );

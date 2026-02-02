@@ -213,7 +213,7 @@ export default function DashboardPage() {
   const handleLogout = async () => {
     try {
       await logout();
-      router.push('/login');
+      router.push('/iniciar');
     } catch (error) {
       console.error('Logout error:', error);
       setError('Error al cerrar sesión');
@@ -235,32 +235,34 @@ export default function DashboardPage() {
 
   return (
     <ProtectedRoute> 
-      <div className="min-h-screen bg-gray-900 text-white">
-        <header className="bg-gray-800 shadow-lg p-4 sticky top-0 z-10">
-          <div className="container mx-auto flex justify-between items-center">
-            <h1 className="text-2xl font-bold text-green-400">Club de Programación Competitiva</h1>
-            <div className="flex items-center space-x-4">
-              <span className="hidden md:inline">Bienvenido, {user.name || user.nombre_completo}</span>
-              <button 
-                onClick={handleLogout}
-                className="flex items-center bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition duration-300 transform hover:scale-105"
-              >
-                <FaSignOutAlt className="mr-2" /> Salir
-              </button>
-            </div>
-          </div>
-        </header>
+      <div className="min-h-screen relative overflow-hidden bg-[#1a1a1a] text-gray-100">
+        {/* Background Pattern */}
+        <div className="dot-pattern fixed inset-0 z-0 pointer-events-none" />
 
-        <main className="container mx-auto p-4 md:p-6">
+        <main className="relative z-10 container mx-auto px-4 pt-28 pb-12 max-w-7xl">
+           
+           <div className="flex flex-col md:flex-row justify-between items-end mb-10 pb-6 border-b border-white/10">
+              <div>
+                 <h1 className="text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-green-400 to-emerald-600 mb-2">
+                    Mi Escritorio
+                 </h1>
+                 <p className="text-gray-400 text-lg">Bienvenido de nuevo, <span className="text-white font-medium">{user.name || user.nombre_completo}</span></p>
+              </div>
+              
+              <div className="hidden md:block text-right">
+                  <p className="text-sm text-gray-500 font-medium tracking-wide uppercase">{new Date().toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+              </div>
+           </div>
+
           {error && (
-            <div className="mb-4 p-3 bg-red-500/10 border border-red-500 rounded-lg text-red-300 text-sm flex items-center justify-between animate-fade-in">
+            <div className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-xl text-red-300 text-sm flex items-center justify-between backdrop-blur-sm">
               <div className="flex items-center">
                 <FaTimes className="mr-2" />
                 {error}
               </div>
               <button 
                 onClick={handleRetryLoadData}
-                className="text-xs bg-red-600 hover:bg-red-700 px-2 py-1 rounded transition"
+                className="text-xs bg-red-600/80 hover:bg-red-600 px-3 py-1.5 rounded transition"
               >
                 Reintentar
               </button>
@@ -268,126 +270,173 @@ export default function DashboardPage() {
           )}
 
           {successMessage && (
-            <div className="mb-4 p-3 bg-green-500/10 border border-green-500 rounded-lg text-green-300 text-sm flex items-center animate-fade-in">
+            <div className="mb-6 p-4 bg-green-500/10 border border-green-500/50 rounded-xl text-green-300 text-sm flex items-center backdrop-blur-sm">
               <FaCheck className="mr-2" />
               {successMessage}
             </div>
           )}
 
-          <div className="flex flex-col md:flex-row gap-6">
-            <aside className="w-full md:w-64 bg-gray-800 rounded-lg p-4 shadow-lg">
-              <div className="flex flex-col items-center mb-6">
-                <div className="w-24 h-24 rounded-full bg-gradient-to-br from-green-500 to-green-700 flex items-center justify-center mb-3 shadow-md">
-                  <FaUser className="text-4xl text-white" />
-                </div>
-                <h2 className="text-xl font-semibold text-center">{user.name || user.nombre_completo}</h2>
-                <p className="text-gray-400 text-sm">{user.role === 'administrador' ? 'Administrador' : 'Miembro'}</p>
-                {user.semestre && (
-                  <p className="text-gray-300 text-sm mt-1 flex items-center">
-                    <FaGraduationCap className="mr-1" /> {user.semestre}° Semestre
-                  </p>
-                )}
-              </div>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            {/* Sidebar / Profile Card */}
+            <aside className="lg:col-span-4 xl:col-span-3 space-y-6">
+               <div className="bg-gray-900/60 backdrop-blur-xl border border-white/10 p-8 rounded-2xl shadow-xl flex flex-col items-center">
+                    <div className="relative mb-6 group">
+                        <div className="w-32 h-32 rounded-full p-1 bg-gradient-to-tr from-green-400 to-emerald-600 shadow-xl">
+                             <div className="w-full h-full rounded-full bg-gray-900 flex items-center justify-center text-4xl font-bold text-gray-300">
+                                {user.name ? user.name[0].toUpperCase() : <FaUser />}
+                             </div>
+                        </div>
+                        <div className="absolute bottom-1 right-2 w-5 h-5 bg-green-500 border-4 border-gray-900 rounded-full"></div>
+                    </div>
+                    
+                    <h2 className="text-xl font-bold text-white text-center">{user.name || user.nombre_completo}</h2>
+                    <span className="inline-block mt-2 px-3 py-1 rounded-full text-xs font-semibold bg-green-500/20 text-green-400 border border-green-500/30">
+                        {user.role === 'administrador' ? 'Administrador' : 'Miembro Oficial'}
+                    </span>
+                    
+                    <div className="w-full mt-6 space-y-3 pt-6 border-t border-white/10">
+                         {user.semestre && (
+                            <div className="flex items-center justify-between text-sm text-gray-400">
+                                <span className="flex items-center gap-2"><FaGraduationCap /> Semestre</span>
+                                <span className="text-white font-medium">{user.semestre}°</span>
+                            </div>
+                         )}
+                         {user.numero_telefono && (
+                            <div className="flex items-center justify-between text-sm text-gray-400">
+                                <span className="flex items-center gap-2"><FaUser /> Teléfono</span>
+                                <span className="text-white font-medium">{user.numero_telefono}</span>
+                            </div>
+                         )}
+                    </div>
+               </div>
 
-              <nav className="space-y-2">
-                <button
-                  onClick={() => setActiveTab('events')}
-                  className={`w-full text-left px-4 py-2 rounded-lg flex items-center transition ${activeTab === 'events' ? 'bg-green-600 shadow-md' : 'hover:bg-gray-700'}`}
-                >
-                  <FaHistory className="mr-3" /> Mis Eventos
-                </button>
-                <button
-                  onClick={() => setActiveTab('profile')}
-                  className={`w-full text-left px-4 py-2 rounded-lg flex items-center transition ${activeTab === 'profile' ? 'bg-green-600 shadow-md' : 'hover:bg-gray-700'}`}
-                >
-                  <FaUser className="mr-3" /> Mi Perfil
-                </button>
-                <button
-                  onClick={() => setActiveTab('security')}
-                  className={`w-full text-left px-4 py-2 rounded-lg flex items-center transition ${activeTab === 'security' ? 'bg-green-600 shadow-md' : 'hover:bg-gray-700'}`}
-                >
-                  <FaLock className="mr-3" /> Seguridad
-                </button>
-              </nav>
+               <nav className="bg-gray-900/60 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-xl space-y-2">
+                  <button
+                    onClick={() => setActiveTab('events')}
+                    className={`w-full text-left px-4 py-3.5 rounded-xl flex items-center transition-all duration-200 ${
+                        activeTab === 'events' 
+                        ? 'bg-gradient-to-r from-green-600 to-emerald-700 text-white shadow-lg' 
+                        : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <FaHistory className="mr-3 text-lg" /> 
+                    <span className="font-medium">Mis Eventos</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('profile')}
+                    className={`w-full text-left px-4 py-3.5 rounded-xl flex items-center transition-all duration-200 ${
+                        activeTab === 'profile' 
+                        ? 'bg-gradient-to-r from-green-600 to-emerald-700 text-white shadow-lg' 
+                        : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <FaUser className="mr-3 text-lg" />
+                     <span className="font-medium">Editar Perfil</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('security')}
+                    className={`w-full text-left px-4 py-3.5 rounded-xl flex items-center transition-all duration-200 ${
+                        activeTab === 'security' 
+                        ? 'bg-gradient-to-r from-green-600 to-emerald-700 text-white shadow-lg' 
+                        : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                    }`}
+                  >
+                    <FaLock className="mr-3 text-lg" />
+                     <span className="font-medium">Seguridad</span>
+                  </button>
+                  
+                  <div className="pt-4 mt-2 border-t border-white/10">
+                      <button 
+                        onClick={handleLogout}
+                        className="w-full text-left px-4 py-3.5 rounded-xl flex items-center text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-all duration-200"
+                      >
+                        <FaSignOutAlt className="mr-3 text-lg" /> 
+                        <span className="font-medium">Cerrar Sesión</span>
+                      </button>
+                  </div>
+               </nav>
             </aside>
 
-            <div className="flex-1 bg-gray-800 rounded-lg p-6 shadow-lg">
-              {activeTab === 'events' && (
-                <div>
-                  <h2 className="text-2xl font-bold mb-6 text-green-400 flex items-center">
-                    <FaCalendarAlt className="mr-2" /> Mis Participaciones
-                  </h2>
+            {/* Main Content */}
+            <div className="lg:col-span-8 xl:col-span-9">
+              <div className="bg-gray-900/60 backdrop-blur-xl border border-white/10 rounded-2xl shadow-xl p-6 md:p-8 min-h-[500px]">
+                {activeTab === 'events' && (
+                <div className="space-y-6">
+                  <div className="flex items-center space-x-4 mb-6">
+                     <div className="p-3.5 rounded-xl bg-green-500/20 text-green-400">
+                        <FaCalendarAlt size={24} />
+                     </div>
+                     <h2 className="text-2xl font-bold text-white">Historial de Participación</h2>
+                  </div>
                   
                   {loading ? (
-                    <div className="flex justify-center py-8">
+                    <div className="flex justify-center py-12">
                       <LoadingSpinner />
                     </div>
                   ) : events.length > 0 ? (
-                    <div className="overflow-x-auto rounded-lg border border-gray-700">
-                      <table className="w-full text-left">
-                        <thead className="bg-gray-700">
-                          <tr>
-                            <th className="p-3 font-medium">Evento</th>
-                            <th className="p-3 font-medium">Fecha</th>
-                            <th className="p-3 font-medium">Participación</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {events.map((event) => (
-                            <tr 
-                              key={`event-${event.id_evento}`}
-                              className="border-b border-gray-700 hover:bg-gray-700/50 transition"
-                            >
-                              <td className="p-3">{event.nombre}</td>
-                              <td className="p-3">{new Date(event.fecha).toLocaleDateString()}</td>
-                              <td className="p-3">
-                                {event.participacion ? (
-                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-900 text-green-200">
-                                    Participó
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-900 text-red-200">
-                                    No participó
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                    <div className="grid gap-4">
+                        {events.map((event) => (
+                           <div key={`event-${event.id_evento}`} className="group bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-xl p-5 transition-all duration-300 flex flex-col md:flex-row justify-between md:items-center gap-4">
+                                <div>
+                                    <h3 className="text-lg font-bold text-white group-hover:text-green-400 transition-colors">{event.nombre}</h3>
+                                    <p className="text-sm text-gray-400 flex items-center mt-2">
+                                        <FaCalendarAlt className="mr-2 text-xs" />
+                                        {new Date(event.fecha).toLocaleDateString('es-MX', { dateStyle: 'long' })}
+                                    </p>
+                                </div>
+                                <div>
+                                    {event.participacion ? (
+                                        <span className="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-bold bg-green-500/20 text-green-400 border border-green-500/30 shadow-[0_0_10px_rgba(34,197,94,0.3)]">
+                                            <FaCheck className="mr-1.5" size={10} /> PARTICIPÓ
+                                        </span>
+                                    ) : (
+                                        <span className="inline-flex items-center px-4 py-1.5 rounded-full text-xs font-bold bg-gray-700/50 text-gray-400 border border-gray-600">
+                                            NO PARTICIPÓ
+                                        </span>
+                                    )}
+                                </div>
+                           </div>
+                        ))}
                     </div>
                   ) : (
-                    <div className="text-center py-8 text-gray-400">
-                      No hay registros de participación en eventos aún.
+                    <div className="flex flex-col items-center justify-center py-16 text-center text-gray-500">
+                      <div className="w-20 h-20 bg-gray-800/50 rounded-full flex items-center justify-center mb-6">
+                         <FaHistory size={32} />
+                      </div>
+                      <h3 className="text-lg font-medium text-gray-400">Sin historial de eventos</h3>
+                      <p className="text-sm mt-2 max-w-xs mx-auto">Aún no has participado en ningún evento. ¡Inscríbete en los próximos eventos!</p>
                     </div>
                   )}
                 </div>
               )}
 
               {activeTab === 'profile' && (
-                <div>
-                  <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-2xl font-bold text-green-400 flex items-center">
-                      <FaUser className="mr-2" /> Mi Perfil
-                    </h2>
+                <div className="space-y-6">
+                  <div className="flex justify-between items-center mb-8">
+                    <div className="flex items-center space-x-4">
+                        <div className="p-3.5 rounded-xl bg-blue-500/20 text-blue-400">
+                             <FaUser size={24} />
+                        </div>
+                        <h2 className="text-2xl font-bold text-white">Información Personal</h2>
+                    </div>
                     {!editMode && (
                       <button
                         onClick={() => setEditMode(true)}
-                        className="flex items-center bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg transition duration-300 transform hover:scale-105"
+                        className="flex items-center bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl transition shadow-lg shadow-blue-900/40 font-medium"
                       >
-                        <FaEdit className="mr-2" /> Editar Perfil
+                        <FaEdit className="mr-2" /> Editar
                       </button>
                     )}
                   </div>
 
                   {editMode ? (
-                    <form onSubmit={handleProfileUpdate} className="space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <form onSubmit={handleProfileUpdate} className="space-y-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="col-span-2">
-                          <label className="block text-gray-300 mb-2">Nombre Completo</label>
+                          <label className="block text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">Nombre Completo</label>
                           <input
                             type="text"
-                            className="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none transition"
+                            className="w-full p-4 rounded-xl bg-black/40 text-white border border-gray-700 focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-none transition"
                             value={formData.nombre_completo}
                             onChange={(e) => setFormData({...formData, nombre_completo: e.target.value})}
                             required
@@ -395,220 +444,209 @@ export default function DashboardPage() {
                         </div>
 
                         <div>
-                          <label className="block text-gray-300 mb-2">Teléfono</label>
+                          <label className="block text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">Teléfono</label>
                           <input
                             type="text"
-                            className="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none transition"
+                            className="w-full p-4 rounded-xl bg-black/40 text-white border border-gray-700 focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-none transition"
                             value={formData.numero_telefono}
                             onChange={(e) => setFormData({...formData, numero_telefono: e.target.value})}
                           />
                         </div>
 
                         <div>
-                          <label className="block text-gray-300 mb-2">Semestre</label>
+                          <label className="block text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">Carrera</label>
                           <select
-                            className="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none transition"
-                            value={formData.semestre}
-                            onChange={(e) => setFormData({...formData, semestre: e.target.value})}
-                          >
-                            <option value="">Seleccionar semestre</option>
-                            {Array.from({length: 14}, (_, i) => i + 1).map((sem) => (
-                              <option key={sem} value={sem}>{sem}° Semestre</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-gray-300 mb-2">Carrera</label>
-                          <select
-                            className="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none transition"
+                            className="w-full p-4 rounded-xl bg-black/40 text-white border border-gray-700 focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-none transition appearance-none"
                             value={formData.carrera}
                             onChange={(e) => setFormData({...formData, carrera: e.target.value})}
                           >
-                            <option value="">Seleccionar carrera</option>
+                            <option value="">Seleccione una carrera</option>
                             {carreras.map((carrera) => (
-                              <option key={carrera} value={carrera}>{carrera}</option>
+                              <option key={carrera} value={carrera} className="bg-gray-800">{carrera}</option>
                             ))}
                           </select>
                         </div>
 
                         <div>
-                          <label className="block text-gray-300 mb-2">Codeforces</label>
-                          <div className="relative">
-                            <input
-                              type="text"
-                              className="w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none transition"
-                              value={formData.usuario_codeforces}
-                              onChange={(e) => setFormData({...formData, usuario_codeforces: e.target.value})}
-                              placeholder="Usuario"
-                            />
-                            <FaCode className="absolute left-3 top-3.5 text-gray-400" />
-                          </div>
+                          <label className="block text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">Semestre</label>
+                          <select
+                            className="w-full p-4 rounded-xl bg-black/40 text-white border border-gray-700 focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-none transition appearance-none"
+                            value={formData.semestre}
+                            onChange={(e) => setFormData({...formData, semestre: e.target.value})}
+                          >
+                            <option value="">Seleccione un semestre</option>
+                            {Array.from({length: 14}, (_, i) => i + 1).map((sem) => (
+                              <option key={sem} value={sem} className="bg-gray-800">{sem}° Semestre</option>
+                            ))}
+                          </select>
                         </div>
 
-                        <div>
-                          <label className="block text-gray-300 mb-2">VJudge</label>
-                          <div className="relative">
-                            <input
-                              type="text"
-                              className="w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none transition"
-                              value={formData.usuario_vjudge}
-                              onChange={(e) => setFormData({...formData, usuario_vjudge: e.target.value})}
-                              placeholder="Usuario"
-                            />
-                            <FaCode className="absolute left-3 top-3.5 text-gray-400" />
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="block text-gray-300 mb-2">OmegaUp</label>
-                          <div className="relative">
-                            <input
-                              type="text"
-                              className="w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none transition"
-                              value={formData.usuario_omegaup}
-                              onChange={(e) => setFormData({...formData, usuario_omegaup: e.target.value})}
-                              placeholder="Usuario"
-                            />
-                            <FaCode className="absolute left-3 top-3.5 text-gray-400" />
-                          </div>
+                        <div className="col-span-2 mt-4">
+                             <h3 className="text-gray-300 font-bold mb-6 flex items-center border-b border-gray-700 pb-2"><FaCode className="mr-2 text-green-400"/> Cuentas de Plataformas</h3>
+                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div>
+                                    <label className="block text-gray-500 text-xs mb-2 uppercase tracking-wider font-bold">Codeforces</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Username"
+                                        className="w-full p-3 rounded-lg bg-black/40 text-white border border-gray-700 focus:border-green-500 transition text-sm"
+                                        value={formData.usuario_codeforces}
+                                        onChange={(e) => setFormData({...formData, usuario_codeforces: e.target.value})}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-gray-500 text-xs mb-2 uppercase tracking-wider font-bold">OmegaUp</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Username"
+                                        className="w-full p-3 rounded-lg bg-black/40 text-white border border-gray-700 focus:border-green-500 transition text-sm"
+                                        value={formData.usuario_omegaup}
+                                        onChange={(e) => setFormData({...formData, usuario_omegaup: e.target.value})}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-gray-500 text-xs mb-2 uppercase tracking-wider font-bold">VJudge</label>
+                                    <input
+                                        type="text"
+                                        placeholder="Username"
+                                        className="w-full p-3 rounded-lg bg-black/40 text-white border border-gray-700 focus:border-green-500 transition text-sm"
+                                        value={formData.usuario_vjudge}
+                                        onChange={(e) => setFormData({...formData, usuario_vjudge: e.target.value})}
+                                    />
+                                </div>
+                             </div>
                         </div>
                       </div>
 
-                      <div className="flex justify-end space-x-3 pt-4">
+                      <div className="flex justify-end gap-4 pt-6 mt-4 border-t border-white/10">
                         <button
                           type="button"
                           onClick={() => setEditMode(false)}
-                          className="px-6 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg transition duration-300"
+                          className="px-6 py-3 rounded-xl border border-gray-600 text-gray-300 hover:bg-white/5 transition font-medium"
                         >
                           Cancelar
                         </button>
                         <button
                           type="submit"
-                          className="px-6 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition duration-300 transform hover:scale-105"
+                          className="px-8 py-3 rounded-xl bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-900/30 transition transform hover:scale-105 font-bold"
                         >
                           Guardar Cambios
                         </button>
                       </div>
                     </form>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-700">
-                        <h3 className="text-lg font-semibold mb-4 text-green-400 flex items-center">
-                          <FaUser className="mr-2" /> Información Personal
-                        </h3>
-                        <div className="space-y-3">
-                          <div>
-                            <p className="text-gray-400 text-sm">Nombre Completo</p>
-                            <p className="text-white">{user.name || user.nombre_completo}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-400 text-sm">Correo Electrónico</p>
-                            <p className="text-white">{user.email}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-400 text-sm">Teléfono</p>
-                            <p className="text-white">{user.numero_telefono || 'No especificado'}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-400 text-sm">Semestre</p>
-                            <p className="text-white">{user.semestre ? `${user.semestre}° Semestre` : 'No especificado'}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-400 text-sm">Carrera</p>
-                            <p className="text-white">{user.carrera || 'No especificada'}</p>
-                          </div>
+                    <div className="bg-black/20 rounded-2xl p-6 md:p-8 border border-white/5 space-y-8">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-y-8 gap-x-12">
+                            <div>
+                                <label className="block text-gray-500 text-xs uppercase tracking-wider mb-2 font-bold">Nombre Completo</label>
+                                <p className="text-xl font-medium text-white">{user.name || user.nombre_completo}</p>
+                            </div>
+                            <div>
+                                <label className="block text-gray-500 text-xs uppercase tracking-wider mb-2 font-bold">Correo Electrónico</label>
+                                <p className="text-xl font-medium text-white">{user.email}</p>
+                            </div>
+                            <div>
+                                <label className="block text-gray-500 text-xs uppercase tracking-wider mb-2 font-bold">Semestre</label>
+                                <p className="text-xl font-medium text-white">{user.semestre ? `${user.semestre}° Semestre` : 'No registrado'}</p>
+                            </div>
+                             <div>
+                                <label className="block text-gray-500 text-xs uppercase tracking-wider mb-2 font-bold">Teléfono</label>
+                                <p className="text-xl font-medium text-white">{user.numero_telefono || 'No registrado'}</p>
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="block text-gray-500 text-xs uppercase tracking-wider mb-2 font-bold">Carrera</label>
+                                <p className="text-xl font-medium text-white">{user.carrera || 'No registrada'}</p>
+                            </div>
                         </div>
-                      </div>
 
-                      <div className="bg-gray-700/50 p-4 rounded-lg border border-gray-700">
-                        <h3 className="text-lg font-semibold mb-4 text-green-400 flex items-center">
-                          <FaCode className="mr-2" /> Perfiles en Plataformas
-                        </h3>
-                        <div className="space-y-3">
-                          <div>
-                            <p className="text-gray-400 text-sm">Codeforces</p>
-                            <p className="text-white">{user.usuario_codeforces || 'No registrado'}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-400 text-sm">VJudge</p>
-                            <p className="text-white">{user.usuario_vjudge || 'No registrado'}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-400 text-sm">OmegaUp</p>
-                            <p className="text-white">{user.usuario_omegaup || 'No registrado'}</p>
-                          </div>
+                        <div className="pt-8 border-t border-white/10">
+                            <h3 className="text-gray-400 font-bold mb-6 flex items-center text-sm uppercase tracking-wider"><FaCode className="mr-2"/> Identificadores de Plataforma</h3>
+                            <div className="flex flex-wrap gap-4">
+                                {user.usuario_codeforces && (
+                                    <span className="px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-gray-300 flex items-center hover:bg-gray-700 transition">
+                                        <span className="w-2.5 h-2.5 rounded-full bg-yellow-500 mr-2.5 shadow-[0_0_8px_rgba(234,179,8,0.5)]"></span> 
+                                        Codeforces: <span className="text-white ml-2 font-mono font-medium">{user.usuario_codeforces}</span>
+                                    </span>
+                                )}
+                                {user.usuario_omegaup && (
+                                    <span className="px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-gray-300 flex items-center hover:bg-gray-700 transition">
+                                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500 mr-2.5 shadow-[0_0_8px_rgba(59,130,246,0.5)]"></span> 
+                                        OmegaUp: <span className="text-white ml-2 font-mono font-medium">{user.usuario_omegaup}</span>
+                                    </span>
+                                )}
+                                {user.usuario_vjudge && (
+                                    <span className="px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-gray-300 flex items-center hover:bg-gray-700 transition">
+                                        <span className="w-2.5 h-2.5 rounded-full bg-purple-500 mr-2.5 shadow-[0_0_8px_rgba(168,85,247,0.5)]"></span> 
+                                        VJudge: <span className="text-white ml-2 font-mono font-medium">{user.usuario_vjudge}</span>
+                                    </span>
+                                )}
+                                {!user.usuario_codeforces && !user.usuario_omegaup && !user.usuario_vjudge && (
+                                    <p className="text-gray-500 italic text-sm py-2">No has registrado tus usuarios de plataformas.</p>
+                                )}
+                            </div>
                         </div>
-                      </div>
                     </div>
                   )}
                 </div>
               )}
 
               {activeTab === 'security' && (
-                <div>
-                  <h2 className="text-2xl font-bold mb-6 text-green-400 flex items-center">
-                    <FaLock className="mr-2" /> Seguridad
-                  </h2>
-                  
-                  <form onSubmit={handlePasswordChange} className="max-w-lg space-y-4">
-                    <div>
-                      <label className="block text-gray-300 mb-2">Contraseña Actual</label>
-                      <div className="relative">
-                        <input
-                          type="password"
-                          className="w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none transition"
-                          value={passwordData.currentPassword}
-                          onChange={(e) => setPasswordData({...passwordData, currentPassword: e.target.value})}
-                          required
-                          placeholder="Ingresa tu contraseña actual"
-                        />
-                        <FaLock className="absolute left-3 top-3.5 text-gray-400" />
-                      </div>
-                    </div>
+                <div className="space-y-6">
+                   <div className="flex items-center space-x-4 mb-6">
+                     <div className="p-3.5 rounded-xl bg-red-500/20 text-red-400">
+                        <FaLock size={24} />
+                     </div>
+                     <h2 className="text-2xl font-bold text-white">Seguridad de la Cuenta</h2>
+                   </div>
 
+                  <form onSubmit={handlePasswordChange} className="space-y-6 max-w-lg mx-auto md:mx-0">
                     <div>
-                      <label className="block text-gray-300 mb-2">Nueva Contraseña</label>
-                      <div className="relative">
-                        <input
-                          type="password"
-                          className="w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none transition"
-                          value={passwordData.newPassword}
-                          onChange={(e) => setPasswordData({...passwordData, newPassword: e.target.value})}
-                          required
-                          minLength="8"
-                          placeholder="Mínimo 8 caracteres"
-                        />
-                        <FaLock className="absolute left-3 top-3.5 text-gray-400" />
-                      </div>
+                      <label className="block text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">Contraseña Actual</label>
+                      <input
+                        type="password"
+                        className="w-full p-4 rounded-xl bg-black/40 text-white border border-gray-700 focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-none transition"
+                        value={passwordData.currentPassword}
+                        onChange={(e) => setPasswordData({...passwordData, currentPassword: e.target.value})}
+                        required
+                      />
                     </div>
-
                     <div>
-                      <label className="block text-gray-300 mb-2">Confirmar Nueva Contraseña</label>
-                      <div className="relative">
-                        <input
-                          type="password"
-                          className="w-full p-3 pl-10 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none transition"
-                          value={passwordData.confirmPassword}
-                          onChange={(e) => setPasswordData({...passwordData, confirmPassword: e.target.value})}
-                          required
-                          minLength="8"
-                          placeholder="Confirma tu nueva contraseña"
-                        />
-                        <FaLock className="absolute left-3 top-3.5 text-gray-400" />
-                      </div>
+                      <label className="block text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">Nueva Contraseña</label>
+                      <input
+                        type="password"
+                        className="w-full p-4 rounded-xl bg-black/40 text-white border border-gray-700 focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-none transition"
+                        value={passwordData.newPassword}
+                        onChange={(e) => setPasswordData({...passwordData, newPassword: e.target.value})}
+                        required
+                        minLength="8"
+                        placeholder="Mínimo 8 caracteres"
+                      />
                     </div>
-
-                    <button
-                      type="submit"
-                      className="px-6 py-2 bg-green-600 hover:bg-green-700 rounded-lg transition duration-300 transform hover:scale-105 mt-4"
-                    >
-                      Cambiar Contraseña
-                    </button>
+                    <div>
+                      <label className="block text-gray-400 text-xs font-bold uppercase tracking-wider mb-2">Confirmar Nueva Contraseña</label>
+                      <input
+                        type="password"
+                        className="w-full p-4 rounded-xl bg-black/40 text-white border border-gray-700 focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-none transition"
+                        value={passwordData.confirmPassword}
+                        onChange={(e) => setPasswordData({...passwordData, confirmPassword: e.target.value})}
+                        required
+                        minLength="8"
+                      />
+                    </div>
+                    <div className="pt-6">
+                      <button
+                        type="submit"
+                        className="w-full md:w-auto px-10 py-3.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold shadow-lg shadow-red-900/40 transition transform hover:scale-105"
+                      >
+                        Actualizar Contraseña
+                      </button>
+                    </div>
                   </form>
                 </div>
               )}
+              </div>
             </div>
+            {/* End Main Content Col */}
           </div>
         </main>
       </div>

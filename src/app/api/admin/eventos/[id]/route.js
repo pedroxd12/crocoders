@@ -1,7 +1,5 @@
-// src/app/api/admin/eventos/[id]/route.js
 import { NextResponse } from 'next/server';
-import { sql } from '@/lib/db-server';
-// Remove: import { uploadFile, deleteFile } from '@/lib/storage-server'; // uploadFile not needed, deleteFile for local storage not needed
+import pool from '@/lib/db-server';
 import { UTApi } from "uploadthing/server";
 
 const utapi = new UTApi();
@@ -14,185 +12,219 @@ async function deleteFromUploadThing(fileKey) {
     console.log(`Successfully deleted ${fileKey} from UploadThing`);
   } catch (e) {
     console.error(`Error deleting ${fileKey} from UploadThing:`, e);
-    // Decide if you want to throw an error or just log it
   }
 }
 
-
 export async function GET(request, context) {
   const { id } = await context.params;
+  const client = await pool.connect();
 
   if (!id || isNaN(Number(id))) {
-    return NextResponse.json({ error: 'ID de evento inválido' }, { status: 400 });
+      return NextResponse.json({ error: 'ID de evento inválido' }, { status: 400 });
   }
 
   try {
-    const [evento] = await sql`
+    // Basic event info + counts
+    const query = `
       SELECT 
         e.*,
-        (
-          SELECT COUNT(*) FROM asistencia_miembro WHERE id_evento = e.id_evento
-        ) as miembros_count,
-        (
-          SELECT COUNT(*) FROM asistencia_invitado WHERE id_evento = e.id_evento
-        ) as invitados_count
+        t.nombre as tipo_nombre,
+        a.nombre as alcance_nombre,
+        -- Concurso info
+        c.id_concurso,
+        c.modalidad,
+        c.max_integrantes_equipo,
+        c.id_plataforma,
+        c.requiere_asesor,
+        c.url_concurso,
+        (SELECT COUNT(*) FROM inscripcion_evento WHERE id_evento = e.id_evento) as total_inscritos
       FROM evento e
-      WHERE e.id_evento = ${id}
+      LEFT JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
+      LEFT JOIN catalogo_alcance_evento a ON e.id_alcance = a.id_alcance
+      LEFT JOIN concurso c ON e.id_evento = c.id_evento
+      WHERE e.id_evento = $1 AND e.deleted_at IS NULL
     `;
+    
+    const result = await client.query(query, [id]);
 
-    if (!evento) {
+    if (result.rows.length === 0) {
       return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
     }
 
-    evento.asistentes_count = (evento.miembros_count || 0) + (evento.invitados_count || 0);
-
-    return NextResponse.json(evento);
+    return NextResponse.json(result.rows[0]);
   } catch (error) {
-    console.error('Error en GET /api/eventos/[id]:', error);
+    console.error('Error en GET /api/admin/eventos/[id]:', error);
     return NextResponse.json({ error: 'Error al obtener evento' }, { status: 500 });
+  } finally {
+    client.release();
   }
 }
 
 export async function PUT(request, context) {
   const { id } = await context.params;
+  const client = await pool.connect();
 
   if (!id) {
     return NextResponse.json({ error: 'ID de evento es requerido' }, { status: 400 });
   }
 
   try {
-    const formData = await request.json(); // Expecting JSON
+    const body = await request.json();
+    const {
+        nombre, descripcion_html, id_tipo_evento, id_alcance,
+        fecha_inicio, fecha_fin, hora_inicio, hora_fin,
+        ubicacion, cupos, tiene_costo, costo,
+        imagen_flyer_url, imagen_flyer_key,
+        // Concurso
+        es_concurso, modalidad, max_integrantes_equipo, id_plataforma, 
+        requiere_asesor, url_concurso
+    } = body;
 
-    const requiredFields = ['nombre_evento', 'descripcion', 'tipo', 'fecha', 'hora_inicio', 'hora_fin'];
-    const missingFields = requiredFields.filter(field => !formData[field]);
-
-    if (missingFields.length > 0) {
-      return NextResponse.json(
-        { error: `Faltan campos requeridos: ${missingFields.join(', ')}` },
-        { status: 400 }
-      );
+    // Validation
+    if (!nombre) {
+        return NextResponse.json({ error: 'Nombre es requerido' }, { status: 400 });
     }
 
-    const eventoData = {
-      nombre_evento: formData.nombre_evento,
-      descripcion: formData.descripcion,
-      tipo: formData.tipo,
-      hermandad: formData.hermandad || 'club de programación',
-      fecha: formData.fecha,
-      hora_inicio: formData.hora_inicio,
-      hora_fin: formData.hora_fin,
-      cupos: parseInt(formData.cupos) || 0,
-      costo: parseFloat(formData.costo) || 0,
-      // imagen_url and imagen_key will be handled separately
-    };
+    await client.query('BEGIN');
 
-    const inicio = new Date(`${eventoData.fecha}T${eventoData.hora_inicio}`);
-    const fin = new Date(`${eventoData.fecha}T${eventoData.hora_fin}`);
-
-    if (inicio >= fin) {
-      return NextResponse.json(
-        { error: 'La hora de fin debe ser posterior a la hora de inicio' },
-        { status: 400 }
-      );
+    // 1. Get current event to handle image deletion if needed
+    const currentRes = await client.query('SELECT imagen_flyer_key FROM evento WHERE id_evento = $1', [id]);
+    if (currentRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
     }
+    const oldKey = currentRes.rows[0].imagen_flyer_key;
 
-    const [eventoActual] = await sql`
-      SELECT imagen_url, imagen_key FROM evento WHERE id_evento = ${id}
-    `;
+    // Handle Image Logic
+    let finalKey = oldKey;
+    let finalUrl = imagen_flyer_url;
 
-    if (!eventoActual) {
-      return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
-    }
-
-    let newImageUrl = eventoActual.imagen_url;
-    let newImageKey = eventoActual.imagen_key;
-
-    // Check if image is being changed or removed
-    if (formData.hasOwnProperty('imagen_url') || formData.hasOwnProperty('imagen_key')) {
-        const oldImageKey = eventoActual.imagen_key;
-        
-        if (formData.imagen_url === null && formData.imagen_key === null) { // Image removed
-            if (oldImageKey) {
-                await deleteFromUploadThing(oldImageKey);
-            }
-            newImageUrl = null;
-            newImageKey = null;
-        } else if (formData.imagen_url && formData.imagen_key) { // New image uploaded
-            if (oldImageKey && oldImageKey !== formData.imagen_key) { // Delete old if different
-                 await deleteFromUploadThing(oldImageKey);
-            }
-            newImageUrl = formData.imagen_url;
-            newImageKey = formData.imagen_key;
+    // If explicit removal or change
+    if (imagen_flyer_key !== undefined) { // Check if key provided in update (even as null)
+        if (imagen_flyer_key !== oldKey) {
+             if (oldKey) await deleteFromUploadThing(oldKey);
+             finalKey = imagen_flyer_key;
         }
     }
 
-
-    const result = await sql`
-      UPDATE evento
-      SET
-        nombre_evento = ${eventoData.nombre_evento},
-        descripcion = ${eventoData.descripcion},
-        tipo = ${eventoData.tipo},
-        hermandad = ${eventoData.hermandad},
-        fecha = ${eventoData.fecha},
-        hora_inicio = ${eventoData.hora_inicio},
-        hora_fin = ${eventoData.hora_fin},
-        cupos = ${eventoData.cupos},
-        costo = ${eventoData.costo},
-        imagen_url = ${newImageUrl},
-        imagen_key = ${newImageKey}
-      WHERE id_evento = ${id}
-      RETURNING *
+    // 2. Update Evento
+    const updateQuery = `
+        UPDATE evento SET
+            nombre = $1, 
+            descripcion_html = $2, 
+            id_tipo_evento = $3, 
+            id_alcance = $4,
+            fecha_inicio = $5, 
+            fecha_fin = $6, 
+            hora_inicio = $7, 
+            hora_fin = $8,
+            ubicacion = $9, 
+            cupos = $10,
+            tiene_costo = $11, 
+            costo = $12,
+            imagen_flyer_url = $13, 
+            imagen_flyer_key = $14,
+            updated_at = NOW()
+        WHERE id_evento = $15
+        RETURNING *
     `;
 
-    if (result.length === 0) {
-      return NextResponse.json({ error: 'Evento no encontrado durante la actualización' }, { status: 404 });
+    const fechaFinValue = fecha_fin || fecha_inicio;
+    
+    await client.query(updateQuery, [
+        nombre, descripcion_html, id_tipo_evento, id_alcance,
+        fecha_inicio, fechaFinValue, hora_inicio, hora_fin,
+        ubicacion, cupos, tiene_costo, costo,
+        finalUrl, finalKey,
+        id
+    ]);
+
+    // 3. Handle Concurso (Insert, Update, or Delete)
+    if (es_concurso) {
+        const checkConcurso = await client.query('SELECT id_concurso FROM concurso WHERE id_evento = $1', [id]);
+        
+        if (checkConcurso.rows.length > 0) {
+            // Update existing
+            await client.query(`
+                UPDATE concurso SET
+                    id_plataforma = $1,
+                    modalidad = $2,
+                    max_integrantes_equipo = $3,
+                    requiere_asesor = $4,
+                    url_concurso = $5
+                WHERE id_evento = $6
+            `, [
+                id_plataforma || null, 
+                modalidad || 'individual',
+                modalidad === 'equipos' ? (parseInt(max_integrantes_equipo) || 3) : null,
+                requiere_asesor,
+                url_concurso,
+                id
+            ]);
+        } else {
+            // Create new
+            await client.query(`
+                INSERT INTO concurso (
+                    id_evento, id_plataforma, modalidad, 
+                    max_integrantes_equipo, requiere_asesor, url_concurso
+                ) VALUES ($1, $2, $3, $4, $5, $6)
+            `, [
+                id,
+                id_plataforma || null, 
+                modalidad || 'individual',
+                modalidad === 'equipos' ? (parseInt(max_integrantes_equipo) || 3) : null,
+                requiere_asesor,
+                url_concurso
+            ]);
+        }
+    } else {
+        // If it was a contest but now isn't, delete from concurso
+        await client.query('DELETE FROM concurso WHERE id_evento = $1', [id]);
     }
 
-    return NextResponse.json(result[0]);
+    await client.query('COMMIT');
+    return NextResponse.json({ success: true, message: 'Evento actualizado correctamente' });
+
   } catch (error) {
-    console.error('Error en PUT /api/eventos/[id]:', error);
+    await client.query('ROLLBACK');
+    console.error('Error en PUT /api/admin/eventos/[id]:', error);
     return NextResponse.json({ error: 'Error al actualizar evento: ' + error.message }, { status: 500 });
+  } finally {
+    client.release();
   }
 }
 
 export async function DELETE(request, context) {
   const { id } = await context.params;
+  const client = await pool.connect();
 
   if (!id || isNaN(Number(id))) {
     return NextResponse.json({ error: 'ID de evento inválido' }, { status: 400 });
   }
 
   try {
-    const [evento] = await sql`
-      SELECT imagen_url, imagen_key FROM evento WHERE id_evento = ${id}
-    `;
-
-    if (!evento) {
-      return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
+    // Get image key to delete from storage
+    const imgRes = await client.query('SELECT imagen_flyer_key FROM evento WHERE id_evento = $1', [id]);
+    
+    if (imgRes.rows.length === 0) {
+        return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
     }
 
-    if (evento.imagen_key) {
-      await deleteFromUploadThing(evento.imagen_key);
+    const { imagen_flyer_key } = imgRes.rows[0];
+
+    // Delete from storage
+    if (imagen_flyer_key) {
+        await deleteFromUploadThing(imagen_flyer_key);
     }
+    
+    // Delete from DB (Cascade handles dependencies like inscripcion_evento, concurso, evidencia, etc.)
+    await client.query('DELETE FROM evento WHERE id_evento = $1', [id]);
 
-    await sql`DELETE FROM asistencia_miembro WHERE id_evento = ${id}`;
-    await sql`DELETE FROM asistencia_invitado WHERE id_evento = ${id}`;
-    await sql`DELETE FROM evidencias WHERE id_evento = ${id}`; // Also delete related evidences
-
-    const result = await sql`
-      DELETE FROM evento WHERE id_evento = ${id}
-      RETURNING *
-    `;
-
-    if (result.length === 0) {
-      // This case should ideally not be reached if the select above found the event
-      return NextResponse.json({ error: 'Evento no encontrado al intentar eliminar' }, { status: 404 });
-    }
-
-    return NextResponse.json({ success: true, message: "Evento y sus imágenes asociadas eliminados." });
+    return NextResponse.json({ success: true, message: "Evento eliminado correctamente" });
   } catch (error) {
-    console.error('Error en DELETE /api/eventos/[id]:', error);
+    console.error('Error en DELETE /api/admin/eventos/[id]:', error);
     return NextResponse.json({ error: 'Error al eliminar evento: ' + error.message }, { status: 500 });
+  } finally {
+    client.release();
   }
 }

@@ -15,6 +15,7 @@ import Image from 'next/image'; // Added for completeness, though EventCard hand
 
 import { Calendar, Filter, Loader, UserPlus, LogIn } from 'lucide-react';
 import { motion } from 'framer-motion';
+import styles from './page.module.css';
 
 async function sendEventRegistrationEmail(email, name, eventDetails) {
   try {
@@ -261,81 +262,78 @@ function EventosContent() {
   if (error) return <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gray-900 text-red-400"><p>{error}</p><Button onClick={fetchEventos}>Reintentar</Button></div>;
 
   return (
-    <motion.main 
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }}
-      className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white py-6 px-3 sm:py-10 sm:px-6"
-    >
-      <div className="max-w-7xl mx-auto">
-        <section className="space-y-6">
-          <motion.div 
-            initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, duration: 0.5 }}
-            className="text-center mb-8 space-y-2"
-          >
-            <h1 className="text-4xl sm:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-teal-400">
-              Explora Nuestros Eventos
-            </h1>
-            <p className="text-gray-300 text-md sm:text-lg max-w-2xl mx-auto">
-              Conferencias, talleres, concursos y más. ¡Encuentra tu próxima aventura de aprendizaje!
-            </p>
-          </motion.div>
+    <div className={styles.pageWrapper}>
+      <main className={styles.container}>
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }} 
+          animate={{ opacity: 1, y: 0 }} 
+          transition={{ duration: 0.6 }}
+        >
+          <h1 className={styles.title}>Nuestros Eventos</h1>
+          <p className={styles.description}>
+            Participa en conferencias, talleres y concursos diseñados para impulsar tu crecimiento profesional.
+          </p>
+        </motion.div>
 
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2, duration: 0.5 }} className="mb-8">
-            <FilterControls filters={filters} onFilterChange={handleFilterChange} />
-          </motion.div>
+        <div className={styles.filtersContainer}>
+           <FilterControls filters={filters} onFilterChange={handleFilterChange} />
+        </div>
 
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3, duration: 0.5 }} className="flex items-center justify-between mb-6 px-1">
-            <div className="flex items-center text-gray-300 text-sm"><Calendar size={16} className="mr-2 text-green-400" /><span>{filteredEvents.length} eventos encontrados</span></div>
-            <Button onClick={fetchEventos} variant="text" size="sm" className="flex items-center text-green-400 hover:text-green-300"><Loader size={16} className="mr-1 animate-spin-slow" />Actualizar</Button>
-          </motion.div>
-
-          {filteredEvents.length === 0 ? (
-            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.4 }} className="py-10 px-4 bg-gray-800 bg-opacity-70 backdrop-blur-sm rounded-xl text-center border border-gray-700">
-              <Filter size={32} className="mx-auto mb-4 text-gray-500" />
-              <p className="text-gray-300 text-lg">{eventos.length === 0 ? 'No hay eventos programados por el momento.' : 'No se encontraron eventos con los filtros actuales.'}</p>
-              {eventos.length > 0 && <Button onClick={() => setFilters({ tipo: 'todos', estado: 'proximos', hermandad: 'todos' })} variant="secondary" className="mt-6 text-sm py-2">Limpiar Filtros</Button>}
-            </motion.div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-              {filteredEvents.map((evento, index) => (
-                <motion.div key={evento.id_evento} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 * index, duration: 0.4 }}>
-                  <EventCard
-                    evento={evento}
-                    isRegistered={registrationStatus[evento.id_evento]}
-                    onParticipate={() => handleParticipateClick(evento)}
-                    onViewDetails={() => handleViewDetails(evento.id_evento)}
-                  />
-                </motion.div>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
+        {filteredEvents.length === 0 ? (
+           <div className={styles.emptyState}>
+              <p>No se encontraron eventos con los filtros actuales.</p>
+              {eventos.length > 0 && (
+                <Button 
+                  onClick={() => setFilters({ tipo: 'todos', estado: 'proximos', hermandad: 'todos' })} 
+                  variant="secondary" 
+                  className="mt-4"
+                >
+                  Limpiar Filtros
+                </Button>
+              )}
+           </div>
+        ) : (
+          <div className={styles.grid}>
+             {filteredEvents.map((evento, index) => (
+                <EventCard 
+                  key={evento.id_evento} 
+                  evento={evento} 
+                  isRegistered={registrationStatus[evento.id_evento]}
+                  onParticipate={() => handleParticipateClick(evento)}
+                  onViewDetails={() => handleViewDetails(evento.id_evento)}
+                  userId={user?.id_miembro}
+                  index={index}
+                />
+             ))}
+          </div>
+        )}
+      </main>
 
       <Modal isOpen={showRegistrationTypeModal} onClose={() => setShowRegistrationTypeModal(false)} title="Confirmar Registro">
         <p className="text-gray-300 mb-6">¿Cómo deseas registrarte al evento "{selectedEventForRegistration?.nombre_evento}"?</p>
         <div className="space-y-3">
-          <Button onClick={() => router.push(`/iniciar?registerEvent=${selectedEventForRegistration?.id_evento}&from=${encodeURIComponent(router.asPath || '/eventos')}`)} variant="primary" className="w-full flex items-center justify-center"><LogIn size={18} className="mr-2"/>Soy miembro (Iniciar sesión)</Button>
-          <Button onClick={() => { setShowRegistrationTypeModal(false); setShowGuestFormModal(true); }} variant="secondary" className="w-full flex items-center justify-center"><UserPlus size={18} className="mr-2"/>Soy invitado</Button>
+          <Button onClick={() => router.push(`/iniciar?redirect=/eventos?eventId=${selectedEventForRegistration?.id_evento}`)} variant="primary" className="w-full justify-center"><LogIn size={18} className="mr-2"/>Soy miembro (Iniciar sesión)</Button>
+          <Button onClick={() => { setShowRegistrationTypeModal(false); setShowGuestFormModal(true); }} variant="secondary" className="w-full justify-center"><UserPlus size={18} className="mr-2"/>Soy invitado</Button>
         </div>
       </Modal>
 
-      <Modal isOpen={showGuestFormModal} onClose={() => { setShowGuestFormModal(false); setFormErrors({}); }} title={`Registro como Invitado: ${selectedEventForRegistration?.nombre_evento || ''}`}>
-        <form onSubmit={(e) => { e.preventDefault(); handleGuestRegistrationSubmit(); }} className="space-y-4">
-          <Input label="Nombre completo *" name="nombre_completo" value={guestData.nombre_completo} onChange={(e) => setGuestData({...guestData, nombre_completo: e.target.value})} required error={formErrors.nombre_completo} className="bg-gray-700 border-gray-600 focus:border-green-500"/>
-          <Input label="Correo electrónico *" type="email" name="correo_electronico" value={guestData.correo_electronico} onChange={(e) => setGuestData({...guestData, correo_electronico: e.target.value})} required error={formErrors.correo_electronico} className="bg-gray-700 border-gray-600 focus:border-green-500"/>
-          <Input label="Número de teléfono *" name="numero_telefono" value={guestData.numero_telefono} onChange={(e) => setGuestData({...guestData, numero_telefono: e.target.value})} required placeholder="10 dígitos" error={formErrors.numero_telefono} className="bg-gray-700 border-gray-600 focus:border-green-500"/>
-          <Select label="Carrera *" name="carrera" value={guestData.carrera} onChange={(e) => setGuestData({...guestData, carrera: e.target.value})} options={carreras.map(c => ({ value: c, label: c }))} placeholder="Selecciona tu carrera" required error={formErrors.carrera} className="bg-gray-700 border-gray-600 focus:border-green-500"/>
-          <Select label="Semestre *" name="semestre" value={guestData.semestre} onChange={(e) => setGuestData({...guestData, semestre: e.target.value})} options={semestres} placeholder="Selecciona tu semestre" required error={formErrors.semestre} className="bg-gray-700 border-gray-600 focus:border-green-500"/>
+      <Modal isOpen={showGuestFormModal} onClose={() => { setShowGuestFormModal(false); setFormErrors({}); }} title={`Registro como Invitado`}>
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto px-1 custom-scrollbar">
+          <Input label="Nombre completo" name="nombre_completo" value={guestData.nombre_completo} onChange={(e) => setGuestData({...guestData, nombre_completo: e.target.value})} error={formErrors.nombre_completo} placeholder="Nombre Completo" />
+          <Input label="Correo electrónico" type="email" name="correo_electronico" value={guestData.correo_electronico} onChange={(e) => setGuestData({...guestData, correo_electronico: e.target.value})} error={formErrors.correo_electronico} placeholder="correo@ejemplo.com" />
+          <Input label="Teléfono" name="numero_telefono" value={guestData.numero_telefono} onChange={(e) => setGuestData({...guestData, numero_telefono: e.target.value.replace(/\D/g, '').slice(0, 10)})} placeholder="10 dígitos" error={formErrors.numero_telefono} />
+          <Select label="Carrera" name="carrera" value={guestData.carrera} onChange={(e) => setGuestData({...guestData, carrera: e.target.value})} options={carreras.map(c => ({ value: c, label: c }))} placeholder="Selecciona tu carrera" error={formErrors.carrera} />
+          <Select label="Semestre" name="semestre" value={guestData.semestre} onChange={(e) => setGuestData({...guestData, semestre: e.target.value})} options={semestres} placeholder="Selecciona tu semestre" error={formErrors.semestre} />
           
           <div className="flex justify-end space-x-3 pt-3">
-            <Button type="button" onClick={() => { setShowGuestFormModal(false); setFormErrors({}); }} variant="secondary" disabled={isSubmitting}>Cancelar</Button>
-            <Button type="submit" variant="primary" loading={isSubmitting} disabled={isSubmitting}>
-              {isSubmitting ? <LoadingSpinner size="sm"/> : "Confirmar Registro"}
+            <Button onClick={() => { setShowGuestFormModal(false); setFormErrors({}); }} variant="secondary" disabled={isSubmitting}>Cancelar</Button>
+            <Button onClick={handleGuestRegistrationSubmit} variant="primary" disabled={isSubmitting}>
+              {isSubmitting ? "Registrando..." : "Confirmar Registro"}
             </Button>
           </div>
-        </form>
+        </div>
       </Modal>
-    </motion.main>
+    </div>
   );
 }
 

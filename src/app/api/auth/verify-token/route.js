@@ -23,9 +23,9 @@ export async function POST(request) {
 
     // Verificar código de verificación y token
     const result = await sql`
-      SELECT pr.*, m.id_miembro as user_id, m.nombre_completo as name 
-      FROM password_reset_tokens pr
-      JOIN miembro m ON pr.user_id = m.id_miembro
+      SELECT pr.*, m.id_miembro as user_id, m.nombre || ' ' || m.apellido_paterno as name 
+      FROM password_reset_token pr
+      JOIN miembro m ON pr.id_miembro = m.id_miembro
       WHERE m.correo_electronico = ${email}
       ORDER BY pr.expires_at DESC
       LIMIT 1
@@ -40,7 +40,7 @@ export async function POST(request) {
       );
     }
 
-    if (tokenData.verification_code !== verificationCode) {
+    if (tokenData.codigo_verificacion !== verificationCode) {
       return NextResponse.json(
         { error: 'Código de verificación incorrecto' },
         { status: 400 }
@@ -61,7 +61,7 @@ export async function POST(request) {
         name: tokenData.name,
         email: email,
         temp: true,
-        tokenId: tokenData.id // Incluir ID del token para referencia
+        tokenId: tokenData.id_token // Incluir ID del token para referencia
       },
       process.env.JWT_SECRET,
       { expiresIn: '15m' }

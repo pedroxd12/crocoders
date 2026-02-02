@@ -1,0 +1,164 @@
+.footerWrapper {
+    position: relative;
+    width: 100%;
+    background: #111111;
+    color: #e0e0e0;
+    overflow: hidden;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.container {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1.5rem 1.5rem; /* Reduced padding */
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.contentRow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    width: 100%;
+}
+
+@media (min-width: 768px) {
+    .contentRow {
+        flex-direction: row;
+        gap: 1rem;
+    }
+}
+
+.brandSection {
+    display: flex;
+    align-items: center;
+    /* gap: 1rem; */
+    flex-direction: column;
+}
+
+@media (min-width: 768px) {
+    .brandSection {
+         align-items: flex-start;
+    }
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: #e0e0e0; /* Changed from green to neutral text as logo has image */
+    font-weight: 700;
+    font-size: 1.25rem;
+    text-decoration: none;
+    transition: opacity 0.3s ease;
+}
+
+.logo:hover {
+    opacity: 0.9;
+}
+
+.socialContainer {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+}
+
+.socialIcon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem; /* Smaller icons */
+    height: 2.5rem;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.05);
+    color: #e0e0e0;
+    transition: all 0.3s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.contactButton {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1.25rem;
+    background: rgba(30, 241, 132, 0.1);
+    color: #1ef184;
+    font-weight: 600;
+    font-size: 0.95rem;
+    border: 1px solid #1ef184;
+    border-radius: 9999px; /* Pill shape */
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+.contactButton:hover {
+    background: #1ef184;
+    color: #000;
+}
+
+.bottomRow {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    padding-top: 1rem;
+    width: 100%;
+    text-align: center;
+    display: none; /* Hidden on mobile by default to save space, show via media query if needed or keep combined */
+}
+
+@media (min-width: 768px) {
+    .bottomRow {
+        display: block;
+        text-align: right; /* Or center */
+        border: none;
+        padding: 0;
+        width: auto;
+    }
+    
+    /* On desktop, copyright is part of the layout flow or a separate small line */
+     .brandSection {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.25rem;
+     }
+}
+
+.copy {
+    font-size: 0.8rem;
+    color: #666;
+    margin: 0;
+}
+
+.copyMobile {
+     font-size: 0.75rem;
+     color: #666;
+     margin-top: 0.5rem;
+}
+
+@media (min-width: 768px) {
+    .copyMobile {
+        display: none;
+    }
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #1ef184;
+    font-weight: 700;
+    font-size: 1.5rem;
+    text-decoration: none;
+    transition: opacity 0.3s ease;
+}
+
+.logo:hover {
+    opacity: 0.8;
+}
+
+.copy {
+    font-size: 0.875rem;
+    color: #a0a0a0;
+}

@@ -1,53 +1,43 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'react-toastify';
-import { 
-  FaUser, 
-  FaEnvelope, 
-  FaTrash, 
-  FaArrowLeft, 
-  FaUsers, 
-  FaCheck, 
-  FaTimes,
-  FaSearch,
-  FaCalendarAlt,
-  FaGraduationCap,
-  FaBook,
-  FaUserTie,
-  FaUserFriends
-} from 'react-icons/fa';
-import Table from '@/components/ui/Table';
-import LoadingSpinner from '@/components/LoadingSpinner';
+import { FaArrowLeft, FaCheck, FaTimes, FaSearch, FaFileInvoiceDollar, FaUserPlus, FaQrcode } from 'react-icons/fa';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import Table from '@/components/ui/Table';
+import Modal from '@/components/ui/Modal';
+import LoadingSpinner from '@/components/LoadingSpinner';
 
-export default function AsistentesAdmin() {
+export default function EventoAsistentes() {
+  const { id } = useParams();
   const router = useRouter();
-  const params = useParams();
-  const [asistentes, setAsistentes] = useState({ miembros: [], invitados: [] });
+  const [asistentes, setAsistentes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [eventoInfo, setEventoInfo] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [deleteConfirmation, setDeleteConfirmation] = useState(null);
-  const { id } = params;
+  const [eventoInfo, setEventoInfo] = useState({ nombre: '', fecha: '' });
+  
+  // Manual Registration State
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [usersCatalog, setUsersCatalog] = useState([]);
+  const [selectedUserJson, setSelectedUserJson] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
 
   useEffect(() => {
-    if (id) {
-      fetchAsistentes();
-      fetchEventoInfo();
-    }
+    fetchAsistentes();
+    fetchUsersCatalog();
   }, [id]);
 
-  const fetchEventoInfo = async () => {
+  const fetchUsersCatalog = async () => {
     try {
-      const res = await fetch(`/api/admin/eventos/${id}`);
-      if (!res.ok) throw new Error('Error al cargar información del evento');
-      const data = await res.json();
-      setEventoInfo(data);
+        const res = await fetch('/api/admin/users');
+        if (res.ok) {
+            const data = await res.json();
+            setUsersCatalog(data);
+        }
     } catch (error) {
-      toast.error(error.message);
+        console.error('Error loading users:', error);
     }
   };
 
@@ -57,11 +47,13 @@ export default function AsistentesAdmin() {
       const res = await fetch(`/api/admin/eventos/${id}/asistentes`);
       if (!res.ok) throw new Error('Error al cargar asistentes');
       const data = await res.json();
-      
-      setAsistentes({
-        miembros: data.miembros || [],
-        invitados: data.invitados || []
-      });
+      setAsistentes(data);
+      if (data.length > 0) {
+        setEventoInfo({ 
+            nombre: data[0].nombre_evento, 
+            fecha: data[0].fecha_inicio 
+        });
+      }
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -69,346 +61,223 @@ export default function AsistentesAdmin() {
     }
   };
 
-  const handleDeleteConfirmation = (idAsistente, esMiembro, nombre) => {
-    setDeleteConfirmation({
-      idAsistente,
-      esMiembro,
-      nombre
-    });
-  };
-
-  const handleEliminarAsistente = async (idAsistente, esMiembro = true) => {
+  const toggleAsistencia = async (inscripcionId, currentStatus) => {
     try {
-      const res = await fetch(
-        `/api/admin/eventos/${id}/asistentes`, 
-        {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ 
-            id_asistente: idAsistente,
-            es_miembro: esMiembro 
-          })
-        }
-      );
+      const res = await fetch(`/api/admin/inscripciones/${inscripcionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'toggle_asistencia', value: !currentStatus })
+      });
+      if (!res.ok) throw new Error('Error al actualizar');
       
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Error al eliminar asistente');
-      }
-      
-      toast.success('Asistente eliminado correctamente');
-      setDeleteConfirmation(null);
-      await fetchAsistentes();
+      setAsistentes(prev => prev.map(a => 
+        a.id_inscripcion === inscripcionId ? { ...a, asistio: !currentStatus } : a
+      ));
+      toast.success(currentStatus ? 'Asistencia eliminada' : 'Asistencia registrada');
     } catch (error) {
-      toast.error(error.message);
+      toast.error('No se pudo actualizar la asistencia');
     }
   };
 
-  const handleToggleAsistencia = async (idAsistente, esMiembro, asistioActual) => {
+  const togglePago = async (inscripcionId, currentStatus) => {
+    if (!confirm(`¿Confirmar que el pago ha sido ${!currentStatus ? 'COMPLETADO' : 'CANCELADO'}?`)) return;
+
     try {
-      const res = await fetch(
-        `/api/admin/eventos/${id}/asistencia`, 
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ 
-            id_asistente: idAsistente,
-            es_miembro: esMiembro,
-            asistio: !asistioActual
-          })
-        }
-      );
+      const res = await fetch(`/api/admin/inscripciones/${inscripcionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'toggle_pago', value: !currentStatus })
+      });
+      if (!res.ok) throw new Error('Error al actualizar');
       
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Error al actualizar asistencia');
-      }
-      
-      toast.success('Asistencia actualizada correctamente');
-      await fetchAsistentes();
+      setAsistentes(prev => prev.map(a => 
+        a.id_inscripcion === inscripcionId ? { ...a, pago_completado: !currentStatus } : a
+      ));
+      toast.success('Estado de pago actualizado');
     } catch (error) {
-      toast.error(error.message);
+      toast.error('No se pudo actualizar el pago');
     }
   };
 
-  const filteredMiembros = asistentes.miembros.filter(miembro =>
-    miembro.nombre_completo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    miembro.correo_electronico?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    miembro.carrera?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    miembro.semestre?.toString().includes(searchTerm)
-  );
+  const handleManualRegister = async (e) => {
+    e.preventDefault();
+    if (!selectedUserJson) {
+        toast.warning('Seleccione un usuario');
+        return;
+    }
 
-  const filteredInvitados = asistentes.invitados.filter(invitado =>
-    invitado.nombre_completo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    invitado.correo_electronico?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    invitado.carrera?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    invitado.semestre?.toString().includes(searchTerm)
-  );
+    setIsRegistering(true);
+    try {
+        const user = JSON.parse(selectedUserJson);
+        const res = await fetch('/api/admin/eventos/register', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                id_evento: id,
+                id_usuario: user.id,
+                tipo_usuario: user.tipo
+            })
+        });
 
-  // Combinar miembros e invitados con un tipo identificador
-  const combinedAsistentes = [
-    ...filteredMiembros.map(m => ({ ...m, tipo: 'miembro' })),
-    ...filteredInvitados.map(i => ({ ...i, tipo: 'invitado' }))
-  ];
+        const data = await res.json();
+        
+        if (!res.ok) throw new Error(data.error || 'Error al registrar');
 
-  if (isLoading) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <div className="text-center">
-          <LoadingSpinner size="lg" />
-          <p className="mt-4 text-gray-400">Cargando asistentes...</p>
-        </div>
-      </div>
-    );
-  }
-
-  const formatearFecha = (fechaStr) => {
-    if (!fechaStr) return '';
-    const fecha = new Date(fechaStr);
-    return fecha.toLocaleDateString('es-ES', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    });
+        toast.success(`Usuario ${user.nombre_completo} registrado correctamente`);
+        setIsRegisterModalOpen(false);
+        setSelectedUserJson('');
+        fetchAsistentes(); // Reload list
+    } catch (error) {
+        toast.error(error.message);
+    } finally {
+        setIsRegistering(false);
+    }
   };
+
+  const handleScanQR = () => {
+    toast.info('Funcionalidad de escaneo QR en desarrollo. Por favor use el registro manual por ahora.');
+  };
+
+  const filteredAsistentes = asistentes.filter(a => 
+    a.nombre_completo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    a.correo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    a.numero_ieee?.includes(searchTerm)
+  );
+  
+  // Filter out users already registered to avoid duplicates in dropdown
+  const availableUsers = usersCatalog.filter(u => 
+    !asistentes.some(a => (a.id_miembro === u.id && u.tipo === 'miembro') || (a.id_invitado === u.id && u.tipo === 'invitado'))
+  );
+
+  if (isLoading) return <div className="flex justify-center h-screen items-center"><LoadingSpinner text="Cargando lista..." /></div>;
 
   return (
     <div className="container mx-auto px-4 py-8">
-      {/* Header con información del evento */}
-      <div className="bg-gray-800/70 rounded-lg shadow-lg p-6 mb-8 border border-gray-700">
+      <div className="mb-6">
+        <Button onClick={() => router.back()} variant="text" className="mb-4 text-gray-400 hover:text-white flex items-center gap-2">
+            <FaArrowLeft /> Volver a Eventos
+        </Button>
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div>
-            <h2 className="text-3xl font-bold text-white flex items-center gap-3">
-              <FaUsers className="text-blue-400" /> 
-              Gestión de Asistentes
-            </h2>
-            {eventoInfo && (
-              <div className="mt-2">
-                <p className="text-xl font-semibold text-blue-300">
-                  {eventoInfo.nombre_evento}
-                </p>
-                <p className="text-gray-300 flex items-center gap-2 mt-1">
-                  <FaCalendarAlt className="text-gray-400" /> 
-                  {formatearFecha(eventoInfo.fecha)}
-                </p>
-              </div>
-            )}
-          </div>
-          <Button 
-            onClick={() => router.push('/admin')} 
-            variant="secondary"
-            icon={<FaArrowLeft />}
-            className="w-full md:w-auto transition-all hover:bg-gray-600"
-          >
-            Volver a Eventos
-          </Button>
-        </div>
-      </div>
-
-      {/* Buscador */}
-      <div className="mb-8">
-        <div className="relative">
-          <Input
-            type="text"
-            placeholder="Buscar por nombre, correo, carrera o semestre..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 bg-gray-800 border-gray-700 focus:border-blue-500 focus:ring-blue-500"
-          />
-          <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-        </div>
-      </div>
-
-      {/* Estadísticas */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <div className="bg-gray-800 rounded-lg shadow-md p-4 border border-blue-900/30">
-          <p className="text-gray-400 text-sm">Total Asistentes</p>
-          <p className="text-2xl font-bold text-white">{asistentes.miembros.length + asistentes.invitados.length}</p>
-        </div>
-        <div className="bg-gray-800 rounded-lg shadow-md p-4 border border-blue-900/30">
-          <p className="text-gray-400 text-sm">Miembros</p>
-          <p className="text-2xl font-bold text-blue-300">{asistentes.miembros.length}</p>
-        </div>
-        <div className="bg-gray-800 rounded-lg shadow-md p-4 border border-blue-900/30">
-          <p className="text-gray-400 text-sm">Invitados</p>
-          <p className="text-2xl font-bold text-purple-300">{asistentes.invitados.length}</p>
-        </div>
-        <div className="bg-gray-800 rounded-lg shadow-md p-4 border border-blue-900/30">
-          <p className="text-gray-400 text-sm">Total Asistencia</p>
-          <p className="text-2xl font-bold text-green-300">
-            {asistentes.miembros.filter(m => m.asistio).length + asistentes.invitados.filter(i => i.asistio).length}
-          </p>
-        </div>
-      </div>
-
-      {/* Tabla Única de Asistentes */}
-      <div className="bg-gray-800 rounded-lg shadow-lg p-6 border border-gray-700">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-semibold text-white flex items-center gap-2">
-            <FaUsers className="text-blue-400" /> Lista de Asistentes
-            <span className="bg-blue-600 text-xs rounded-full px-2 py-1 ml-2">
-              {combinedAsistentes.length}
-            </span>
-          </h3>
-          <div className="flex gap-2">
-            <span className="flex items-center text-sm text-blue-300">
-              <FaUserTie className="mr-1" /> Miembros: {asistentes.miembros.length}
-            </span>
-            <span className="flex items-center text-sm text-purple-300">
-              <FaUserFriends className="mr-1" /> Invitados: {asistentes.invitados.length}
-            </span>
-          </div>
-        </div>
-        
-        {combinedAsistentes.length > 0 ? (
-          <div className="overflow-x-auto">
-            <Table
-              columns={[
-                { 
-                  header: 'Tipo', 
-                  accessor: 'tipo',
-                  render: (asistente) => (
-                    <div className={`flex items-center gap-2 ${
-                      asistente.tipo === 'miembro' ? 'text-blue-300' : 'text-purple-300'
-                    }`}>
-                      {asistente.tipo === 'miembro' ? (
-                        <FaUserTie title="Miembro" />
-                      ) : (
-                        <FaUserFriends title="Invitado" />
-                      )}
-                      <span className="capitalize">{asistente.tipo}</span>
-                    </div>
-                  ),
-                  cellClassName: 'font-medium'
-                },
-                { 
-                  header: 'Nombre', 
-                  accessor: 'nombre_completo',
-                  cellClassName: 'font-medium'
-                },
-                { 
-                  header: 'Carrera', 
-                  accessor: 'carrera',
-                  render: (asistente) => (
-                    <div className="flex items-center gap-2">
-                      <FaGraduationCap className="text-gray-500" />
-                      <span>{asistente.carrera || 'No especificado'}</span>
-                    </div>
-                  ),
-                  cellClassName: 'text-gray-300'
-                },
-                { 
-                  header: 'Semestre', 
-                  accessor: 'semestre',
-                  render: (asistente) => (
-                    <div className="flex items-center gap-2 justify-center">
-                      <FaBook className="text-gray-500" />
-                      <span>{asistente.semestre || 'N/A'}</span>
-                    </div>
-                  ),
-                  cellClassName: 'text-gray-300 text-center'
-                },
-                { 
-                  header: 'Correo', 
-                  accessor: 'correo_electronico',
-                  render: (asistente) => (
-                    <div className="flex items-center gap-2">
-                      <FaEnvelope className="text-gray-500" />
-                      <span className="text-gray-300">{asistente.correo_electronico}</span>
-                    </div>
-                  ),
-                  cellClassName: 'text-gray-400 text-sm'
-                },
-                {
-                  header: 'Asistencia',
-                  render: (asistente) => (
-                    <button
-                      onClick={() => handleToggleAsistencia(
-                        asistente.tipo === 'miembro' ? asistente.id_miembro : asistente.id_invitado,
-                        asistente.tipo === 'miembro',
-                        asistente.asistio
-                      )}
-                      className={`flex items-center gap-1 text-xs px-3 py-1 rounded-full transition-all ${
-                        asistente.asistio 
-                          ? 'bg-green-700 hover:bg-green-800 text-white' 
-                          : 'bg-red-700 hover:bg-red-800 text-white'
-                      }`}
-                    >
-                      {asistente.asistio ? (
-                        <>
-                          <FaCheck /> Asistió
-                        </>
-                      ) : (
-                        <>
-                          <FaTimes /> No asistió
-                        </>
-                      )}
-                    </button>
-                  )
-                },
-                {
-                  header: 'Acciones',
-                  render: (asistente) => (
-                    <button
-                      onClick={() => handleDeleteConfirmation(
-                        asistente.tipo === 'miembro' ? asistente.id_miembro : asistente.id_invitado,
-                        asistente.tipo === 'miembro',
-                        asistente.nombre_completo
-                      )}
-                      className="bg-red-600 hover:bg-red-700 text-white py-1 px-3 rounded-md flex items-center gap-1 text-sm transition-all"
-                    >
-                      <FaTrash size={12} /> Eliminar
-                    </button>
-                  ),
-                  cellClassName: 'text-right'
-                }
-              ]}
-              data={combinedAsistentes}
-              emptyMessage="No hay asistentes registrados en este evento"
-              className="w-full"
-              headerClassName="bg-gray-700 text-gray-300"
-              rowClassName="border-b border-gray-700 hover:bg-gray-700/50"
-            />
-          </div>
-        ) : (
-          <div className="bg-gray-700/30 rounded-lg p-8 text-center">
-            <p className="text-gray-400">No hay asistentes que coincidan con tu búsqueda</p>
-          </div>
-        )}
-      </div>
-
-      {/* Modal de confirmación de eliminación */}
-      {deleteConfirmation && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 rounded-lg shadow-lg p-6 max-w-md w-full border border-gray-700">
-            <h3 className="text-xl font-bold text-white mb-4">Confirmar eliminación</h3>
-            <p className="text-gray-300 mb-6">
-              ¿Estás seguro de que deseas eliminar a <span className="font-semibold text-red-300">{deleteConfirmation.nombre}</span> de la lista de asistentes?
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3 justify-end">
-              <Button 
-                onClick={() => setDeleteConfirmation(null)} 
-                variant="secondary"
-                className="w-full sm:w-auto"
-              >
-                Cancelar
-              </Button>
-              <Button 
-                onClick={() => handleEliminarAsistente(deleteConfirmation.idAsistente, deleteConfirmation.esMiembro)} 
-                variant="destructive"
-                className="w-full sm:w-auto bg-red-600 hover:bg-red-700"
-                icon={<FaTrash />}
-              >
-                Eliminar
-              </Button>
+            <div>
+                <h1 className="text-2xl font-bold text-white">Lista de Asistencia</h1>
+                {eventoInfo.nombre && (
+                    <p className="text-gray-400 text-sm mt-1">
+                        Evento: <span className="text-green-400 font-semibold">{eventoInfo.nombre}</span> 
+                        <span className="mx-2">|</span> 
+                        Fecha: {new Date(eventoInfo.fecha).toLocaleDateString()}
+                    </p>
+                )}
             </div>
-          </div>
+            <div className="flex gap-4">
+                 <div className="bg-gray-800 p-2 rounded-lg text-center min-w-[100px]">
+                    <div className="text-2xl font-bold text-white">{asistentes.length}</div>
+                    <div className="text-xs text-gray-400">Inscritos</div>
+                 </div>
+                 <div className="bg-gray-800 p-2 rounded-lg text-center min-w-[100px]">
+                    <div className="text-2xl font-bold text-green-400">{asistentes.filter(a => a.asistio).length}</div>
+                    <div className="text-xs text-gray-400">Asistieron</div>
+                 </div>
+            </div>
         </div>
-      )}
+      </div>
+
+      <div className="bg-gray-800 rounded-lg shadow-md p-4 mb-4 flex flex-col md:flex-row gap-4 justify-between items-center">
+        <Input 
+            placeholder="Buscar por nombre, correo o IEEE..." 
+            value={searchTerm} 
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="bg-gray-700 border-gray-600 focus:border-green-500 w-full md:w-96"
+            icon={<FaSearch className="text-gray-400"/>}
+        />
+        <div className="flex gap-2 w-full md:w-auto">
+            <Button onClick={handleScanQR} variant="secondary" className="flex items-center gap-2">
+                <FaQrcode /> <span className="hidden sm:inline">Escanear QR</span>
+            </Button>
+            <Button onClick={() => setIsRegisterModalOpen(true)} variant="primary" className="flex items-center gap-2">
+                <FaUserPlus /> <span className="hidden sm:inline">Registrar Manualmente</span>
+            </Button>
+        </div>
+      </div>
+
+      <div className="bg-gray-800 rounded-lg shadow-md overflow-hidden">
+        <Table
+          columns={[
+            { header: 'Nombre', accessor: 'nombre_completo', cellClassName: 'font-medium text-white py-3 px-4' },
+            { header: 'Correo', accessor: 'correo', cellClassName: 'text-gray-400 text-sm py-3 px-4' },
+            { header: 'Tipo', accessor: 'tipo_usuario', cellClassName: 'text-xs text-gray-500 py-3 px-4' },
+            { 
+              header: 'Estado Pago', 
+              render: (row) => (
+                row.requiere_pago ? (
+                    <button 
+                        onClick={() => togglePago(row.id_inscripcion, row.pago_completado)}
+                        className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold transition ${row.pago_completado ? 'bg-green-900/50 text-green-400 border border-green-500/30' : 'bg-red-900/50 text-red-400 border border-red-500/30'}`}
+                        title="Clic para cambiar estado de pago"
+                    >
+                        {row.pago_completado ? <><FaCheck size={10}/> PAGADO</> : <><FaTimes size={10}/> PENDIENTE</>}
+                    </button>
+                ) : <span className="text-xs text-gray-500">Gratuito</span>
+              ),
+              cellClassName: 'py-3 px-4' 
+            },
+            { 
+              header: 'Asistencia', 
+              render: (row) => (
+                <button 
+                    onClick={() => toggleAsistencia(row.id_inscripcion, row.asistio)}
+                    className={`flex items-center justify-center w-8 h-8 rounded-full transition ${row.asistio ? 'bg-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                    title={row.asistio ? "Marcar como no asistió" : "Marcar asistencia"}
+                >
+                    {row.asistio ? <FaCheck /> : <div className="w-2 h-2 rounded-full bg-gray-500"></div>}
+                </button>
+              ),
+              cellClassName: 'py-3 px-4 text-center' 
+            }
+          ]}
+          data={filteredAsistentes}
+          emptyMessage="No hay asistentes registrados"
+          className="w-full"
+          headerClassName="bg-gray-700 text-gray-300"
+          rowClassName="border-b border-gray-700 hover:bg-gray-700/50"
+        />
+      </div>
+
+      {/* Manual Register Modal */}
+      <Modal
+        isOpen={isRegisterModalOpen}
+        onClose={() => setIsRegisterModalOpen(false)}
+        title="Registrar Asistente Manualmente"
+      >
+        <form onSubmit={handleManualRegister} className="space-y-4">
+            <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Seleccionar Usuario</label>
+                <select 
+                    value={selectedUserJson} 
+                    onChange={(e) => setSelectedUserJson(e.target.value)}
+                    className="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 min-h-[150px]"
+                    size="5" 
+                >
+                    <option value="" disabled>-- Seleccione un usuario --</option>
+                    {availableUsers.map(user => (
+                        <option key={`${user.tipo}-${user.id}`} value={JSON.stringify(user)} className="py-1">
+                            {user.nombre_completo} ({user.tipo}) - {user.email}
+                        </option>
+                    ))}
+                    {availableUsers.length === 0 && <option disabled>No hay usuarios disponibles para registrar</option>}
+                </select>
+                <p className="text-xs text-gray-400 mt-2">
+                    Lista de usuarios (miembros e invitados) que aún no están inscritos en este evento.
+                </p>
+            </div>
+            
+            <div className="flex justify-end gap-3 mt-6">
+                <Button type="button" onClick={() => setIsRegisterModalOpen(false)} variant="secondary">Cancelar</Button>
+                <Button type="submit" variant="primary" disabled={isRegistering}>
+                    {isRegistering ? <LoadingSpinner size="sm" /> : 'Registrar Usuario'}
+                </Button>
+            </div>
+        </form>
+      </Modal>
     </div>
   );
 }

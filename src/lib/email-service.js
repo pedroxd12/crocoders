@@ -26,13 +26,13 @@ export async function sendRecoveryEmail(email, name, userId) {
 
     // Guardar token en la base de datos
     await sql`
-      DELETE FROM password_reset_tokens 
-      WHERE user_id = ${userId}
+      DELETE FROM password_reset_token 
+      WHERE id_miembro = ${userId}
     `;
 
     await sql`
-      INSERT INTO password_reset_tokens 
-        (user_id, token, verification_code, expires_at) 
+      INSERT INTO password_reset_token 
+        (id_miembro, token, codigo_verificacion, expires_at) 
       VALUES 
         (${userId}, ${token}, ${verificationCode}, ${expiresAt})
     `;

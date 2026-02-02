@@ -51,7 +51,7 @@ export default function BongoCatKeyboard() {
                  
                  // Centrado y levantado ligeramente
                  keyboard.position.x = 0;
-                 keyboard.position.y = 5; 
+                 keyboard.position.y = 15; 
                  keyboard.position.z = 0;
             } else {
                  // Configuración DESKTOP

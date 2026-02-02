@@ -45,8 +45,8 @@ export async function POST(request) {
 
     // Verificar que el token de recuperación aún sea válido
     const [token] = await sql`
-      SELECT * FROM password_reset_tokens 
-      WHERE id = ${decoded.tokenId} AND user_id = ${decoded.id}
+      SELECT * FROM password_reset_token 
+      WHERE id_token = ${decoded.tokenId} AND id_miembro = ${decoded.id}
     `;
 
     if (!token) {
@@ -68,8 +68,8 @@ export async function POST(request) {
 
     // Eliminar todos los tokens de recuperación para este usuario
     await sql`
-      DELETE FROM password_reset_tokens 
-      WHERE user_id = ${decoded.id}
+      DELETE FROM password_reset_token 
+      WHERE id_miembro = ${decoded.id}
     `;
 
     return NextResponse.json({

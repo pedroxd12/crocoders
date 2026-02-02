@@ -159,9 +159,9 @@ export async function PUT(request) {
           
           if (existing.length > 0) {
               if (usuario && usuario.trim() !== '') {
-                   await sql`UPDATE cuenta_plataforma SET usuario = ${usuario}, activo = true, updated_at = NOW() WHERE id_cuenta = ${existing[0].id_cuenta}`;
+                   await sql`UPDATE cuenta_plataforma SET usuario = ${usuario}, activo = true, ultima_actualizacion = NOW() WHERE id_cuenta = ${existing[0].id_cuenta}`;
               } else {
-                   await sql`UPDATE cuenta_plataforma SET usuario = '', activo = false, updated_at = NOW() WHERE id_cuenta = ${existing[0].id_cuenta}`;
+                   await sql`UPDATE cuenta_plataforma SET usuario = '', activo = false, ultima_actualizacion = NOW() WHERE id_cuenta = ${existing[0].id_cuenta}`;
               }
           } else if (usuario && usuario.trim() !== '') {
               await sql`INSERT INTO cuenta_plataforma (id_miembro, id_plataforma, usuario) VALUES (${decoded.id}, ${pid}, ${usuario})`;

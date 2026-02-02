@@ -66,13 +66,13 @@ export async function POST(request) {
     let registroExistente;
     if (tipo === 'miembro') {
       [registroExistente] = await sql`
-        SELECT 1 FROM asistencia_miembro 
+        SELECT 1 FROM inscripcion_evento 
         WHERE id_evento = ${eventoId} AND id_miembro = ${userId} 
         LIMIT 1
       `;
     } else {
       [registroExistente] = await sql`
-        SELECT 1 FROM asistencia_invitado 
+        SELECT 1 FROM inscripcion_evento 
         WHERE id_evento = ${eventoId} AND id_invitado = ${userId} 
         LIMIT 1
       `;
@@ -85,44 +85,41 @@ export async function POST(request) {
       );
     }
     
-    // Eliminar el registro según el tipo
+    // Eliminar el registro (o marcar como cancelado si prefieres historial, pero el usuario pidió borrar)
+    // Usaremos DELETE físico como pidió el usuario para miembros, aqui aplica igual para la inscripción
     if (tipo === 'miembro') {
       await sql`
-        DELETE FROM asistencia_miembro 
+        DELETE FROM inscripcion_evento 
         WHERE id_evento = ${eventoId} AND id_miembro = ${userId}
       `;
     } else {
       await sql`
-        DELETE FROM asistencia_invitado 
+        DELETE FROM inscripcion_evento 
         WHERE id_evento = ${eventoId} AND id_invitado = ${userId}
       `;
     }
     
-    // Obtener datos actualizados del evento
+    // Obtener datos actualizados del evento (cupos se actualizan via trigger)
     const [updatedEvent] = await sql`
       SELECT 
-        e.id_evento,
-        e.nombre_evento,
-        e.fecha,
-        e.hora_inicio,
-        COUNT(DISTINCT am.id_miembro) + COUNT(DISTINCT ai.id_invitado) as asistentes_count,
-        CASE 
-          WHEN e.cupos IS NULL THEN NULL 
-          ELSE e.cupos - (COUNT(DISTINCT am.id_miembro) + COUNT(DISTINCT ai.id_invitado))
-        END as cupos_disponibles
-      FROM evento e
-      LEFT JOIN asistencia_miembro am ON e.id_evento = am.id_evento
-      LEFT JOIN asistencia_invitado ai ON e.id_evento = ai.id_evento
-      WHERE e.id_evento = ${eventoId}
-      GROUP BY e.id_evento
+        id_evento,
+        nombre as nombre_evento,
+        fecha_inicio as fecha,
+        hora_inicio,
+        cupos_disponibles,
+        (SELECT COUNT(*) FROM inscripcion_evento WHERE id_evento = ${eventoId}) as asistentes_count
+      FROM evento
+      WHERE id_evento = ${eventoId}
     `;
     
+    if (!updatedEvent) return NextResponse.json({ success: true, message: 'Registro cancelado' });
+
     return NextResponse.json({ 
       success: true,
       message: 'Cancelación de registro exitosa',
       event: {
         ...updatedEvent,
-        fecha: updatedEvent.fecha.toISOString().split('T')[0],
+        fecha: updatedEvent.fecha instanceof Date ? updatedEvent.fecha.toISOString().split('T')[0] : updatedEvent.fecha,
         asistentes_count: Number(updatedEvent.asistentes_count) || 0,
         cupos_disponibles: updatedEvent.cupos_disponibles !== null ? Number(updatedEvent.cupos_disponibles) : null
       }
