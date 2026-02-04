@@ -1,4 +1,4 @@
-// src/app/eventos/[id]/page.jsx
+﻿// src/app/eventos/[id]/page.jsx
 'use client';
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useRouter, useParams, usePathname, useSearchParams } from 'next/navigation';
@@ -12,15 +12,16 @@ import Input from '@/components/ui/Input';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { 
   Calendar, Users, Clock, ArrowLeft, CheckCircle, XCircle, UserPlus, 
-  LogIn, AlertTriangle, DollarSign, Loader, Info, Tag, BookOpen, Building, PartyPopper
+  LogIn, AlertTriangle, DollarSign, Loader, Info, Tag, BookOpen, Building, PartyPopper, QrCode, Trash2, Plus,
+  Eye as EyeIcon, Shield, MapPin, Globe, ExternalLink
 } from 'lucide-react';
 
-async function sendEventRegistrationEmail(email, name, eventDetails) {
+async function sendEventRegistrationEmail(email, name, eventDetails, qrToken) {
   try {
     const response = await fetch('/api/confirmation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, name, eventDetails }),
+      body: JSON.stringify({ email, name, eventDetails, qrToken }),
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Error al enviar correo');
@@ -41,21 +42,23 @@ function EventoDetalleContent() {
   const [error, setError] = useState(null);
   
   const [isRegistered, setIsRegistered] = useState(false);
+  const [qrToken, setQrToken] = useState(null);
   const [registrationCheckLoading, setRegistrationCheckLoading] = useState(true);
 
+  // Modals
   const [showRegistrationTypeModal, setShowRegistrationTypeModal] = useState(false);
   const [showGuestFormModal, setShowGuestFormModal] = useState(false);
+  const [showTeamFormModal, setShowTeamFormModal] = useState(false);
   const [showUnregisterModal, setShowUnregisterModal] = useState(false);
-  const [actionLoading, setActionLoading] = useState(false);
-
+  const [showTicketModal, setShowTicketModal] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
+
+  // Status & Actions
+  const [actionLoading, setActionLoading] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState({ show: false, message: '', type: 'invitado' });
   const [selectedImageUrl, setSelectedImageUrl] = useState('');
 
-  const [showGuestRegistrationSuccess, setShowGuestRegistrationSuccess] = useState(false);
-  // NUEVO: Estado para la animación de éxito de registro de MIEMBRO
-  const [showMemberRegistrationSuccess, setShowMemberRegistrationSuccess] = useState(false);
-
-
+  // Forms Data
   const [guestData, setGuestData] = useState({
     nombre_completo: '',
     correo_electronico: '',
@@ -64,6 +67,13 @@ function EventoDetalleContent() {
     carrera: '',
     escuela_institucion: ''
   });
+  
+  const [teamData, setTeamData] = useState({
+    nombre: '',
+    integrantes: [{ nombre: '', email: '', telefono: '', institucion: '', carrera: '', semestre: '', es_capitan: true }],
+    asesor: { nombre: '', email: '', telefono: '', institucion: '' }
+  });
+
   const [formErrors, setFormErrors] = useState({});
 
   const semestres = Array.from({ length: 14 }, (_, i) => ({ value: (i + 1).toString(), label: `${i + 1}° Semestre` }));
@@ -112,11 +122,14 @@ function EventoDetalleContent() {
     try {
       const res = await fetch(`/api/eventos/check-register?id=${currentEvento.id_evento}&userId=${currentUser.id_miembro}`);
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({error: 'Error al verificar estado de registro'}));
-        throw new Error(errData.error ||'Error al verificar estado de registro');
+        // Silencioso
+      } else {
+        const data = await res.json();
+        setIsRegistered(data.registered);
+        if (data.registered && data.qrToken) {
+            setQrToken(data.qrToken);
+        }
       }
-      const data = await res.json();
-      setIsRegistered(data.registered);
     } catch (err) {
       setIsRegistered(false);
     } finally {
@@ -139,65 +152,42 @@ function EventoDetalleContent() {
     }
   }, [evento, user, isAuthenticated, authLoading, loading, checkUserRegistration]);
 
-  useEffect(() => {
-    const registeredParam = searchParams.get('registered');
-    const eventIdParam = searchParams.get('eventId');
-    if (registeredParam === 'true' && eventIdParam === id) {
-      setIsRegistered(true);
-      setRegistrationCheckLoading(false); 
-      toast.success('¡Inscripción exitosa!', { theme: "dark" });
-      
-      if (!isAuthenticated) { // Si no está autenticado, fue un invitado
-        setShowGuestRegistrationSuccess(true);
-        setTimeout(() => setShowGuestRegistrationSuccess(false), 4000);
-      } else if (isAuthenticated) { // Si está autenticado, fue un miembro
-        setShowMemberRegistrationSuccess(true);
-        setTimeout(() => setShowMemberRegistrationSuccess(false), 4000);
-      }
-      router.replace(`/eventos/${id}`, {scroll: false}); 
-    }
-  }, [searchParams, router, id, isAuthenticated]);
-
-  const validateGuestForm = () => {
-    const errors = {};
-    if (!guestData.nombre_completo.trim()) errors.nombre_completo = 'Nombre es requerido';
-    if (!guestData.correo_electronico.trim()) errors.correo_electronico = 'Email es requerido';
-    else if (!/\S+@\S+\.\S+/.test(guestData.correo_electronico)) errors.correo_electronico = 'Email no válido';
-    if (!guestData.numero_telefono.trim()) errors.numero_telefono = 'Teléfono es requerido';
-    else if (!/^[0-9]{10}$/.test(guestData.numero_telefono)) errors.numero_telefono = 'Teléfono debe ser de 10 dígitos';
-    if (!guestData.carrera.trim()) errors.carrera = 'Carrera/Bachillerato es requerido';
-    if (!guestData.escuela_institucion.trim()) errors.escuela_institucion = 'Escuela/Institución es requerida';
-    if (!guestData.semestre) errors.semestre = 'Semestre es requerido';
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
-  const handleApiRegistration = async (type) => {
+  const handleApiRegistration = async (type, payload = {}) => {
     setActionLoading(true);
-    const endpoint = type === 'register' ? '/api/eventos/register' : '/api/eventos/unregister';
-    const userIdToUse = (type === 'unregister' || (type === 'register' && isAuthenticated)) ? user?.id_miembro : guestData.id_invitado_temp;
-    const userType = isAuthenticated ? 'miembro' : 'invitado';
-
-    if (!userIdToUse && !(type === 'register' && !isAuthenticated)) { 
-        toast.error("Error: No se pudo identificar al usuario para esta acción.", {theme: "dark"});
-        setActionLoading(false);
-        return;
-    }
+    const endpoint = type === 'unregister' ? '/api/eventos/unregister' : '/api/eventos/register';
     
+    // Preparar userId
+    let userIdToUse = user?.id_miembro;
+    if (type === 'register' && !isAuthenticated && !payload.equipo) {
+        // Invitado individual
+        // (Se maneja en el bloque try/catch con llamada previa a /api/invitados si fuese necesario, 
+        // pero ahora el backend soporta creación inline en registro de equipo, 
+        // para individual invitado seguimos usand la lógica anterior o unificada).
+        // Si es guest individual, enviamos datos de guest
+    }
+
     try {
-      let requestBody = { eventoId: evento.id_evento, userId: userIdToUse, tipo: userType };
+      let requestBody = { eventoId: evento.id_evento, tipo: isAuthenticated ? 'miembro' : 'invitado', userId: userIdToUse };
       
-      if (type === 'register' && !isAuthenticated) {
-        const guestRes = await fetch('/api/invitados', {
+      // Lógica específica por tipo
+      if (type === 'register_team') {
+          requestBody = {
+              eventoId: evento.id_evento,
+              tipo: 'equipo',
+              equipo: payload.equipo,
+              integrantes: payload.integrantes,
+              asesor: payload.asesor
+          };
+      } else if (type === 'register' && !isAuthenticated) {
+         // Registro Invitado Individual
+         const guestRes = await fetch('/api/invitados', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(guestData),
-        });
-        const guestResult = await guestRes.json();
-        if (!guestRes.ok || !guestResult.id_invitado) {
-          throw new Error(guestResult.error || 'Error al procesar datos de invitado');
-        }
-        requestBody.userId = guestResult.id_invitado;
+            body: JSON.stringify(payload.guestData),
+         });
+         const guestResult = await guestRes.json();
+         if (!guestRes.ok) throw new Error(guestResult.error || 'Error al procesar datos de invitado');
+         requestBody.userId = guestResult.id_invitado;
       }
 
       const response = await fetch(endpoint, {
@@ -206,45 +196,46 @@ function EventoDetalleContent() {
         body: JSON.stringify(requestBody),
       });
       const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || `Error en ${type}`);
+      if (!response.ok) throw new Error(result.error || `Error en ${type}`);
+      
+      // Éxito
+      setIsRegistered(type !== 'unregister'); 
+      if (result.event) {
+        setEvento(prev => ({...prev, ...result.event})); 
+      }
+      if (result.qrToken) {
+        setQrToken(result.qrToken);
       }
       
-      setIsRegistered(type === 'register'); 
-      if (result.event) {
-        setEvento(prev => ({...prev, ...result.event, isPastEvent: prev.isPastEvent, tipo_evento_display: prev.tipo_evento_display})); 
-      }
-      toast.success(result.message || `${type === 'register' ? 'Inscripción' : 'Cancelación'} exitosa!`, { theme: "dark" });
-
-      if (type === 'register') {
-        const emailToSend = isAuthenticated ? user.correo_electronico : guestData.correo_electronico;
-        const nameToSend = isAuthenticated ? user.nombre_completo : guestData.nombre_completo;
-        if (emailToSend && nameToSend && result.event) {
-          sendEventRegistrationEmail(emailToSend, nameToSend, result.event);
-        }
-        
-        if (!isAuthenticated) { // Invitado
-          setShowGuestRegistrationSuccess(true);
-          setTimeout(() => setShowGuestRegistrationSuccess(false), 4000);
-        } else { // Miembro
-          setShowMemberRegistrationSuccess(true);
-          setTimeout(() => setShowMemberRegistrationSuccess(false), 4000);
-        }
-      }
-
+      const successType = isAuthenticated ? 'miembro' : 'invitado';
+      const isCancellation = type === 'unregister';
+      
+      setShowSuccessModal({ 
+        show: true, 
+        message: isCancellation ? 'Inscripción cancelada correctamente.' : 'Te has inscrito correctamente.', 
+        title: isCancellation ? 'Cancelación Exitosa' : '¡Registro Exitoso!',
+        type: successType,
+        isCancellation // Flag para UI condicional (icono, texto extra)
+      });
+      
+      // Cerrar modales
       setShowRegistrationTypeModal(false);
       setShowGuestFormModal(false);
+      setShowTeamFormModal(false);
       setShowUnregisterModal(false);
-      if (type === 'register' && !isAuthenticated) {
-        setGuestData({ nombre_completo: '', correo_electronico: '', numero_telefono: '', semestre: '', carrera: '', escuela_institucion: '' });
-        setFormErrors({});
+
+      // Enviar correo (simplificado) - Solo si no es unregister
+      if (!isCancellation) {
+         sendEventRegistrationEmail(
+            isAuthenticated ? user.correo_electronico : (payload.guestData?.correo_electronico || payload.integrantes?.[0]?.email),
+            isAuthenticated ? user.nombre_completo : (payload.guestData?.nombre_completo || payload.integrantes?.[0]?.nombre),
+            result.event || evento,
+            result.qrToken
+         );
       }
 
     } catch (error) {
       toast.error(`Error: ${error.message}`, { theme: "dark" });
-      if (!isAuthenticated && type === 'register' && error.message.toLowerCase().includes("miembro")) {
-        setFormErrors(prev => ({...prev, correo_electronico: error.message}));
-      }
     } finally {
       setActionLoading(false);
     }
@@ -255,431 +246,448 @@ function EventoDetalleContent() {
       setShowUnregisterModal(true);
     } else if (evento.isPastEvent) {
       toast.info('Este evento ya ha finalizado.', { theme: "dark" });
-    } else if (evento.cupos !== null && evento.cupos_disponibles <= 0) {
-      toast.info('No hay cupos disponibles para este evento.', { theme: "dark" });
+    } else if (evento.permite_equipos) {
+      // Flujo de Equipos
+      // Pre-llenar datos del capitán si está autenticado
+      if (isAuthenticated && teamData.integrantes[0].nombre === '') {
+          const newTeam = {...teamData};
+          newTeam.integrantes[0] = {
+              nombre: user.nombre_completo || '',
+              email: user.correo_electronico || '',
+              telefono: user.numero_telefono || '',
+              // Dejar vacío si no tenemos el dato exacto, evitar autocompletado incorrecto
+              institucion: user.escuela_institucion || '',
+              carrera: user.carrera || '',
+              semestre: user.semestre?.toString() || '',
+              es_capitan: true,
+              es_miembro: true
+          };
+          setTeamData(newTeam);
+      }
+      setShowTeamFormModal(true);
     } else if (isAuthenticated) {
-      handleApiRegistration('register'); // Miembros se registran directamente
+      handleApiRegistration('register');
     } else {
-      setShowRegistrationTypeModal(true); // Invitados ven el modal de tipo de registro
+      setShowRegistrationTypeModal(true);
     }
   };
 
-  const handleGuestRegistrationSubmit = () => {
-    if (!validateGuestForm()) return;
-    handleApiRegistration('register');
+  // --- Handlers para Equipos ---
+  const addTeamMember = () => {
+    const maxMembers = evento.max_integrantes_equipo || 5; 
+    if (teamData.integrantes.length >= maxMembers) {
+        toast.info(`El equipo ya tiene el máximo de ${maxMembers} integrantes.`);
+        return;
+    }
+    setTeamData({
+        ...teamData,
+        integrantes: [...teamData.integrantes, { nombre: '', email: '', telefono: '', institucion: '', carrera: '', semestre: '', es_capitan: false }]
+    });
   };
 
-  const handleGuestInputChange = (e) => {
-    const { name, value } = e.target;
-    setGuestData(prev => ({ ...prev, [name]: value }));
-    if (formErrors[name]) setFormErrors(prev => ({ ...prev, [name]: '' }));
+  const removeTeamMember = (index) => {
+    // Check against dynamic minimum if available, otherwise 1
+    const minCount = evento.min_integrantes_equipo || 1;
+    if (teamData.integrantes.length <= minCount) {
+        toast.info(minCount > 1 
+            ? `Este evento requiere equipos de al menos ${minCount} estudiantes.` 
+            : "Debes tener al menos un integrante.");
+        return;
+    }
+    const newIntegrantes = [...teamData.integrantes];
+    newIntegrantes.splice(index, 1);
+    setTeamData({ ...teamData, integrantes: newIntegrantes });
   };
+ 
+  const updateTeamMember = (index, field, value) => {
+    const newIntegrantes = [...teamData.integrantes];
+    newIntegrantes[index] = { ...newIntegrantes[index], [field]: value };
+    setTeamData({ ...teamData, integrantes: newIntegrantes });
+  };
+  
+  // Validaciones extra antes de enviar
+  const handleTeamSubmit = (e) => {
+    e.preventDefault();
+    const minMembers = evento.min_integrantes_equipo || 1;
+    if (teamData.integrantes.length < minMembers) {
+        toast.warning(`Debes registrar al menos ${minMembers} integrantes.`);
+        return;
+    }
 
-  const formatTime = (timeStr) => {
-    if (!timeStr || typeof timeStr !== 'string') return 'N/A';
-    const parts = timeStr.split(':');
-    if (parts.length < 2) return 'N/A';
-    const hours = parseInt(parts[0], 10);
-    const minutes = parseInt(parts[1], 10);
-    if (isNaN(hours) || isNaN(minutes)) return 'N/A';
+    // Verificar campos vacíos en integrantes
+    const missingInfo = teamData.integrantes.some((m, i) => !m.nombre || !m.email); 
+    if (missingInfo) {
+        toast.error("Por favor completa Nombre y Email de todos los integrantes.");
+        return;
+    }
     
+    // Si se requiere asesor, verificar que esta completo (el HTML required lo hace, pero doble check no duele)
+    if (evento.requiere_asesor && (!teamData.asesor.nombre || !teamData.asesor.email)) {
+        toast.error("La información del asesor es obligatoria para este evento.");
+        return;
+    }
+
+    handleApiRegistration('register_team', { 
+        equipo: { nombre: teamData.nombre }, 
+        integrantes: teamData.integrantes, 
+        asesor: teamData.asesor 
+    });
+  };
+
+  // --- Utils ---
+  const formatTime = (timeStr) => {
+    if (!timeStr) return 'N/A';
+    const [hours, minutes] = timeStr.toString().split(':');
     const date = new Date();
-    date.setHours(hours);
-    date.setMinutes(minutes);
+    date.setHours(parseInt(hours), parseInt(minutes));
     return date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true });
   };
 
-  const handleImageClick = (imageUrl) => {
-    if (imageUrl) {
-        setSelectedImageUrl(imageUrl);
-        setShowImageModal(true);
-    }
-  };
-  
-  if (authLoading || loading) return <LoadingSpinner fullScreen text="Cargando detalle del evento..." />;
-  if (error) return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gray-900 text-red-400">
-      <AlertTriangle size={48} className="mb-4"/> 
-      <p className="text-xl text-center">{error}</p>
-      <Button onClick={fetchEventoDetails} variant="secondary" className="mt-6">Reintentar</Button>
-    </div>
-  );
-  if (!evento) return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-gray-900 text-gray-300">
-      <AlertTriangle size={48} className="mb-4"/> 
-      <p className="text-xl">Evento no encontrado.</p>
-      <Button onClick={() => router.push('/eventos')} variant="secondary" className="mt-6">Volver a Eventos</Button>
-    </div>
-  );
+  if (authLoading || loading) return <LoadingSpinner fullScreen text="Cargando evento..." />;
+  if (error || !evento) return <div className="min-h-screen items-center justify-center flex text-red-400">Error: {error || 'Evento no encontrado'}</div>;
 
   const canParticipate = !evento.isPastEvent && (evento.cupos === null || evento.cupos_disponibles > 0);
 
   return (
     <motion.main 
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }}
-      className="min-h-screen bg-gradient-to-b from-gray-900 via-slate-900 to-gray-900 text-white py-10 md:py-16 px-4"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} 
+      className="min-h-screen bg-[#0f1014] text-white pb-20 font-sans"
     >
-      <div className="max-w-5xl mx-auto">
-        <motion.button 
-          onClick={() => router.push('/eventos')}
-          className="flex items-center text-green-400 hover:text-green-300 mb-8 md:mb-10 group text-sm"
-          whileHover={{ x: -3 }} transition={{ type: "spring", stiffness: 300 }}
-        >
-          <ArrowLeft size={18} className="mr-2 group-hover:text-green-200 transition-colors" /> <span className="group-hover:underline">Volver a la lista de eventos</span>
-        </motion.button>
-
-        <motion.div 
-          initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.5, delay: 0.1 }}
-          className="bg-gray-800 rounded-2xl md:rounded-3xl overflow-hidden shadow-2xl border border-gray-700"
-        >
-          <div 
-            className="relative h-64 md:h-80 lg:h-96 w-full cursor-pointer" 
-            onClick={() => handleImageClick(evento.imagen_url || '/placeholder-event.jpg')}
-          >
-            <Image
-              src={evento.imagen_url || '/placeholder-event.jpg'}
-              alt={evento.nombre_evento || "Imagen del evento"}
-              fill
-              className="object-cover"
-              sizes="(max-width: 768px) 100vw, (max-width: 1024px) 80vw, 60vw"
-              priority
-              quality={80}
-              onError={(e) => { e.target.onerror = null; e.target.src = '/placeholder-event.jpg';}}
+      {/* Hero Header */}
+      <div className="relative h-[55vh] min-h-[500px] w-full overflow-hidden">
+          <div className="absolute inset-0">
+            <Image 
+                src={evento.imagen_url || '/placeholder-event.jpg'} 
+                alt={evento.nombre_evento} 
+                fill 
+                className="object-cover opacity-60 blur-sm scale-105" 
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/40 to-transparent"></div>
-            
-            <div className="absolute top-4 right-4 flex flex-col items-end gap-2">
-                {evento.isPastEvent ? (
-                    <span className="bg-slate-600 text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg flex items-center"><Clock size={14} className="mr-1.5"/>Finalizado</span>
-                ) : registrationCheckLoading ? (
-                    <span className="bg-blue-600 text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg flex items-center"><Loader size={14} className="mr-1.5 animate-spin"/>Verificando...</span>
-                ) : isRegistered ? (
-                    <span className="bg-purple-600 text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg flex items-center"><CheckCircle size={14} className="mr-1.5"/>Inscrito</span>
-                ) : (evento.cupos !== null && evento.cupos_disponibles <= 0) ? (
-                    <span className="bg-red-600 text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg flex items-center"><XCircle size={14} className="mr-1.5"/>Cupos Llenos</span>
-                ) : (
-                    <span className="bg-green-600 text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg">Disponible</span>
-                )}
-                {evento.tipo_evento_display && (
-                    <span className="bg-sky-600/80 text-white text-xs font-medium px-3 py-1.5 rounded-full shadow-lg flex items-center backdrop-blur-sm">
-                        <Tag size={14} className="mr-1.5" />
-                        {evento.tipo_evento_display}
-                    </span>
-                )}
-            </div>
+            <div className="absolute inset-0 bg-gradient-to-t from-[#0f1014] via-[#0f1014]/60 to-transparent" />
           </div>
 
-          <div className="p-6 md:p-8 lg:p-10">
-            <motion.h1 
-              initial={{ opacity: 0, y:10 }} animate={{ opacity: 1, y:0 }} transition={{ delay: 0.2, duration: 0.5 }}
-              className="text-3xl md:text-4xl lg:text-5xl font-extrabold mb-3 md:mb-4 
-                           text-transparent bg-clip-text bg-gradient-to-r from-green-300 via-teal-300 to-sky-400 leading-tight"
-            >
-              {evento.nombre_evento}
-            </motion.h1>
-            
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3, duration: 0.5 }} 
-              className="text-gray-300 mb-6 md:mb-8 flex items-center text-base md:text-lg"
-            >
-              <Calendar size={18} className="mr-2.5 text-green-400 flex-shrink-0"/>
-              {new Date(evento.fecha + 'T00:00:00').toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-            </motion.div>
-
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4, duration: 0.5 }} 
-              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 mb-8 md:mb-10"
-            >
-              <InfoCard icon={<Clock size={20}/>} title="Horario">
-                {formatTime(evento.hora_inicio)} - {formatTime(evento.hora_fin)}
-              </InfoCard>
-              
-              <InfoCard icon={<Users size={20}/>} title="Cupos">
-                {evento.cupos !== null ? 
-                  `${evento.asistentes_count || 0} / ${evento.cupos} (${Math.max(0, evento.cupos_disponibles ?? evento.cupos - (evento.asistentes_count || 0) )} disponibles)` : 
-                  'Cupos ilimitados'}
-              </InfoCard>
-
-              {evento.costo > 0 && (
-                <InfoCard icon={<DollarSign size={20}/>} title="Costo">
-                  ${evento.costo.toFixed(2)} MXN
-                </InfoCard>
-              )}
-            </motion.div>
-
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5, duration: 0.5 }} 
-              className="mb-8 md:mb-10"
-            >
-              <h2 className="text-2xl md:text-3xl font-bold text-green-300 mb-3 md:mb-4 flex items-center">
-                <Info size={24} className="mr-3"/>
-                Acerca de este evento
-              </h2>
-              <article className="prose prose-base sm:prose-lg prose-invert max-w-none 
-                                text-gray-200/90 whitespace-pre-line leading-relaxed 
-                                prose-headings:text-green-200 prose-a:text-teal-300 hover:prose-a:text-teal-200
-                                prose-strong:text-gray-100">
-                {evento.descripcion || 'No hay descripción detallada para este evento.'}
-              </article>
-            </motion.div>
-
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6, duration: 0.5 }} 
-              className="border-t border-gray-700 pt-6 md:pt-8"
-            >
-              <Button 
-                onClick={handleParticipateFlow}
-                variant={isRegistered ? 'danger' : (evento.isPastEvent || !canParticipate) ? 'disabled' : 'primary'}
-                className="w-full md:w-auto text-base md:text-lg py-3 px-8 shadow-lg"
-                disabled={actionLoading || registrationCheckLoading || (evento.isPastEvent || (!isRegistered && !canParticipate))}
-                loading={actionLoading || registrationCheckLoading}
-              >
-                {registrationCheckLoading ? 'Verificando...' : 
-                 isRegistered ? 'Cancelar Inscripción' : 
-                 evento.isPastEvent ? 'Evento Finalizado' : 
-                 !canParticipate ? 'Cupos Agotados' : 
-                 'Inscribirme al Evento'}
-              </Button>
-            </motion.div>
+          <div className="absolute top-0 left-0 w-full p-6 z-20 pointer-events-none">
+             <div className="max-w-7xl mx-auto px-6 md:px-12 pointer-events-auto">
+                <button onClick={() => router.push('/eventos')} className="text-white/80 hover:text-white flex items-center bg-black/30 px-4 py-2 rounded-full backdrop-blur-md transition-all hover:bg-black/50">
+                    <ArrowLeft size={18} className="mr-2" /> Regresar
+                </button>
+             </div>
           </div>
-        </motion.div>
+
+          <div className="absolute bottom-0 left-0 w-full p-6 md:p-12 max-w-7xl mx-auto flex flex-col md:flex-row items-end gap-8 z-10 w-full left-1/2 -translate-x-1/2">
+              <div className="relative w-48 h-64 md:w-64 md:h-80 shadow-2xl rounded-xl overflow-hidden border-4 border-[#0f1014] hidden md:block flex-shrink-0 cursor-pointer group" onClick={() => setSelectedImageUrl(evento.imagen_url) || setShowImageModal(true)}>
+                  <Image src={evento.imagen_url || '/placeholder-event.jpg'} alt="Flyer" fill className="object-cover group-hover:scale-105 transition-transform duration-500"/>
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                     <EyeIcon className="text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" size={32} />
+                  </div>
+              </div>
+
+              <div className="flex-1 mb-4">
+                  <div className="flex flex-wrap gap-2 mb-4">
+                      <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-green-500/20 text-green-400 border border-green-500/30 backdrop-blur-md">
+                          {evento.tipo_evento_display}
+                      </span>
+                      {evento.isPastEvent && <span className="px-3 py-1 rounded-full text-xs font-bold uppercase bg-red-500/20 text-red-400 border border-red-500/30">Finalizado</span>}
+                      {isRegistered && <span className="px-3 py-1 rounded-full text-xs font-bold uppercase bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center"><CheckCircle size={12} className="mr-1"/> Inscrito</span>}
+                  </div>
+                  
+                  <h1 className="text-4xl md:text-6xl font-black mb-4 leading-tight tracking-tight text-white drop-shadow-xl">
+                      {evento.nombre_evento}
+                  </h1>
+
+                  <div className="flex flex-wrap gap-x-8 gap-y-4 text-gray-300 text-sm md:text-base font-medium">
+                      <div className="flex items-center gap-2"><Calendar className="text-green-400" size={20}/> {new Date(evento.fecha + 'T00:00:00').toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                      <div className="flex items-center gap-2"><Clock className="text-blue-400" size={20}/> {formatTime(evento.hora_inicio)} - {formatTime(evento.hora_fin)}</div>
+                      <div className="flex items-center gap-2"><MapPin className="text-red-400" size={20}/> {evento.ubicacion || 'Por definir'}</div>
+                  </div>
+              </div>
+          </div>
       </div>
 
-      <Modal isOpen={showUnregisterModal} onClose={() => setShowUnregisterModal(false)} title="Confirmar Cancelación">
-        <p className="text-gray-300 mb-6">¿Estás seguro de que deseas cancelar tu inscripción para "{evento?.nombre_evento}"?</p>
-        <div className="flex justify-end space-x-3">
-          <Button onClick={() => setShowUnregisterModal(false)} variant="secondary" disabled={actionLoading}>No, mantener</Button>
-          <Button onClick={() => handleApiRegistration('unregister')} variant="danger" loading={actionLoading} disabled={actionLoading}>Sí, cancelar</Button>
-        </div>
-      </Modal>
+      <div className="max-w-7xl mx-auto px-6 md:px-12 pt-8 grid grid-cols-1 lg:grid-cols-3 gap-10">
+          {/* Main Content */}
+          <div className="lg:col-span-2 space-y-8">
+              {/* Image Mobile */}
+              <div className="block md:hidden rounded-xl overflow-hidden shadow-2xl relative h-64 border border-gray-800" onClick={() => setSelectedImageUrl(evento.imagen_url) || setShowImageModal(true)}>
+                  <Image src={evento.imagen_url || '/placeholder-event.jpg'} alt="Flyer" fill className="object-cover"/>
+              </div>
 
-      <Modal isOpen={showRegistrationTypeModal} onClose={() => setShowRegistrationTypeModal(false)} title="Confirmar Inscripción">
-         <p className="text-gray-300 mb-6">¿Cómo deseas inscribirte al evento "{evento?.nombre_evento}"?</p>
-        <div className="space-y-3">
-          <Button 
-            onClick={() => {
-                setShowRegistrationTypeModal(false);
-                const fromURL = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
-                router.push(`/iniciar?registerEvent=${id}&from=${encodeURIComponent(fromURL)}`);
-            }} 
-            variant="primary" 
-            className="w-full flex items-center justify-center"
-            disabled={actionLoading}
-          >
-            <LogIn size={18} className="mr-2"/>Soy miembro (Iniciar sesión)
-          </Button>
-          <Button 
-            onClick={() => { setShowRegistrationTypeModal(false); setShowGuestFormModal(true); }} 
-            variant="secondary" 
-            className="w-full flex items-center justify-center"
-            disabled={actionLoading}
-          >
-            <UserPlus size={18} className="mr-2"/>Soy invitado
-          </Button>
-        </div>
-      </Modal>
+              <div className="bg-[#181a20] p-6 md:p-8 rounded-2xl border border-gray-800 shadow-xl">
+                  <h3 className="text-2xl font-bold mb-6 flex items-center text-gray-100">
+                      <BookOpen className="mr-3 text-purple-400" /> Sobre el evento
+                  </h3>
+                  <div 
+                    className="prose prose-invert prose-lg max-w-none prose-p:text-gray-400 prose-headings:text-gray-200 prose-a:text-green-400 hover:prose-a:text-green-300 prose-strong:text-white"
+                    dangerouslySetInnerHTML={{ __html: evento.descripcion || '<p>Sin descripción disponible.</p>' }}
+                  />
+              </div>
 
-      <Modal 
-        isOpen={showGuestFormModal} 
-        onClose={() => { setShowGuestFormModal(false); setFormErrors({}); }} 
-        title={`Inscripción como Invitado: ${evento?.nombre_evento || ''}`}
-      >
-        <form onSubmit={(e) => { e.preventDefault(); handleGuestRegistrationSubmit(); }} className="space-y-4">
-          <Input 
-            label="Nombre completo *" 
-            name="nombre_completo" 
-            value={guestData.nombre_completo} 
-            onChange={handleGuestInputChange} 
-            required 
-            error={formErrors.nombre_completo} 
-            className="bg-gray-700 border-gray-600 focus:border-green-500"
-            icon={<UserPlus size={16} className="text-gray-400"/>}
-          />
-          <Input 
-            label="Correo electrónico *" 
-            type="email" 
-            name="correo_electronico" 
-            value={guestData.correo_electronico} 
-            onChange={handleGuestInputChange} 
-            required 
-            error={formErrors.correo_electronico} 
-            className="bg-gray-700 border-gray-600 focus:border-green-500"
-          />
-          <Input 
-            label="Número de teléfono *" 
-            name="numero_telefono" 
-            value={guestData.numero_telefono} 
-            onChange={handleGuestInputChange} 
-            required 
-            placeholder="10 dígitos" 
-            error={formErrors.numero_telefono} 
-            className="bg-gray-700 border-gray-600 focus:border-green-500"
-          />
-          <Input 
-            label="Escuela/Institución *" 
-            name="escuela_institucion" 
-            value={guestData.escuela_institucion} 
-            onChange={handleGuestInputChange} 
-            required 
-            error={formErrors.escuela_institucion} 
-            className="bg-gray-700 border-gray-600 focus:border-green-500"
-            icon={<Building size={16} className="text-gray-400"/>}
-          />
-          <Input 
-            label="Carrera/Bachillerato *" 
-            name="carrera" 
-            value={guestData.carrera} 
-            onChange={handleGuestInputChange} 
-            required 
-            error={formErrors.carrera} 
-            className="bg-gray-700 border-gray-600 focus:border-green-500"
-            icon={<BookOpen size={16} className="text-gray-400"/>}
-          />
-           <div className="mb-4">
-            <label className="block text-gray-300 text-sm font-medium mb-2">Semestre *</label>
-            <select
-              name="semestre"
-              value={guestData.semestre}
-              onChange={handleGuestInputChange}
-              required
-              className="w-full p-2.5 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-none transition"
-            >
-              <option value="">Selecciona tu semestre</option>
-              {semestres.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-            {formErrors.semestre && <p className="text-red-400 text-xs mt-1">{formErrors.semestre}</p>}
+              {/* Requirements/Details Grid - Minimalist Redesign */}
+              {evento.id_concurso && (
+                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-8">
+                        {/* Participación */}
+                        <div className="bg-zinc-900/50 p-4 rounded-2xl border border-white/5 flex flex-col justify-center items-center text-center hover:bg-zinc-900 transition-colors">
+                            <Users className="text-gray-400 mb-2 h-6 w-6" strokeWidth={1.5} />
+                            <span className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">Equipo</span>
+                            <span className="text-gray-200 font-medium text-sm">
+                                {evento.modalidad === 'equipos' 
+                                    ? `${evento.min_integrantes_equipo || 2} - ${evento.max_integrantes_equipo} pax` 
+                                    : 'Individual'}
+                            </span>
+                        </div>
+
+                        {/* Requerimientos - Asesor */}
+                        <div className="bg-zinc-900/50 p-4 rounded-2xl border border-white/5 flex flex-col justify-center items-center text-center hover:bg-zinc-900 transition-colors">
+                            <Shield className={`mb-2 h-6 w-6 ${evento.requiere_asesor ? 'text-orange-400' : 'text-gray-400'}`} strokeWidth={1.5} />
+                            <span className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">Asesor</span>
+                            <span className={`font-medium text-sm ${evento.requiere_asesor ? 'text-orange-300' : 'text-gray-200'}`}>
+                                {evento.requiere_asesor ? 'Requerido' : 'Opcional'}
+                            </span>
+                        </div>
+
+                        {/* Plataforma CTA */}
+                        {evento.url_concurso ? (
+                            <a 
+                                href={evento.url_concurso} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="col-span-2 md:col-span-1 bg-blue-600/10 p-4 rounded-2xl border border-blue-500/20 flex flex-col justify-center items-center text-center group hover:bg-blue-600/20 transition-all cursor-pointer"
+                            >
+                                <div className="flex items-center gap-2 mb-1">
+                                    <Globe className="text-blue-400 h-5 w-5 group-hover:scale-110 transition-transform" />
+                                    <ExternalLink className="text-blue-500 h-3 w-3" />
+                                </div>
+                                <span className="text-xs text-blue-300/80 uppercase tracking-wider font-semibold mb-1">Concurso</span>
+                                <span className="text-blue-100 font-bold text-sm group-hover:text-white transition-colors">
+                                    Ir a la Plataforma
+                                </span>
+                            </a>
+                        ) : (
+                             <div className="col-span-2 md:col-span-1 bg-zinc-900/50 p-4 rounded-2xl border border-white/5 flex flex-col justify-center items-center text-center opacity-50">
+                                <Globe className="text-gray-500 mb-2 h-6 w-6" strokeWidth={1.5} />
+                                <span className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">Plataforma</span>
+                                <span className="text-gray-400 text-sm">No especificada</span>
+                            </div>
+                        )}
+                   </div>
+              )}
           </div>
-          
-          <div className="flex justify-end space-x-3 pt-3">
-            <Button type="button" onClick={() => { setShowGuestFormModal(false); setFormErrors({}); }} variant="secondary" disabled={actionLoading}>Cancelar</Button>
-            <Button type="submit" variant="primary" loading={actionLoading} disabled={actionLoading}>{actionLoading ? "Inscribiendo..." : "Confirmar Inscripción"}</Button>
+
+          {/* Sidebar / Actions */}
+          <div className="lg:col-span-1 space-y-6">
+              <div className="bg-[#181a20] p-6 rounded-2xl border border-gray-800 shadow-xl sticky top-24">
+                   {/* Payment Status Section - Fixed */}
+                   {evento.tiene_costo && (
+                        <div className="mb-6 p-4 rounded-xl bg-gray-900/50 border border-gray-700">
+                            <div className="flex justify-between items-center mb-2">
+                                <span className="text-gray-400 text-sm">Costo de inscripción</span>
+                                <span className="text-xl font-bold text-white">${evento.costo}</span>
+                            </div>
+                            
+                            {isRegistered ? (
+                                <div className="flex items-center gap-2 mt-2 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-sm">
+                                    <AlertTriangle size={16}/>
+                                    <span>Pago pendiente de verificación</span>
+                                </div>
+                            ) : (
+                                <div className="text-xs text-gray-500 mt-1">
+                                    * El pago se realiza después de la inscripción.
+                                </div>
+                            )}
+                        </div>
+                   )}
+
+                   <div className="mb-6 pb-6 border-b border-gray-700">
+                       <div className="flex justify-between items-center mb-2">
+                           <span className="text-gray-400 font-medium h-6">Cupos disponibles</span>
+                           <span className={`font-bold text-xl ${evento.cupos_disponibles > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                {evento.cupos_disponibles !== null ? evento.cupos_disponibles : '∞'}
+                           </span>
+                       </div>
+                       {evento.cupos && (
+                           <div className="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
+                               <div 
+                                 className="bg-green-500 h-full" 
+                                 style={{ width: `${Math.max(0, Math.min(100, (evento.cupos_disponibles / evento.cupos) * 100))}%` }}
+                               />
+                           </div>
+                       )}
+                   </div>
+
+                   <div className="mb-6">
+                        {!evento.tiene_costo && (
+                            <div className="flex justify-between items-center mb-1">
+                                <span className="text-gray-300">Costo de entrada</span>
+                                <span className="text-2xl font-bold text-white">GRATIS</span>
+                            </div>
+                        )}
+                   </div>
+
+                   <Button 
+                        onClick={handleParticipateFlow} 
+                        variant={isRegistered ? 'danger' : 'primary'} 
+                        disabled={actionLoading || (!canParticipate && !isRegistered)}
+                        className="w-full py-4 text-lg font-bold shadow-lg shadow-green-900/20 mb-3"
+                    >
+                        {isRegistered ? 'Cancelar Inscripción' : !canParticipate ? 'Cupos Agotados' : evento.permite_equipos ? 'Inscribir Equipo' : 'Inscribirme Ahora'}
+                    </Button>
+
+                    {isRegistered && (
+                        <Button onClick={() => setShowTicketModal(true)} variant="secondary" className="w-full py-3 flex items-center justify-center">
+                            <QrCode className="mr-2" size={18}/> Ver Ticket de Acceso
+                        </Button>
+                    )}
+
+                   <div className="mt-6 pt-6 border-t border-gray-700 text-center">
+                       <p className="text-xs text-gray-500">
+                           ¿Tienes dudas? Contacta a los administradores del club.
+                       </p>
+                   </div>
+              </div>
           </div>
-        </form>
-      </Modal>
-
-      <Modal 
-        isOpen={showImageModal} 
-        onClose={() => setShowImageModal(false)} 
-        title={evento?.nombre_evento || "Vista de Imagen"}
-      >
-        <div className="flex justify-center items-center p-2 md:p-4 bg-black bg-opacity-50">
-            {selectedImageUrl ? (
-                <div style={{ maxWidth: '90vw', maxHeight: '85vh', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                    <Image
-                        src={selectedImageUrl}
-                        alt="Imagen del evento en tamaño completo"
-                        width={1200} 
-                        height={800} 
-                        style={{objectFit: 'contain'}}
-                        className="rounded-md" 
-                    />
-                </div>
-            ) : (
-                <p className="text-gray-300">No se pudo cargar la imagen.</p>
-            )}
-        </div>
-        <div className="flex justify-end p-3 md:p-4 border-t border-gray-700 mt-0">
-            <Button onClick={() => setShowImageModal(false)} variant="secondary">
-                Cerrar
-            </Button>
-        </div>
-      </Modal>
-
-      {/* Modal de Éxito para Invitado */}
-      <AnimatePresence>
-        {showGuestRegistrationSuccess && (
-          <Modal
-            isOpen={showGuestRegistrationSuccess}
-            onClose={() => setShowGuestRegistrationSuccess(false)}
-            title="¡Inscripción Exitosa!"
-            size="md" 
-            hideHeader={false}
-          >
-            <motion.div
-              className="text-center p-6 flex flex-col items-center"
-              initial={{ opacity: 0, scale: 0.7 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.7 }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
-            >
-              <PartyPopper size={64} className="text-green-400 mb-6 animate-bounce" />
-              <h3 className="text-2xl font-bold text-white mb-3">
-                ¡Felicidades, {guestData.nombre_completo || 'Invitado'}!
-              </h3>
-              <p className="text-gray-300 mb-1">
-                Te has inscrito correctamente al evento:
-              </p>
-              <p className="text-green-300 font-semibold text-lg mb-6">
-                {evento?.nombre_evento}
-              </p>
-              <p className="text-sm text-gray-400 mb-6">
-                Hemos enviado un correo de confirmación a <span className="font-medium text-gray-200">{guestData.correo_electronico}</span> con los detalles.
-              </p>
-              <Button 
-                onClick={() => setShowGuestRegistrationSuccess(false)} 
-                variant="primary"
-                className="w-full"
-              >
-                Entendido
-              </Button>
-            </motion.div>
-          </Modal>
-        )}
-      </AnimatePresence>
+      </div>
       
-      {/* NUEVO: Modal de Éxito para Miembro */}
+      {/* ... Modals mantenidos igual ... */}
+      
+      {/* Modal Equipos */}
+      <Modal isOpen={showTeamFormModal} onClose={() => setShowTeamFormModal(false)} title="Registro de Equipo" size="2xl">
+         <form onSubmit={handleTeamSubmit} className="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
+            <div className="space-y-4">
+                <h3 className="text-green-400 font-bold border-b border-gray-700 pb-2">Datos del Equipo</h3>
+                <Input label="Nombre del Equipo *" value={teamData.nombre} onChange={e => setTeamData({...teamData, nombre: e.target.value})} required className="bg-gray-700"/>
+                
+                <div className="space-y-3 bg-gray-700/30 p-4 rounded-xl border border-gray-600">
+                    <h4 className="text-sm font-bold text-gray-300">
+                        Datos del Asesor {evento.requiere_asesor ? <span className="text-red-400">*</span> : <span className="text-gray-500 font-normal">(Opcional)</span>}
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <Input label={`Nombre ${evento.requiere_asesor ? '*' : ''}`} value={teamData.asesor.nombre} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, nombre: e.target.value}})} required={evento.requiere_asesor} className="bg-gray-700"/>
+                        <Input label={`Email ${evento.requiere_asesor ? '*' : ''}`} type="email" value={teamData.asesor.email} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, email: e.target.value}})} required={evento.requiere_asesor} className="bg-gray-700"/>
+                        <Input label={`Teléfono ${evento.requiere_asesor ? '*' : ''}`} value={teamData.asesor.telefono} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, telefono: e.target.value}})} required={evento.requiere_asesor} className="bg-gray-700"/>
+                        <Input label={`Institución ${evento.requiere_asesor ? '*' : ''}`} value={teamData.asesor.institucion} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, institucion: e.target.value}})} required={evento.requiere_asesor} className="bg-gray-700"/>
+                    </div>
+                </div>
+                
+                <div className="space-y-4">
+                    <div className="flex justify-between items-center border-b border-gray-700 pb-2">
+                        <h3 className="text-green-400 font-bold">
+                            Integrantes del Equipo <span className="text-gray-400 text-sm font-normal ml-2">(1 - {evento.max_integrantes_equipo || 5} miembros)</span>
+                        </h3>
+                        <Button type="button" size="sm" onClick={addTeamMember} disabled={teamData.integrantes.length >= (evento.max_integrantes_equipo || 5)} variant="secondary">
+                            <Plus size={14} className="mr-1"/> Agregar Integrante ({teamData.integrantes.length}/{evento.max_integrantes_equipo || 5})
+                        </Button>
+                    </div>
+                    
+                    {teamData.integrantes.map((member, idx) => (
+                        <div key={idx} className="bg-gray-700/50 p-4 rounded-xl border border-gray-600 relative">
+                            {idx > 0 && (
+                                <button type="button" onClick={() => removeTeamMember(idx)} className="absolute top-2 right-2 text-red-400 hover:text-red-300">
+                                    <Trash2 size={16}/>
+                                </button>
+                            )}
+                            <h4 className="text-xs uppercase font-bold text-gray-400 mb-2">Integrante {idx + 1} {idx === 0 ? '(Capitán)' : ''}</h4>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <Input label="Email *" type="email" value={member.email} onChange={e => updateTeamMember(idx, 'email', e.target.value)} required placeholder="Correo personal o institucional" className="bg-gray-700 text-sm"/>
+                                <Input label="Nombre *" value={member.nombre} onChange={e => updateTeamMember(idx, 'nombre', e.target.value)} required className="bg-gray-700 text-sm"/>
+                                <div className="md:col-span-2">
+                                    <p className="text-xs text-blue-300 mb-2">* Si el integrante es miembro del club, asegúrese de usar su correo registrado para vincular su cuenta automáticamente.</p>
+                                </div>
+                                {/* Campos extendidos para invitados/no detectados (siempre pedirlos para asegurar datos) */}
+                                <Input label="Teléfono" value={member.telefono} onChange={e => updateTeamMember(idx, 'telefono', e.target.value)} required className="bg-gray-700 text-sm"/>
+                                <Input label="Institución" value={member.institucion} onChange={e => updateTeamMember(idx, 'institucion', e.target.value)} required className="bg-gray-700 text-sm"/>
+                                <Input label="Carrera/Bachillerato" value={member.carrera} onChange={e => updateTeamMember(idx, 'carrera', e.target.value)} required className="bg-gray-700 text-sm"/>
+                             </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+            
+            <div className="flex justify-end pt-4 gap-3">
+                <Button type="button" onClick={() => setShowTeamFormModal(false)} variant="secondary">Cancelar</Button>
+                <Button type="submit" loading={actionLoading}>Registrar Equipo</Button>
+            </div>
+         </form>
+      </Modal>
+
+      {/* Modal Ticket QR */}
+      <Modal isOpen={showTicketModal} onClose={() => setShowTicketModal(false)} title="Mi Ticket de Acceso" size="sm">
+          <div className="flex flex-col items-center justify-center p-6 bg-white rounded-xl">
+              <h3 className="text-black font-bold mb-4 text-lg">{evento.nombre_evento}</h3>
+              {/* QR Code generado dinámicamente con token seguro si existe, fallback a legacy JSON */}
+              <div className="border-4 border-black p-2">
+                <Image 
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrToken || JSON.stringify({eventId: evento.id_evento, userId: user?.id_miembro, date: new Date().toISOString()}))}`} 
+                    alt="QR Code" 
+                    width={200} 
+                    height={200}
+                    unoptimized
+                />
+              </div>
+              <p className="text-black text-sm mt-4 text-center">Presenta este código al ingresar al evento.</p>
+          </div>
+      </Modal>
+
+      {/* Modal Tipo de Registro (Invitado vs Miembro) */}
+      <Modal isOpen={showRegistrationTypeModal} onClose={() => setShowRegistrationTypeModal(false)} title="Confirmar Inscripción">
+        <div className="space-y-3">
+          <Button onClick={() => router.push(`/iniciar?redirect=${encodeURIComponent(pathname)}`)} variant="primary" className="w-full flex justify-center"><LogIn className="mr-2"/>Soy miembro (Iniciar sesión)</Button>
+          <Button onClick={() => { setShowRegistrationTypeModal(false); setShowGuestFormModal(true); }} variant="secondary" className="w-full flex justify-center"><UserPlus className="mr-2"/>Soy invitado</Button>
+        </div>
+      </Modal>
+
+      {/* Formulario Invitado (simplificado) */}
+      <Modal isOpen={showGuestFormModal} onClose={() => setShowGuestFormModal(false)} title="Registro Invitado">
+          <form onSubmit={(e) => { e.preventDefault(); handleApiRegistration('register', { guestData }); }} className="space-y-3">
+             <Input label="Nombre *" value={guestData.nombre_completo} onChange={e => setGuestData({...guestData, nombre_completo: e.target.value})} required className="bg-gray-700"/>
+             <Input label="Email *" type="email" value={guestData.correo_electronico} onChange={e => setGuestData({...guestData, correo_electronico: e.target.value})} required className="bg-gray-700"/>
+             <Input label="Teléfono *" value={guestData.numero_telefono} onChange={e => setGuestData({...guestData, numero_telefono: e.target.value})} required className="bg-gray-700"/>
+             <Input label="Escuela/Institución *" value={guestData.escuela_institucion} onChange={e => setGuestData({...guestData, escuela_institucion: e.target.value})} required className="bg-gray-700"/>
+             <Input label="Carrera *" value={guestData.carrera} onChange={e => setGuestData({...guestData, carrera: e.target.value})} required className="bg-gray-700"/>
+             <Button type="submit" loading={actionLoading} className="w-full mt-4">Confirmar</Button>
+          </form>
+      </Modal>
+
+      {/* Modal Éxito / Confirmación */}
       <AnimatePresence>
-        {showMemberRegistrationSuccess && user && (
-          <Modal
-            isOpen={showMemberRegistrationSuccess}
-            onClose={() => setShowMemberRegistrationSuccess(false)}
-            title="¡Inscripción Exitosa!"
-            size="md"
-            hideHeader={false}
-          >
-            <motion.div
-              className="text-center p-6 flex flex-col items-center"
-              initial={{ opacity: 0, scale: 0.7 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.7 }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
-            >
-              <PartyPopper size={64} className="text-green-400 mb-6 animate-bounce" />
-              <h3 className="text-2xl font-bold text-white mb-3">
-                ¡Excelente, {user.nombre_completo || 'Miembro'}!
-              </h3>
-              <p className="text-gray-300 mb-1">
-                Tu inscripción al evento:
-              </p>
-              <p className="text-green-300 font-semibold text-lg mb-6">
-                {evento?.nombre_evento}
-              </p>
-              <p className="text-sm text-gray-400 mb-6">
-                ha sido confirmada. Hemos enviado los detalles a tu correo <span className="font-medium text-gray-200">{user.correo_electronico}</span>.
-              </p>
-              <Button 
-                onClick={() => setShowMemberRegistrationSuccess(false)} 
-                variant="primary"
-                className="w-full"
-              >
-                ¡Genial!
-              </Button>
-            </motion.div>
-          </Modal>
+        {showSuccessModal.show && (
+            <Modal isOpen={showSuccessModal.show} onClose={() => setShowSuccessModal({show: false})} title={showSuccessModal.title || "Notificación"}>
+                <div className="text-center p-4">
+                    {showSuccessModal.isCancellation ? (
+                        <Trash2 size={50} className="text-red-400 mx-auto mb-4"/>
+                    ) : (
+                        <PartyPopper size={50} className="text-green-400 mx-auto mb-4 animate-bounce"/>
+                    )}
+                    <p className="text-white text-lg">{showSuccessModal.message}</p>
+                    {!showSuccessModal.isCancellation && (
+                        <p className="text-gray-400 mt-2">Revisa tu correo para más detalles.</p>
+                    )}
+                    <Button onClick={() => setShowSuccessModal({show: false})} className="mt-6 w-full">Entendido</Button>
+                </div>
+            </Modal>
         )}
       </AnimatePresence>
+       
+       <Modal isOpen={showUnregisterModal} onClose={() => setShowUnregisterModal(false)} title="Cancelar Inscripción">
+          <p className="text-white mb-4">¿Seguro que deseas cancelar tu registro?</p>
+          <div className="flex justify-end gap-3">
+             <Button onClick={() => setShowUnregisterModal(false)} variant="secondary">No</Button>
+             <Button onClick={() => handleApiRegistration('unregister')} variant="danger" loading={actionLoading}>Sí, cancelar</Button>
+          </div>
+       </Modal>
+       
+       <Modal isOpen={showImageModal} onClose={() => setShowImageModal(false)} title="Vista Previa">
+          <div className="relative h-[80vh] w-full">
+            <Image src={selectedImageUrl} alt="Preview" fill className="object-contain" />
+          </div>
+       </Modal>
 
     </motion.main>
   );
 }
 
 const InfoCard = ({ icon, title, children }) => (
-  <div className="bg-gray-700/50 p-4 rounded-xl border border-gray-600/50 shadow-lg">
-    <h3 className="text-green-300 font-semibold mb-2 flex items-center text-sm md:text-base">
-      {icon && <span className="mr-2">{icon}</span>}
-      {title}
-    </h3>
-    <p className="text-gray-200 text-sm md:text-base">{children}</p>
+  <div className="bg-gray-700/50 p-4 rounded-xl border border-gray-600 shadow-lg">
+    <h3 className="text-green-300 font-semibold mb-1 flex items-center gap-2">{icon} {title}</h3>
+    <div className="text-white text-lg">{children}</div>
   </div>
 );
 

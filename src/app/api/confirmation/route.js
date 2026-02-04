@@ -1,6 +1,7 @@
 // api/confirmation/route.js
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
+import { toDataURL } from 'qrcode';
 
 export async function POST(request) {
   try {
@@ -13,7 +14,7 @@ export async function POST(request) {
       );
     }
 
-    const { email, name, eventDetails } = data;
+    const { email, name, eventDetails, qrToken } = data;
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!email || typeof email !== 'string' || !emailRegex.test(email)) {
@@ -76,6 +77,31 @@ export async function POST(request) {
       }
     } catch (_) {}
 
+    let attachments = [];
+    if (qrToken) {
+        try {
+            // Generate QR Code Image using the secure token
+            const qrDataUrl = await toDataURL(qrToken, {
+                errorCorrectionLevel: 'H',
+                margin: 2,
+                width: 300,
+                color: {
+                    dark: '#000000',
+                    light: '#ffffff'
+                }
+            });
+            // Convert Data URL to Buffer for attachment
+            const base64Data = qrDataUrl.split(';base64,').pop();
+            attachments.push({
+                filename: 'ticket-qr.png',
+                content: Buffer.from(base64Data, 'base64'),
+                cid: 'uniquexqr@crocoders' // Reference ID for embedding in HTML
+            });
+        } catch (e) {
+            console.error('Error generating QR for email:', e);
+        }
+    }
+
     const mailOptions = {
       from: `"Club Crocoders" <${process.env.EMAIL_USER}>`,
       to: email,
@@ -88,12 +114,23 @@ export async function POST(request) {
           <div style="padding: 25px; background-color: #f9f9f9; border-radius: 0 0 8px 8px; border: 1px solid #e1e1e1;">
             <h2 style="color: #1a1a1a; margin-top: 0;">¡Hola ${name}!</h2>
             <p>Tu registro para el evento <strong>${eventDetails.nombre_evento}</strong> ha sido exitoso.</p>
+            
             <div style="background-color: white; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e1e1e1;">
               <h3 style="margin-top: 0; color: #1a1a1a;">Detalles del evento:</h3>
               <p><strong>Fecha:</strong> ${formattedDate}</p>
               <p><strong>Hora:</strong> ${eventDetails.hora_inicio || '--:--'} - ${eventDetails.hora_fin || '--:--'}</p>
               ${eventDetails.costo > 0 ? `<p><strong>Costo:</strong> $${Number(eventDetails.costo).toFixed(2)}</p>` : ''}
+              ${eventDetails.ubicacion ? `<p><strong>Ubicación:</strong> ${eventDetails.ubicacion}</p>` : ''}
             </div>
+
+            ${qrToken ? `
+            <div style="text-align: center; margin: 30px 0; padding: 20px; background: white; border-radius: 10px; border: 2px dashed #1ef184;">
+                <p style="margin-top: 0; font-weight: bold; color: #333;">TU TICKET DE ACCESO</p>
+                <img src="cid:uniquexqr@crocoders" alt="QR Code" style="width: 200px; height: 200px;" />
+                <p style="margin-bottom: 0; font-size: 12px; color: #888;">Presenta este código en la entrada</p>
+            </div>
+            ` : ''}
+
             <p style="font-size: 14px; color: #666;">Recibirás un recordatorio un día antes del evento.</p>
             <p style="font-size: 14px; color: #666;">Si tienes alguna pregunta, contáctanos respondiendo a este correo.</p>
           </div>
@@ -102,7 +139,8 @@ export async function POST(request) {
           </div>
         </div>
       `,
-      text: `Hola ${name},\n\nTu registro para el evento "${eventDetails.nombre_evento}" ha sido exitoso.\n\nDetalles:\nFecha: ${formattedDate}\nHora: ${eventDetails.hora_inicio || '--:--'} - ${eventDetails.hora_fin || '--:--'}\n${eventDetails.costo > 0 ? `Costo: $${Number(eventDetails.costo).toFixed(2)}\n` : ''}\nRecibirás un recordatorio antes del evento.\n\nSaludos,\nClub Crocoders`
+      text: `Hola ${name},\n\nTu registro para el evento "${eventDetails.nombre_evento}" ha sido exitoso.\n\nDetalles:\nFecha: ${formattedDate}\nHora: ${eventDetails.hora_inicio || '--:--'} - ${eventDetails.hora_fin || '--:--'}\n${eventDetails.costo > 0 ? `Costo: $${Number(eventDetails.costo).toFixed(2)}\n` : ''}\n${qrToken ? 'Se adjunta tu código QR de acceso.\n' : ''}\nSaludos,\nClub Crocoders`,
+      attachments: attachments
     };
 
     const sendMail = transporter.sendMail(mailOptions);

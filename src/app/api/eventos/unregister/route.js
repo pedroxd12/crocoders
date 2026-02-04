@@ -1,6 +1,6 @@
 // app/api/eventos/unregister/route.js
 import { NextResponse } from 'next/server';
-import { sql } from '@/lib/db-server';
+import pool from '@/lib/db-server';
 
 export async function POST(request) {
   try {
@@ -8,126 +8,104 @@ export async function POST(request) {
     const { eventoId, userId, tipo } = data;
     
     // Validaciones básicas
-    if (!eventoId || isNaN(Number(eventoId))) {
-      return NextResponse.json(
-        { success: false, error: 'ID de evento no válido' },
-        { status: 400 }
-      );
-    }
-    
-    if (!userId || isNaN(Number(userId))) {
-      return NextResponse.json(
-        { success: false, error: 'ID de usuario no válido' },
-        { status: 400 }
-      );
-    }
-    
-    if (!tipo || !['miembro', 'invitado'].includes(tipo)) {
-      return NextResponse.json(
-        { success: false, error: 'Tipo de registro no válido' },
-        { status: 400 }
-      );
+    if (!eventoId || isNaN(Number(eventoId)) || !userId || isNaN(Number(userId))) {
+      return NextResponse.json({ success: false, error: 'Datos de evento o usuario no válidos' }, { status: 400 });
     }
 
-    // Verificar si el usuario existe según el tipo
-    let userExists;
-    if (tipo === 'miembro') {
-      const [user] = await sql`
-        SELECT id_miembro FROM miembro WHERE id_miembro = ${userId} LIMIT 1
-      `;
-      userExists = user?.id_miembro;
-    } else {
-      const [user] = await sql`
-        SELECT id_invitado FROM invitado WHERE id_invitado = ${userId} LIMIT 1
-      `;
-      userExists = user?.id_invitado;
-    }
+    const client = await pool.connect();
     
-    if (!userExists) {
-      return NextResponse.json(
-        { success: false, error: 'Usuario no encontrado' },
-        { status: 404 }
-      );
-    }
-    
-    // Verificar si el evento existe
-    const [evento] = await sql`
-      SELECT id_evento FROM evento WHERE id_evento = ${eventoId} LIMIT 1
-    `;
-    
-    if (!evento) {
-      return NextResponse.json(
-        { success: false, error: 'Evento no encontrado' },
-        { status: 404 }
-      );
-    }
-    
-    // Verificar si el usuario está registrado en el evento
-    let registroExistente;
-    if (tipo === 'miembro') {
-      [registroExistente] = await sql`
-        SELECT 1 FROM inscripcion_evento 
-        WHERE id_evento = ${eventoId} AND id_miembro = ${userId} 
-        LIMIT 1
-      `;
-    } else {
-      [registroExistente] = await sql`
-        SELECT 1 FROM inscripcion_evento 
-        WHERE id_evento = ${eventoId} AND id_invitado = ${userId} 
-        LIMIT 1
-      `;
-    }
-    
-    if (!registroExistente) {
-      return NextResponse.json(
-        { success: false, error: 'El usuario no está registrado en este evento' },
-        { status: 400 }
-      );
-    }
-    
-    // Eliminar el registro (o marcar como cancelado si prefieres historial, pero el usuario pidió borrar)
-    // Usaremos DELETE físico como pidió el usuario para miembros, aqui aplica igual para la inscripción
-    if (tipo === 'miembro') {
-      await sql`
-        DELETE FROM inscripcion_evento 
-        WHERE id_evento = ${eventoId} AND id_miembro = ${userId}
-      `;
-    } else {
-      await sql`
-        DELETE FROM inscripcion_evento 
-        WHERE id_evento = ${eventoId} AND id_invitado = ${userId}
-      `;
-    }
-    
-    // Obtener datos actualizados del evento (cupos se actualizan via trigger)
-    const [updatedEvent] = await sql`
-      SELECT 
-        id_evento,
-        nombre as nombre_evento,
-        fecha_inicio as fecha,
-        hora_inicio,
-        cupos_disponibles,
-        (SELECT COUNT(*) FROM inscripcion_evento WHERE id_evento = ${eventoId}) as asistentes_count
-      FROM evento
-      WHERE id_evento = ${eventoId}
-    `;
-    
-    if (!updatedEvent) return NextResponse.json({ success: true, message: 'Registro cancelado' });
+    try {
+        await client.query('BEGIN');
+        
+        // 1. Verificar si hay inscripción directa (Individual)
+        let unregisterQuery = '';
+        let queryParams = [];
+        
+        if (tipo === 'miembro') {
+            unregisterQuery = 'DELETE FROM inscripcion_evento WHERE id_evento = $1 AND id_miembro = $2 RETURNING id_inscripcion, id_equipo';
+            queryParams = [eventoId, userId];
+        } else {
+            unregisterQuery = 'DELETE FROM inscripcion_evento WHERE id_evento = $1 AND id_invitado = $2 RETURNING id_inscripcion, id_equipo';
+            queryParams = [eventoId, userId];
+        }
 
-    return NextResponse.json({ 
-      success: true,
-      message: 'Cancelación de registro exitosa',
-      event: {
-        ...updatedEvent,
-        fecha: updatedEvent.fecha instanceof Date ? updatedEvent.fecha.toISOString().split('T')[0] : updatedEvent.fecha,
-        asistentes_count: Number(updatedEvent.asistentes_count) || 0,
-        cupos_disponibles: updatedEvent.cupos_disponibles !== null ? Number(updatedEvent.cupos_disponibles) : null
-      }
-    });
+        let res = await client.query(unregisterQuery, queryParams);
+        let idEquipoToDelete = null;
+
+        // 2. Si no se borró nada, verificar si pertenece a un equipo (Inscripción indirecta)
+        if (res.rowCount === 0 && tipo === 'miembro') {
+             // Buscar el equipo al que pertenece el usuario en este evento
+             const teamRes = await client.query(`
+                SELECT ie.id_inscripcion, ie.id_equipo 
+                FROM inscripcion_evento ie
+                JOIN equipo_concurso eq ON ie.id_equipo = eq.id_equipo
+                JOIN integrante_equipo int_eq ON eq.id_equipo = int_eq.id_equipo
+                WHERE ie.id_evento = $1 AND int_eq.id_miembro = $2
+                LIMIT 1
+             `, [eventoId, userId]);
+
+             if (teamRes.rows.length > 0) {
+                 // Encontrado! Es parte de un equipo.
+                 // IMPORTANTE: Al "desinscribirse", ¿borramos todo el equipo o solo al miembro?
+                 // Generalmente el usuario espera salir del evento. Si es capitan o último miembro, se borra el equipo.
+                 // Por simplicidad en este flujo, borraremos la inscripción del equipo completo (cancelación de equipo).
+                 // Ojo: Esto afecta a otros miembros. Deberíamos advertir en frontend, pero asumiremos cancelación total por ahora.
+                 
+                 const row = teamRes.rows[0];
+                 await client.query('DELETE FROM inscripcion_evento WHERE id_inscripcion = $1', [row.id_inscripcion]);
+                 idEquipoToDelete = row.id_equipo;
+                 res = { rowCount: 1 }; // Marcar como borrado
+             }
+        }
+
+        if (res.rowCount > 0) {
+            // 3. Restaurar Cupo (asegurando no exceder el máximo definido en 'cupos')
+            // Se usa LEAST para mantener la integridad si cupos_disponibles se hubiera desincronizado
+            /* await client.query(`
+                UPDATE evento 
+                SET cupos_disponibles = LEAST(cupos, cupos_disponibles + 1) 
+                WHERE id_evento = $1
+            `, [eventoId]); */
+            
+            // 4. Limpieza opcional de equipo huérfano si fuera necesario (cascade delete lo maneja en DB si está configurado)
+            
+            await client.query('COMMIT');
+            
+            // Obtener datos actualizados para el cliente
+            const updatedEventRes = await client.query(`
+                SELECT 
+                id_evento, nombre as nombre_evento, fecha_inicio as fecha, hora_inicio, cupos_disponibles,
+                (SELECT COUNT(*) FROM inscripcion_evento WHERE id_evento = $1) as asistentes_count
+                FROM evento WHERE id_evento = $1
+            `, [eventoId]);
+            const updatedEvent = updatedEventRes.rows[0];
+
+            return NextResponse.json({ 
+                success: true, 
+                message: 'Inscripción cancelada correctamente',
+                event: {
+                    ...updatedEvent,
+                    fecha: updatedEvent?.fecha instanceof Date ? updatedEvent.fecha.toISOString().split('T')[0] : updatedEvent?.fecha,
+                    asistentes_count: Number(updatedEvent?.asistentes_count) || 0,
+                    cupos_disponibles: updatedEvent?.cupos_disponibles !== null ? Number(updatedEvent.cupos_disponibles) : null
+                }
+            });
+        } else {
+            await client.query('ROLLBACK');
+            return NextResponse.json({ success: false, error: 'No se encontró una inscripción activa para cancelar' }, { status: 404 });
+        }
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error en unregister:', error);
+        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    } finally {
+        client.release();
+    }
   } catch (error) {
     console.error('Error en POST /api/eventos/unregister:', error);
     return NextResponse.json(
-      { success: false, error: 'Error interno del servidor' },
+      { success: false, error: 'Error interno del servidor: ' + error.message },
       { status: 500 }
     );
   }

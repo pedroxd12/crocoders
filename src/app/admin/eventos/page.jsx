@@ -42,6 +42,7 @@ export default function EventosAdmin() {
     es_concurso: false,
     modalidad: 'individual',
     max_integrantes_equipo: 3,
+    min_integrantes_equipo: 1, // Nuevo campo
     id_plataforma: '',
     requiere_asesor: false,
     url_concurso: ''
@@ -177,6 +178,7 @@ export default function EventosAdmin() {
       es_concurso: isContest,
       modalidad: evento.modalidad || 'individual',
       max_integrantes_equipo: evento.max_integrantes_equipo || 3,
+      min_integrantes_equipo: evento.min_integrantes_equipo || 1, // Cargar valor
       id_plataforma: evento.id_plataforma || '',
       requiere_asesor: evento.requiere_asesor || false,
       url_concurso: evento.url_concurso || ''
@@ -204,6 +206,7 @@ export default function EventosAdmin() {
       es_concurso: false,
       modalidad: 'individual',
       max_integrantes_equipo: 3,
+      min_integrantes_equipo: 1, // Reset
       id_plataforma: '',
       requiere_asesor: false,
       url_concurso: ''
@@ -333,6 +336,11 @@ export default function EventosAdmin() {
               </select>
             </div>
           </div>
+          
+          <div className="flex items-center gap-2 px-1">
+             <input id="es_concurso" name="es_concurso" type="checkbox" checked={formData.es_concurso} onChange={handleInputChange} className="w-4 h-4 text-green-600 bg-gray-700 border-gray-500 rounded focus:ring-green-500" />
+             <label htmlFor="es_concurso" className="font-medium text-gray-300 text-sm select-none cursor-pointer">Habilitar funciones de Concurso/Competencia</label>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Input label="Fecha Inicio" type="date" name="fecha_inicio" value={formData.fecha_inicio} onChange={handleInputChange} required className="bg-gray-700 border-gray-600" />
@@ -360,29 +368,98 @@ export default function EventosAdmin() {
              )}
           </div>
           
-          {/* Concurso Logic */}
+          {/* Concurso Logic - Improved UI */}
           {formData.es_concurso && (
-            <div className="border border-green-500/30 bg-green-900/10 p-4 rounded-lg space-y-4">
-                <h3 className="text-green-400 font-semibold text-sm border-b border-green-500/30 pb-2 mb-2">Configuración de Concurso</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-1">Modalidad</label>
-                        <select name="modalidad" value={formData.modalidad} onChange={handleInputChange} className="w-full p-2.5 rounded-lg bg-gray-700 text-white border border-gray-600">
-                           <option value="individual">Individual</option>
-                           <option value="equipos">Equipos</option>
-                        </select>
+            <div className="bg-gray-700/50 p-5 rounded-xl border border-blue-500/20 shadow-lg">
+                <h3 className="text-blue-400 font-bold mb-4 flex items-center border-b border-blue-500/10 pb-2">
+                    <span className="bg-blue-500/20 p-1.5 rounded-lg mr-2"><FaUsers size={14}/></span>
+                    Configuración de Competencia
+                </h3>
+                
+                <div className="space-y-4">
+                    {/* Fila 1: Modalidad y Plataforma */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-600">
+                             <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Modalidad de Participación</label>
+                             <select 
+                                name="modalidad" 
+                                value={formData.modalidad} 
+                                onChange={handleInputChange} 
+                                className="w-full bg-gray-700 text-white rounded-lg p-2.5 border border-gray-600 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                             >
+                                <option value="individual">Individual</option>
+                                <option value="equipos">Por Equipos</option>
+                             </select>
+                        </div>
+                        
+                         <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-600">
+                            <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Plataforma (Juez)</label>
+                            <select 
+                                name="id_plataforma" 
+                                value={formData.id_plataforma} 
+                                onChange={handleInputChange} 
+                                className="w-full bg-gray-700 text-white rounded-lg p-2.5 border border-gray-600 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                            >
+                                <option value="">Ninguna / Otra</option>
+                                {catalogs.plataformas.map(p => <option key={p.id_plataforma} value={p.id_plataforma}>{p.nombre}</option>)}
+                            </select>
+                        </div>
                     </div>
-                    {formData.modalidad === 'equipos' && (
-                        <Input label="Max. Integrantes" type="number" name="max_integrantes_equipo" min="2" value={formData.max_integrantes_equipo} onChange={handleInputChange} className="bg-gray-700 border-gray-600" />
+
+                    {/* Fila 2: Configuración de Equipos (Solo si es equipos) */}
+                     {formData.modalidad === 'equipos' && (
+                        <div className="grid grid-cols-2 gap-4 bg-gray-800/50 p-3 rounded-lg border border-gray-600 animate-in fade-in slide-in-from-top-2 duration-300">
+                            <Input 
+                                label="Mín. Integrantes" 
+                                type="number" 
+                                name="min_integrantes_equipo" 
+                                min="1" 
+                                value={formData.min_integrantes_equipo} 
+                                onChange={handleInputChange} 
+                                className="bg-gray-700 border-gray-600" 
+                            />
+                            <Input 
+                                label="Máx. Integrantes" 
+                                type="number" 
+                                name="max_integrantes_equipo" 
+                                min={formData.min_integrantes_equipo || 1} 
+                                value={formData.max_integrantes_equipo} 
+                                onChange={handleInputChange} 
+                                className="bg-gray-700 border-gray-600" 
+                            />
+                        </div>
                     )}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-1">Plataforma (Op.)</label>
-                        <select name="id_plataforma" value={formData.id_plataforma} onChange={handleInputChange} className="w-full p-2.5 rounded-lg bg-gray-700 text-white border border-gray-600">
-                           <option value="">Ninguna / Otra</option>
-                           {catalogs.plataformas.map(p => <option key={p.id_plataforma} value={p.id_plataforma}>{p.nombre}</option>)}
-                        </select>
+                    
+                    {/* Fila 3: Opciones de Registro */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                         <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-600 h-full">
+                            <label className="block text-xs font-bold text-gray-400 uppercase mb-3">Requisitos Adicionales</label>
+                            <label className="flex items-center gap-3 cursor-pointer group p-2 hover:bg-gray-700/50 rounded transition-colors">
+                                <div className="relative flex items-center">
+                                    <input 
+                                        type="checkbox" 
+                                        name="requiere_asesor" 
+                                        checked={formData.requiere_asesor} 
+                                        onChange={handleInputChange} 
+                                        className="peer w-5 h-5 cursor-pointer appearance-none rounded border border-gray-500 bg-gray-700 checked:bg-green-500 checked:border-green-500 transition-all"
+                                    />
+                                    <FaUserShield className="absolute pointer-events-none opacity-0 peer-checked:opacity-100 text-white text-[10px] left-[5px]" />
+                                </div>
+                                <span className="text-gray-300 text-sm group-hover:text-white transition-colors">Requerir Asesor (Obligatorio)</span>
+                            </label>
+                         </div>
+                         
+                         <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-600">
+                             <Input 
+                                label="URL del Concurso (Externo)" 
+                                name="url_concurso" 
+                                value={formData.url_concurso} 
+                                onChange={handleInputChange} 
+                                placeholder="https://..." 
+                                className="bg-gray-700 border-gray-600" 
+                            />
+                         </div>
                     </div>
-                     <Input label="URL del Concurso" name="url_concurso" value={formData.url_concurso} onChange={handleInputChange} placeholder="https://..." className="bg-gray-700 border-gray-600" />
                 </div>
             </div>
           )}

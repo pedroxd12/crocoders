@@ -74,10 +74,17 @@ export default function EventCard({ evento, isRegistered, index }) {
   const getCuposDisplay = () => {
     if (evento.cupos === null) return 'Cupos ilimitados';
     
-    const asistentes = evento.asistentes_count || 0;
+    // Calculates attendees based on available spots if pure count is missing
     const disponibles = evento.cupos_disponibles !== null 
-      ? evento.cupos_disponibles 
-      : Math.max(0, evento.cupos - asistentes);
+      ? Number(evento.cupos_disponibles)
+      : Math.max(0, evento.cupos - (evento.asistentes_count || 0));
+
+    // If API doesn't return asistentes_count, derive it: cupos - disponibles
+    const asistentes = evento.asistentes_count !== undefined
+      ? evento.asistentes_count
+      : (evento.cupos !== null && evento.cupos_disponibles !== null)
+          ? evento.cupos - evento.cupos_disponibles
+          : 0;
     
     const pocosDisponibles = disponibles > 0 && disponibles <= evento.cupos * 0.2;
     

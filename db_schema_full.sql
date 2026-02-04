@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS public.concurso
     id_evento integer NOT NULL,
     id_plataforma integer,
     modalidad character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    min_integrantes_equipo integer DEFAULT 1,
     max_integrantes_equipo integer,
     requiere_asesor boolean DEFAULT false,
     requiere_cuenta_especial boolean DEFAULT false,
@@ -206,7 +207,12 @@ CREATE TABLE IF NOT EXISTS public.inscripcion_evento
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT inscripcion_evento_pkey PRIMARY KEY (id_inscripcion),
     CONSTRAINT inscripcion_evento_id_evento_id_invitado_key UNIQUE (id_evento, id_invitado),
-    CONSTRAINT inscripcion_evento_id_evento_id_miembro_key UNIQUE (id_evento, id_miembro)
+    CONSTRAINT inscripcion_evento_id_evento_id_miembro_key UNIQUE (id_evento, id_miembro),
+    CONSTRAINT un_tipo_inscrito CHECK (
+        (id_miembro IS NOT NULL)::integer + 
+        (id_invitado IS NOT NULL)::integer + 
+        (id_equipo IS NOT NULL)::integer = 1
+    )
 );
 
 COMMENT ON TABLE public.inscripcion_evento

@@ -209,7 +209,7 @@ export default function DashboardPage() {
       setError('Error de conexión con el servidor');
     }
   };
-
+ 
   const handleLogout = async () => {
     try {
       await logout();

@@ -29,6 +29,7 @@
     "nodemailer": "^7.0.13",
     "pg": "^8.14.1",
     "postgres": "^3.4.5",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-countup": "^6.5.3",
     "react-dom": "^19.0.0",

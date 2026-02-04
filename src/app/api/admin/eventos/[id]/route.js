@@ -34,6 +34,7 @@ export async function GET(request, context) {
         c.id_concurso,
         c.modalidad,
         c.max_integrantes_equipo,
+        c.min_integrantes_equipo,
         c.id_plataforma,
         c.requiere_asesor,
         c.url_concurso,
@@ -76,7 +77,7 @@ export async function PUT(request, context) {
         ubicacion, cupos, tiene_costo, costo,
         imagen_flyer_url, imagen_flyer_key,
         // Concurso
-        es_concurso, modalidad, max_integrantes_equipo, id_plataforma, 
+        es_concurso, modalidad, max_integrantes_equipo, min_integrantes_equipo, id_plataforma, 
         requiere_asesor, url_concurso
     } = body;
 
@@ -150,13 +151,15 @@ export async function PUT(request, context) {
                     id_plataforma = $1,
                     modalidad = $2,
                     max_integrantes_equipo = $3,
-                    requiere_asesor = $4,
-                    url_concurso = $5
-                WHERE id_evento = $6
+                    min_integrantes_equipo = $4,
+                    requiere_asesor = $5,
+                    url_concurso = $6
+                WHERE id_evento = $7
             `, [
                 id_plataforma || null, 
                 modalidad || 'individual',
                 modalidad === 'equipos' ? (parseInt(max_integrantes_equipo) || 3) : null,
+                modalidad === 'equipos' ? (parseInt(min_integrantes_equipo) || 2) : 1,
                 requiere_asesor,
                 url_concurso,
                 id
@@ -166,13 +169,14 @@ export async function PUT(request, context) {
             await client.query(`
                 INSERT INTO concurso (
                     id_evento, id_plataforma, modalidad, 
-                    max_integrantes_equipo, requiere_asesor, url_concurso
-                ) VALUES ($1, $2, $3, $4, $5, $6)
+                    max_integrantes_equipo, min_integrantes_equipo, requiere_asesor, url_concurso
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
             `, [
                 id,
                 id_plataforma || null, 
                 modalidad || 'individual',
                 modalidad === 'equipos' ? (parseInt(max_integrantes_equipo) || 3) : null,
+                modalidad === 'equipos' ? (parseInt(min_integrantes_equipo) || 2) : 1,
                 requiere_asesor,
                 url_concurso
             ]);

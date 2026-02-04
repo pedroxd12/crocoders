@@ -32,6 +32,7 @@ export async function GET() {
         c.id_concurso,
         c.modalidad,
         c.max_integrantes_equipo,
+        c.min_integrantes_equipo,
         c.id_plataforma,
         cp.nombre as plataforma_nombre
       FROM evento e
@@ -78,6 +79,7 @@ export async function POST(request) {
       es_concurso,
       modalidad, // 'individual' | 'equipos'
       max_integrantes_equipo,
+      min_integrantes_equipo,
       id_plataforma,
       requiere_asesor,
       url_concurso
@@ -138,12 +140,15 @@ export async function POST(request) {
 
     // 2. Insertar Concurso si aplica
     if (es_concurso) {
+      // Valor por defecto para equipos: mínimo 2 personas, o lo que venga del front
+      const minIntegrantes = modalidad === 'equipos' ? (parseInt(min_integrantes_equipo) || 2) : 1; 
+      
       const insertConcursoQuery = `
         INSERT INTO concurso (
           id_evento, id_plataforma, modalidad, 
-          max_integrantes_equipo, requiere_asesor, url_concurso
+          max_integrantes_equipo, min_integrantes_equipo, requiere_asesor, url_concurso
         ) VALUES (
-          $1, $2, $3, $4, $5, $6
+          $1, $2, $3, $4, $5, $6, $7
         )
       `;
       
@@ -152,6 +157,7 @@ export async function POST(request) {
         id_plataforma || null,
         modalidad || 'individual',
         modalidad === 'equipos' ? (parseInt(max_integrantes_equipo) || 3) : null,
+        minIntegrantes,
         requiere_asesor || false,
         url_concurso
       ]);

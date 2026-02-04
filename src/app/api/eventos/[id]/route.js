@@ -16,6 +16,14 @@ export async function GET(request, context) {
       SELECT 
         e.*,
         t.nombre as tipo_nombre,
+        t.permite_equipos,
+        c.id_concurso,
+        c.modalidad,
+        c.max_integrantes_equipo,
+        c.min_integrantes_equipo,
+        c.requiere_asesor,
+        c.requiere_cuenta_especial,
+        c.url_concurso,
         (
           SELECT COUNT(*) 
           FROM inscripcion_evento 
@@ -23,6 +31,7 @@ export async function GET(request, context) {
         ) as asistentes_count
       FROM evento e
       LEFT JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
+      LEFT JOIN concurso c ON e.id_evento = c.id_evento
       WHERE e.id_evento = ${id}
     `;
 
@@ -50,7 +59,8 @@ export async function GET(request, context) {
       // Usar columna directa de cupos_disponibles
       cupos_disponibles: evento.cupos_disponibles !== null ? Number(evento.cupos_disponibles) : null,
       asistentes_count: Number(evento.asistentes_count) || 0,
-      imagen_url: evento.imagen_flyer_url // Alias si el front usa imagen_url
+      imagen_url: evento.imagen_flyer_url, // Alias si el front usa imagen_url
+      url_concurso: evento.url_concurso
     };
 
     return NextResponse.json(eventoFormateado);
