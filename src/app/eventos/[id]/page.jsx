@@ -91,7 +91,19 @@ function EventoDetalleContent() {
       if (!data || Object.keys(data).length === 0) throw new Error('Evento no encontrado o datos vacíos');
       
       const now = new Date();
-      const eventEndDate = new Date(data.fecha);
+      
+      // Verificar si el registro está cerrado basándose en fecha_limite_registro
+      let registroCerrado = false;
+      if (data.fecha_limite_registro) {
+        const fechaLimiteRegistro = new Date(data.fecha_limite_registro);
+        registroCerrado = now > fechaLimiteRegistro;
+      }
+      
+      // Verificar si el evento ya finalizó (para mostrar badge "Finalizado")
+      // Usar fecha_fin si existe, si no usar fecha_inicio
+      const fechaFinEvento = data.fecha_fin || data.fecha;
+      // Agregar 'T00:00:00' para asegurar que se interprete en timezone local
+      const eventEndDate = new Date(fechaFinEvento + 'T00:00:00');
       if (data.hora_fin) {
         const [hours, minutes] = data.hora_fin.split(':');
         eventEndDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), 59, 999);
@@ -103,6 +115,7 @@ function EventoDetalleContent() {
         ...data,
         fecha: new Date(data.fecha).toISOString().split('T')[0],
         isPastEvent: eventEndDate < now,
+        registroCerrado: registroCerrado, // Nueva propiedad para controlar inscripciones
         tipo_evento_display: data.tipo ? data.tipo.charAt(0).toUpperCase() + data.tipo.slice(1) : 'General'
       });
     } catch (err) {
@@ -244,8 +257,8 @@ function EventoDetalleContent() {
   const handleParticipateFlow = () => {
     if (isRegistered) {
       setShowUnregisterModal(true);
-    } else if (evento.isPastEvent) {
-      toast.info('Este evento ya ha finalizado.', { theme: "dark" });
+    } else if (evento.registroCerrado) {
+      toast.info('El periodo de inscripción para este evento ha finalizado.', { theme: "dark" });
     } else if (evento.permite_equipos) {
       // Flujo de Equipos
       // Pre-llenar datos del capitán si está autenticado
@@ -346,7 +359,7 @@ function EventoDetalleContent() {
   if (authLoading || loading) return <LoadingSpinner fullScreen text="Cargando evento..." />;
   if (error || !evento) return <div className="min-h-screen items-center justify-center flex text-red-400">Error: {error || 'Evento no encontrado'}</div>;
 
-  const canParticipate = !evento.isPastEvent && (evento.cupos === null || evento.cupos_disponibles > 0);
+  const canParticipate = !evento.registroCerrado && (evento.cupos === null || evento.cupos_disponibles > 0);
 
   return (
     <motion.main 
@@ -528,7 +541,15 @@ function EventoDetalleContent() {
                         disabled={actionLoading || (!canParticipate && !isRegistered)}
                         className="w-full py-4 text-lg font-bold shadow-lg shadow-green-900/20 mb-3"
                     >
-                        {isRegistered ? 'Cancelar Inscripción' : !canParticipate ? 'Cupos Agotados' : evento.permite_equipos ? 'Inscribir Equipo' : 'Inscribirme Ahora'}
+                        {isRegistered 
+                          ? 'Cancelar Inscripción' 
+                          : evento.registroCerrado 
+                            ? 'Inscripciones Cerradas' 
+                            : !canParticipate 
+                              ? 'Cupos Agotados' 
+                              : evento.permite_equipos 
+                                ? 'Inscribir Equipo' 
+                                : 'Inscribirme Ahora'}
                     </Button>
 
                     {isRegistered && (

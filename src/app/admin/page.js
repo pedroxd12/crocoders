@@ -16,7 +16,8 @@ import {
   User,
   Menu,
   X,
-  Calendar
+  Calendar,
+  BookOpen
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -27,6 +28,7 @@ import InvitadosAdmin from './InvitadosAdmin/page';
 import GestionAdministradores from './GestionAdministradores/page';
 import AdminProfile from './AdminProfile/page';
 import EvidenciasAdmin from './evidencias/page';
+import ProgramasAdmin from './programas/page';
 
 export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -48,6 +50,7 @@ export default function AdminPanel() {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'eventos', label: 'Eventos', icon: Calendar },
+    { id: 'programas', label: 'Programas', icon: BookOpen },
     { id: 'miembros', label: 'Miembros', icon: Users },
     { id: 'invitados', label: 'Invitados', icon: UserPlus },
     { id: 'admins', label: 'Administradores', icon: Shield },
@@ -58,6 +61,7 @@ export default function AdminPanel() {
     switch (activeTab) {
       case 'dashboard': return <DashboardHome />;
       case 'eventos': return <EventosAdmin />;
+      case 'programas': return <ProgramasAdmin />;
       case 'miembros': return <MiembrosAdmin />;
       case 'invitados': return <InvitadosAdmin />;
       case 'admins': return <GestionAdministradores />;

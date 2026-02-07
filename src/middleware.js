@@ -107,6 +107,13 @@ export async function middleware(request) {
       return NextResponse.redirect(new URL('/dashboard', request.url));
     }
 
+    // Permitir acceso a /staff para todos los usuarios autenticados (miembros)
+    // La verificación de si realmente son staff se hace en las APIs
+    if (pathname.startsWith('/staff') && user.role === ROLES.ADMIN) {
+      // Los admins no usan el panel de staff, redirigir al admin
+      return NextResponse.redirect(new URL('/admin', request.url));
+    }
+
     // Redirigir a la página correcta si el usuario está autenticado pero en una ruta no adecuada
     if ((pathname === '/dashboard' && user.role === ROLES.ADMIN) || 
         (pathname === '/admin' && user.role !== ROLES.ADMIN)) {

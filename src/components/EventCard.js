@@ -39,6 +39,15 @@ export default function EventCard({ evento, isRegistered, index }) {
         gradient: 'from-purple-500/20 to-purple-700/20'
       };
     }
+    if (evento.registroCerrado) {
+      return { 
+        text: 'Inscripciones Cerradas', 
+        color: 'bg-orange-500/80 backdrop-blur-md', 
+        textColor: 'text-white',
+        Icon: XCircle,
+        gradient: 'from-orange-500/20 to-orange-700/20'
+      };
+    }
     if (evento.cupos !== null && evento.cupos_disponibles <= 0) {
       return { 
         text: 'Cupos Llenos', 

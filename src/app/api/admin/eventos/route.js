@@ -11,6 +11,7 @@ export async function GET() {
         e.descripcion_html,
         e.fecha_inicio,
         e.fecha_fin,
+        TO_CHAR(e.fecha_limite_registro, 'YYYY-MM-DD"T"HH24:MI') as fecha_limite_registro,
         e.hora_inicio,
         e.hora_fin,
         e.ubicacion,
@@ -34,6 +35,8 @@ export async function GET() {
         c.max_integrantes_equipo,
         c.min_integrantes_equipo,
         c.id_plataforma,
+        c.requiere_asesor,
+        c.url_concurso,
         cp.nombre as plataforma_nombre
       FROM evento e
       JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
@@ -67,6 +70,7 @@ export async function POST(request) {
       id_alcance,
       fecha_inicio,
       fecha_fin,
+      fecha_limite_registro,
       hora_inicio,
       hora_fin,
       ubicacion,
@@ -99,17 +103,17 @@ export async function POST(request) {
     const insertEventoQuery = `
       INSERT INTO evento (
         nombre, descripcion_html, id_tipo_evento, id_alcance,
-        fecha_inicio, fecha_fin, hora_inicio, hora_fin,
+        fecha_inicio, fecha_fin, fecha_limite_registro, hora_inicio, hora_fin,
         ubicacion, cupos, cupos_disponibles,
         tiene_costo, costo,
         imagen_flyer_url, imagen_flyer_key,
         estado
       ) VALUES (
         $1, $2, $3, $4,
-        $5, $6, $7, $8,
-        $9, $10, $10, -- cupos_disponibles inicial = cupos
-        $11, $12,
-        $13, $14,
+        $5, $6, $7, $8, $9,
+        $10, $11, $11, -- cupos_disponibles inicial = cupos
+        $12, $13,
+        $14, $15,
         'publicado'
       )
       RETURNING id_evento;
@@ -126,6 +130,7 @@ export async function POST(request) {
       id_alcance,
       fecha_inicio,
       fechaFinValue,
+      fecha_limite_registro || null,
       hora_inicio,
       hora_fin,
       ubicacion,

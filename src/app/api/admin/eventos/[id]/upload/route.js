@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
-import sql from '@/lib/db-server';
+import pool from '@/lib/db-server';
 import fs from 'fs';
 import path from 'path';
 
 export async function POST(request, { params }) {
+  const { id } = await params;
+  const client = await pool.connect();
+  
   try {
-    const { id } = params;
-    
     if (!id) {
       return NextResponse.json(
         { message: 'ID de evento es requerido' },
@@ -15,11 +16,12 @@ export async function POST(request, { params }) {
     }
 
     // Verificar si el evento existe
-    const [evento] = await sql`
-      SELECT 1 FROM evento WHERE id_evento = ${id}
-    `;
+    const eventoCheck = await client.query(
+      'SELECT 1 FROM evento WHERE id_evento = $1',
+      [id]
+    );
     
-    if (!evento) {
+    if (eventoCheck.rows.length === 0) {
       return NextResponse.json(
         { message: 'Evento no encontrado' },
         { status: 404 }
@@ -52,23 +54,18 @@ export async function POST(request, { params }) {
         
         await fs.promises.writeFile(filepath, Buffer.from(buffer));
         
-        const [imagen] = await sql`
-          INSERT INTO evento_imagenes (
+        const imagenResult = await client.query(
+          `INSERT INTO evento_imagenes (
             id_evento,
             nombre_archivo,
             ruta,
             tipo_mime,
             tamanio
-          ) VALUES (
-            ${id},
-            ${filename},
-            ${`/uploads/eventos/${id}/`},
-            ${file.type},
-            ${file.size}
-          ) RETURNING *
-        `;
+          ) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+          [id, filename, `/uploads/eventos/${id}/`, file.type, file.size]
+        );
         
-        imagenesGuardadas.push(imagen);
+        imagenesGuardadas.push(imagenResult.rows[0]);
       }
     }
 
@@ -79,13 +76,16 @@ export async function POST(request, { params }) {
       { message: 'Error al subir imágenes: ' + error.message },
       { status: 500 }
     );
+  } finally {
+    client.release();
   }
 }
 
 export async function GET(request, { params }) {
+  const { id } = await params;
+  const client = await pool.connect();
+  
   try {
-    const { id } = params;
-    
     if (!id) {
       return NextResponse.json(
         { message: 'ID de evento es requerido' },
@@ -93,28 +93,32 @@ export async function GET(request, { params }) {
       );
     }
 
-    const imagenes = await sql`
-      SELECT * FROM evento_imagenes
-      WHERE id_evento = ${id}
-      ORDER BY fecha_creacion DESC
-    `;
+    const result = await client.query(
+      `SELECT * FROM evento_imagenes
+       WHERE id_evento = $1
+       ORDER BY fecha_creacion DESC`,
+      [id]
+    );
 
-    return NextResponse.json(imagenes);
+    return NextResponse.json(result.rows);
   } catch (error) {
     console.error('Error fetching images:', error);
     return NextResponse.json(
       { message: 'Error al obtener imágenes' },
       { status: 500 }
     );
+  } finally {
+    client.release();
   }
 }
 
 export async function DELETE(request, { params }) {
+  const { id } = await params;
+  const { searchParams } = new URL(request.url);
+  const imageId = searchParams.get('imageId');
+  const client = await pool.connect();
+  
   try {
-    const { id } = params;
-    const { searchParams } = new URL(request.url);
-    const imageId = searchParams.get('imageId');
-    
     if (!id || !imageId) {
       return NextResponse.json(
         { message: 'ID de evento e ID de imagen son requeridos' },
@@ -123,17 +127,20 @@ export async function DELETE(request, { params }) {
     }
 
     // Obtener información de la imagen
-    const [imagen] = await sql`
-      SELECT * FROM evento_imagenes 
-      WHERE id_imagen = ${imageId} AND id_evento = ${id}
-    `;
+    const imagenResult = await client.query(
+      `SELECT * FROM evento_imagenes 
+       WHERE id_imagen = $1 AND id_evento = $2`,
+      [imageId, id]
+    );
 
-    if (!imagen) {
+    if (imagenResult.rows.length === 0) {
       return NextResponse.json(
         { message: 'Imagen no encontrada' },
         { status: 404 }
       );
     }
+
+    const imagen = imagenResult.rows[0];
 
     // Eliminar archivo físico
     const filePath = path.join(
@@ -153,10 +160,10 @@ export async function DELETE(request, { params }) {
     }
 
     // Eliminar registro de la base de datos
-    await sql`
-      DELETE FROM evento_imagenes 
-      WHERE id_imagen = ${imageId}
-    `;
+    await client.query(
+      'DELETE FROM evento_imagenes WHERE id_imagen = $1',
+      [imageId]
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -165,5 +172,7 @@ export async function DELETE(request, { params }) {
       { message: 'Error al eliminar imagen: ' + error.message },
       { status: 500 }
     );
+  } finally {
+    client.release();
   }
 }

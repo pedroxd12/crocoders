@@ -30,6 +30,7 @@ export default function EventosAdmin() {
     id_alcance: '',
     fecha_inicio: '',
     fecha_fin: '',
+    fecha_limite_registro: '',
     hora_inicio: '',
     hora_fin: '',
     ubicacion: '',
@@ -167,6 +168,7 @@ export default function EventosAdmin() {
       id_alcance: evento.id_alcance,
       fecha_inicio: evento.fecha_inicio ? evento.fecha_inicio.split('T')[0] : '',
       fecha_fin: evento.fecha_fin ? evento.fecha_fin.split('T')[0] : '',
+      fecha_limite_registro: evento.fecha_limite_registro || '',
       hora_inicio: evento.hora_inicio || '',
       hora_fin: evento.hora_fin || '',
       ubicacion: evento.ubicacion || '',
@@ -195,6 +197,7 @@ export default function EventosAdmin() {
       id_alcance: catalogs.alcances[0]?.id_alcance || '',
       fecha_inicio: '',
       fecha_fin: '',
+      fecha_limite_registro: '',
       hora_inicio: '',
       hora_fin: '',
       ubicacion: '',
@@ -347,6 +350,20 @@ export default function EventosAdmin() {
             <Input label="Fecha Fin" type="date" name="fecha_fin" value={formData.fecha_fin} onChange={handleInputChange} className="bg-gray-700 border-gray-600" />
             <Input label="Hora Inicio" type="time" name="hora_inicio" value={formData.hora_inicio} onChange={handleInputChange} required className="bg-gray-700 border-gray-600" />
             <Input label="Hora Fin" type="time" name="hora_fin" value={formData.hora_fin} onChange={handleInputChange} required className="bg-gray-700 border-gray-600" />
+          </div>
+          
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+            <Input 
+              label="Fecha Límite de Registro" 
+              type="datetime-local" 
+              name="fecha_limite_registro" 
+              value={formData.fecha_limite_registro} 
+              onChange={handleInputChange} 
+              className="bg-gray-700 border-gray-600" 
+            />
+            <p className="text-xs text-gray-400 mt-2">
+              ⚠️ Fecha y hora límite para que los usuarios puedan inscribirse. Si se deja vacío, se permitirán inscripciones hasta 1 hora antes del inicio del evento.
+            </p>
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

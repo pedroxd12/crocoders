@@ -15,7 +15,7 @@ export async function POST(request) {
 
     // Obtener información del evento y si es concurso (equipos)
     const eventoRes = await client.query(`
-      SELECT e.id_evento, e.cupos_disponibles, e.estado, e.nombre,
+      SELECT e.id_evento, e.cupos_disponibles, e.estado, e.nombre, e.fecha_limite_registro,
              c.id_concurso, c.max_integrantes_equipo, c.requiere_asesor, t.permite_equipos
       FROM evento e
       LEFT JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
@@ -29,6 +29,19 @@ export async function POST(request) {
     }
     
     const evento = eventoRes.rows[0];
+
+    // Verificar fecha límite de registro
+    if (evento.fecha_limite_registro) {
+      const now = new Date();
+      const fechaLimite = new Date(evento.fecha_limite_registro);
+      if (now > fechaLimite) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ 
+          success: false, 
+          error: 'El periodo de inscripción para este evento ha finalizado.' 
+        }, { status: 400 });
+      }
+    }
 
     // Verificar estado
     if (!['publicado', 'en_curso'].includes(evento.estado)) {

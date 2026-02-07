@@ -52,7 +52,21 @@ export async function GET(request, context) {
       return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
     }
 
-    return NextResponse.json(result.rows[0]);
+    const evento = result.rows[0];
+    
+    // Formatear fecha_limite_registro para datetime-local (sin conversión UTC)
+    if (evento.fecha_limite_registro) {
+      const fecha = new Date(evento.fecha_limite_registro);
+      // Obtener componentes en timezone local del servidor
+      const year = fecha.getFullYear();
+      const month = String(fecha.getMonth() + 1).padStart(2, '0');
+      const day = String(fecha.getDate()).padStart(2, '0');
+      const hours = String(fecha.getHours()).padStart(2, '0');
+      const minutes = String(fecha.getMinutes()).padStart(2, '0');
+      evento.fecha_limite_registro = `${year}-${month}-${day}T${hours}:${minutes}`;
+    }
+
+    return NextResponse.json(evento);
   } catch (error) {
     console.error('Error en GET /api/admin/eventos/[id]:', error);
     return NextResponse.json({ error: 'Error al obtener evento' }, { status: 500 });
@@ -73,7 +87,7 @@ export async function PUT(request, context) {
     const body = await request.json();
     const {
         nombre, descripcion_html, id_tipo_evento, id_alcance,
-        fecha_inicio, fecha_fin, hora_inicio, hora_fin,
+        fecha_inicio, fecha_fin, fecha_limite_registro, hora_inicio, hora_fin,
         ubicacion, cupos, tiene_costo, costo,
         imagen_flyer_url, imagen_flyer_key,
         // Concurso
@@ -117,16 +131,17 @@ export async function PUT(request, context) {
             id_alcance = $4,
             fecha_inicio = $5, 
             fecha_fin = $6, 
-            hora_inicio = $7, 
-            hora_fin = $8,
-            ubicacion = $9, 
-            cupos = $10,
-            tiene_costo = $11, 
-            costo = $12,
-            imagen_flyer_url = $13, 
-            imagen_flyer_key = $14,
+            fecha_limite_registro = $7,
+            hora_inicio = $8, 
+            hora_fin = $9,
+            ubicacion = $10, 
+            cupos = $11,
+            tiene_costo = $12, 
+            costo = $13,
+            imagen_flyer_url = $14, 
+            imagen_flyer_key = $15,
             updated_at = NOW()
-        WHERE id_evento = $15
+        WHERE id_evento = $16
         RETURNING *
     `;
 
@@ -134,7 +149,7 @@ export async function PUT(request, context) {
     
     await client.query(updateQuery, [
         nombre, descripcion_html, id_tipo_evento, id_alcance,
-        fecha_inicio, fechaFinValue, hora_inicio, hora_fin,
+        fecha_inicio, fechaFinValue, fecha_limite_registro || null, hora_inicio, hora_fin,
         ubicacion, cupos, tiene_costo, costo,
         finalUrl, finalKey,
         id

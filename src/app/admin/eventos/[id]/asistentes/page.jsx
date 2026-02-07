@@ -9,6 +9,7 @@ import Input from '@/components/ui/Input';
 import Table from '@/components/ui/Table';
 import Modal from '@/components/ui/Modal';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import QRScannerModal from '@/components/QRScannerModal';
 
 export default function EventoAsistentes() {
   const { id } = useParams();
@@ -23,6 +24,9 @@ export default function EventoAsistentes() {
   const [usersCatalog, setUsersCatalog] = useState([]);
   const [selectedUserJson, setSelectedUserJson] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
+  
+  // QRScanner State
+  const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
 
   useEffect(() => {
     fetchAsistentes();
@@ -135,7 +139,12 @@ export default function EventoAsistentes() {
   };
 
   const handleScanQR = () => {
-    toast.info('Funcionalidad de escaneo QR en desarrollo. Por favor use el registro manual por ahora.');
+    setIsQRScannerOpen(true);
+  };
+  
+  const handleQRSuccess = (data) => {
+    // Reload attendance list after successful scan
+    fetchAsistentes();
   };
 
   const filteredAsistentes = asistentes.filter(a => 
@@ -278,6 +287,13 @@ export default function EventoAsistentes() {
             </div>
         </form>
       </Modal>
+      
+      {/* QR Scanner Modal */}
+      <QRScannerModal 
+        isOpen={isQRScannerOpen}
+        onClose={() => setIsQRScannerOpen(false)}
+        onSuccess={handleQRSuccess}
+      />
     </div>
   );
 }

@@ -47,6 +47,7 @@ export async function GET(request, context) {
       // Mapeo para retrocompatibilidad con frontend que espera 'fecha'
       fecha: evento.fecha_inicio instanceof Date ? evento.fecha_inicio.toISOString().split('T')[0] : evento.fecha_inicio,
       fecha_fin: evento.fecha_fin instanceof Date ? evento.fecha_fin.toISOString().split('T')[0] : evento.fecha_fin,
+      fecha_limite_registro: evento.fecha_limite_registro instanceof Date ? evento.fecha_limite_registro.toISOString() : evento.fecha_limite_registro,
       hora_inicio: evento.hora_inicio?.toString?.() ?? null,
       hora_fin: evento.hora_fin?.toString?.() ?? null,
       tipo: evento.tipo_nombre || 'Evento',

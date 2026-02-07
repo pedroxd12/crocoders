@@ -19,6 +19,7 @@ export async function GET() {
         e.hora_inicio,
         e.fecha_fin,
         e.hora_fin,
+        e.fecha_limite_registro,
         e.costo,
         e.cupos,
         e.ubicacion,
@@ -45,7 +46,8 @@ export async function GET() {
         return {
             ...evento,
             estado: estadoTiempo, // Sobrescribir estado DB con estado visual
-            fecha: new Date(evento.fecha).toISOString().split('T')[0]
+            fecha: new Date(evento.fecha).toISOString().split('T')[0],
+            fecha_fin: evento.fecha_fin ? new Date(evento.fecha_fin).toISOString().split('T')[0] : evento.fecha
         };
     });
     

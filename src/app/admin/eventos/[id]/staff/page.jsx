@@ -35,7 +35,11 @@ export default function EventoStaff() {
   const fetchStaff = async () => {
     try {
         const res = await fetch(`/api/admin/eventos/${id}/staff`);
-        if (res.ok) setStaff(await res.json());
+        if (res.ok) {
+            const data = await res.json();
+            console.log('👨‍💼 Staff actual:', data);
+            setStaff(data);
+        }
     } catch (error) {
         console.error(error);
         toast.error('Error al cargar staff');
@@ -54,14 +58,22 @@ export default function EventoStaff() {
 
   const fetchMembers = async () => {
       try {
-          // Temporarily use users endpoint, filtering for members on client or if specific endpoint exists
           const res = await fetch('/api/admin/users'); 
           if (res.ok) {
               const data = await res.json();
+              console.log('👥 Usuarios obtenidos:', data);
               // Filter only members, no guests can be staff usually
-              setAvailableMembers(data.filter(u => u.tipo === 'miembro')); 
+              const members = data.filter(u => u.tipo === 'miembro');
+              console.log('✅ Miembros filtrados:', members);
+              setAvailableMembers(members); 
+          } else {
+              console.error('❌ Error en respuesta:', res.status);
+              toast.error('Error al cargar miembros');
           }
-      } catch (error) { console.error(error); }
+      } catch (error) { 
+          console.error('❌ Error al cargar miembros:', error);
+          toast.error('Error al cargar lista de miembros');
+      }
   };
 
   const handleAddStaff = async (e) => {
@@ -116,6 +128,8 @@ export default function EventoStaff() {
 
   // Filter out members already in staff
   const membersNotInStaff = availableMembers.filter(m => !staff.some(s => s.id_miembro === m.id));
+  
+  console.log('📋 Miembros disponibles (no en staff):', membersNotInStaff);
 
   if (loading) return <LoadingSpinner />;
 

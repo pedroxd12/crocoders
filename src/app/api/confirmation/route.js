@@ -65,8 +65,11 @@ export async function POST(request) {
     }
 
     let formattedDate = eventDetails.fecha;
+    let formattedHoraInicio = eventDetails.hora_inicio || '--:--';
+    let formattedHoraFin = eventDetails.hora_fin || '--:--';
+    
     try {
-      const date = new Date(eventDetails.fecha);
+      const date = new Date(eventDetails.fecha + 'T00:00:00');
       if (!isNaN(date.getTime())) {
         formattedDate = date.toLocaleDateString('es-ES', {
           weekday: 'long',
@@ -76,6 +79,22 @@ export async function POST(request) {
         });
       }
     } catch (_) {}
+    
+    // Formatear horas en formato 12h con AM/PM
+    const formatTime = (timeStr) => {
+      if (!timeStr || timeStr === '--:--') return timeStr;
+      try {
+        const [hours, minutes] = timeStr.split(':');
+        const date = new Date();
+        date.setHours(parseInt(hours, 10), parseInt(minutes, 10));
+        return date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true });
+      } catch (_) {
+        return timeStr;
+      }
+    };
+    
+    formattedHoraInicio = formatTime(eventDetails.hora_inicio);
+    formattedHoraFin = formatTime(eventDetails.hora_fin);
 
     let attachments = [];
     if (qrToken) {
@@ -118,9 +137,9 @@ export async function POST(request) {
             <div style="background-color: white; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e1e1e1;">
               <h3 style="margin-top: 0; color: #1a1a1a;">Detalles del evento:</h3>
               <p><strong>Fecha:</strong> ${formattedDate}</p>
-              <p><strong>Hora:</strong> ${eventDetails.hora_inicio || '--:--'} - ${eventDetails.hora_fin || '--:--'}</p>
-              ${eventDetails.costo > 0 ? `<p><strong>Costo:</strong> $${Number(eventDetails.costo).toFixed(2)}</p>` : ''}
+              <p><strong>Hora:</strong> ${formattedHoraInicio} - ${formattedHoraFin}</p>
               ${eventDetails.ubicacion ? `<p><strong>Ubicación:</strong> ${eventDetails.ubicacion}</p>` : ''}
+              ${eventDetails.costo && eventDetails.costo > 0 ? `<p><strong>Costo:</strong> $${Number(eventDetails.costo).toFixed(2)} MXN</p>` : '<p><strong>Entrada:</strong> GRATUITA</p>'}
             </div>
 
             ${qrToken ? `
@@ -139,7 +158,7 @@ export async function POST(request) {
           </div>
         </div>
       `,
-      text: `Hola ${name},\n\nTu registro para el evento "${eventDetails.nombre_evento}" ha sido exitoso.\n\nDetalles:\nFecha: ${formattedDate}\nHora: ${eventDetails.hora_inicio || '--:--'} - ${eventDetails.hora_fin || '--:--'}\n${eventDetails.costo > 0 ? `Costo: $${Number(eventDetails.costo).toFixed(2)}\n` : ''}\n${qrToken ? 'Se adjunta tu código QR de acceso.\n' : ''}\nSaludos,\nClub Crocoders`,
+      text: `Hola ${name},\n\nTu registro para el evento "${eventDetails.nombre_evento}" ha sido exitoso.\n\nDetalles:\nFecha: ${formattedDate}\nHora: ${formattedHoraInicio} - ${formattedHoraFin}\n${eventDetails.ubicacion ? `Ubicación: ${eventDetails.ubicacion}\n` : ''}${eventDetails.costo && eventDetails.costo > 0 ? `Costo: $${Number(eventDetails.costo).toFixed(2)} MXN\n` : 'Entrada: GRATUITA\n'}\n${qrToken ? 'Se adjunta tu código QR de acceso.\n' : ''}\nSaludos,\nClub Crocoders`,
       attachments: attachments
     };
 

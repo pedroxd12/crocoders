@@ -94,11 +94,26 @@ function EventosContent() {
       if (!Array.isArray(data)) throw new Error('Formato de datos inesperado');
       
       const now = new Date();
-      const formattedEvents = data.map(evento => ({
-        ...evento,
-        fecha: new Date(evento.fecha).toISOString().split('T')[0],
-        isPastEvent: new Date(`${evento.fecha}T${evento.hora_fin || '23:59'}`) < now
-      }));
+      const formattedEvents = data.map(evento => {
+        let registroCerrado = false;
+        if (evento.fecha_limite_registro) {
+          const fechaLimiteRegistro = new Date(evento.fecha_limite_registro);
+          registroCerrado = now > fechaLimiteRegistro;
+        }
+        
+        // Usar fecha_fin si existe, si no usar fecha_inicio para determinar si finalizó
+        const fechaFin = evento.fecha_fin || evento.fecha;
+        const horaFin = evento.hora_fin || '23:59';
+        // Agregar 'T' para asegurar interpretación en timezone local
+        const fechaFinCompleta = `${fechaFin}T${horaFin}`;
+        
+        return {
+          ...evento,
+          fecha: new Date(evento.fecha + 'T00:00:00').toISOString().split('T')[0],
+          isPastEvent: new Date(fechaFinCompleta) < now,
+          registroCerrado: registroCerrado
+        };
+      });
       
       setEventos(formattedEvents);
     } catch (err) {
