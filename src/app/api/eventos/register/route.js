@@ -32,8 +32,17 @@ export async function POST(request) {
 
     // Verificar fecha límite de registro
     if (evento.fecha_limite_registro) {
-      const now = new Date();
-      const fechaLimite = new Date(evento.fecha_limite_registro);
+      // Usar timestamps en milisegundos para comparación robusta
+      const now = Date.now();
+      const fechaLimite = new Date(evento.fecha_limite_registro).getTime();
+      
+      console.log('🕐 Validación fecha límite:', {
+        ahora: new Date(now).toISOString(),
+        limite: new Date(fechaLimite).toISOString(),
+        diferencia_ms: fechaLimite - now,
+        permite_registro: now <= fechaLimite
+      });
+      
       if (now > fechaLimite) {
         await client.query('ROLLBACK');
         return NextResponse.json({ 

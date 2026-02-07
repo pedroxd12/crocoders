@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { FaUser, FaLock, FaEnvelope, FaCode, FaCalendarAlt, FaHistory, FaEdit, FaSignOutAlt, FaTimes, FaCheck, FaGraduationCap, FaBook } from 'react-icons/fa';
+import { FaUser, FaLock, FaEnvelope, FaCode, FaCalendarAlt, FaHistory, FaEdit, FaSignOutAlt, FaTimes, FaCheck, FaGraduationCap, FaBook, FaUserShield, FaClipboardCheck } from 'react-icons/fa';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '@/context/AuthContext';
@@ -25,6 +25,7 @@ export default function DashboardPage() {
     confirmPassword: ''
   });
   const [events, setEvents] = useState([]);
+  const [staffEvents, setStaffEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -101,6 +102,35 @@ export default function DashboardPage() {
     }
   }, []);
 
+  // Función para cargar eventos donde soy staff
+  const fetchStaffEvents = useCallback(async () => {
+    try {
+      const res = await fetch('/api/staff/eventos', { 
+        credentials: 'include',
+        headers: {
+          'Cache-Control': 'no-cache'
+        }
+      });
+      
+      if (!res.ok) {
+        // Si retorna 401 o 403, simplemente no tiene eventos de staff
+        if (res.status === 401 || res.status === 403) {
+          setStaffEvents([]);
+          return { success: true };
+        }
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+      
+      const data = await res.json();
+      setStaffEvents(data || []);
+      return { success: true };
+    } catch (error) {
+      console.error('Error fetching staff events:', error);
+      setStaffEvents([]);
+      return { success: false, error: error.message };
+    }
+  }, []);
+
   // Carga inicial de datos
   useEffect(() => {
     if (!user || !initialLoad) return;
@@ -110,9 +140,10 @@ export default function DashboardPage() {
         setLoading(true);
         setError('');
         
-        const [profileResult, eventsResult] = await Promise.allSettled([
+        const [profileResult, eventsResult, staffEventsResult] = await Promise.allSettled([
           fetchUserProfile(),
-          fetchEvents()
+          fetchEvents(),
+          fetchStaffEvents()
         ]);
 
         if (profileResult.status === 'rejected' || eventsResult.status === 'rejected') {
@@ -120,6 +151,7 @@ export default function DashboardPage() {
           console.error('Error loading data:', error);
           setError('Error al cargar algunos datos. Intente recargar la página.');
         }
+        // Staff events son opcionales, no mostrar error si fallan
       } catch (error) {
         console.error('Unexpected error:', error);
         setError('Error inesperado al cargar datos.');
@@ -130,7 +162,7 @@ export default function DashboardPage() {
     };
 
     loadData();
-  }, [user, initialLoad, fetchUserProfile, fetchEvents]);
+  }, [user, initialLoad, fetchUserProfile, fetchEvents, fetchStaffEvents]);
 
   const handleProfileUpdate = async (e) => {
     e.preventDefault();
@@ -344,6 +376,23 @@ export default function DashboardPage() {
                     <FaLock className="mr-3 text-lg" />
                      <span className="font-medium">Seguridad</span>
                   </button>
+                  
+                  {staffEvents.length > 0 && (
+                    <button
+                      onClick={() => setActiveTab('staff')}
+                      className={`w-full text-left px-4 py-3.5 rounded-xl flex items-center transition-all duration-200 ${
+                          activeTab === 'staff' 
+                          ? 'bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg' 
+                          : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <FaUserShield className="mr-3 text-lg" />
+                      <span className="font-medium">Mis Eventos Staff</span>
+                      <span className="ml-auto bg-blue-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                        {staffEvents.length}
+                      </span>
+                    </button>
+                  )}
                   
                   <div className="pt-4 mt-2 border-t border-white/10">
                       <button 
@@ -642,6 +691,94 @@ export default function DashboardPage() {
                       </button>
                     </div>
                   </form>
+                </div>
+              )}
+
+              {activeTab === 'staff' && (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center space-x-4">
+                      <div className="p-3.5 rounded-xl bg-blue-500/20 text-blue-400">
+                        <FaUserShield size={24} />
+                      </div>
+                      <h2 className="text-2xl font-bold text-white">Mis Eventos Como Staff</h2>
+                    </div>
+                    <button
+                      onClick={() => router.push('/staff')}
+                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium transition transform hover:scale-105"
+                    >
+                      <FaClipboardCheck className="inline mr-2" />
+                      Panel Completo
+                    </button>
+                  </div>
+
+                  <p className="text-gray-400 mb-6">
+                    Eventos donde estás asignado como staff. Haz clic en "Panel Completo" para acceder a las funciones de registro de asistencia.
+                  </p>
+
+                  {staffEvents.length === 0 ? (
+                    <div className="text-center py-12">
+                      <div className="inline-block p-6 rounded-full bg-gray-800/50 mb-4">
+                        <FaUserShield size={48} className="text-gray-600" />
+                      </div>
+                      <p className="text-gray-400 text-lg">No estás asignado como staff en ningún evento actualmente.</p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-4">
+                      {staffEvents.map(event => (
+                        <div 
+                          key={event.id_evento}
+                          className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-2xl p-6 border border-gray-700 hover:border-blue-500 transition-all duration-300 shadow-lg hover:shadow-blue-900/30"
+                        >
+                          <div className="flex justify-between items-start mb-4">
+                            <div>
+                              <h3 className="text-xl font-bold text-white mb-2">{event.titulo}</h3>
+                              <p className="text-gray-400 text-sm mb-3">{event.descripcion}</p>
+                            </div>
+                            <span className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider ${
+                              event.estado === 'abierto' 
+                                ? 'bg-green-500/20 text-green-400 border border-green-500/50'
+                                : 'bg-gray-500/20 text-gray-400 border border-gray-500/50'
+                            }`}>
+                              {event.estado}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div className="flex items-center text-gray-300">
+                              <FaCalendarAlt className="mr-2 text-blue-400" />
+                              <span className="text-sm">
+                                {new Date(event.fecha_inicio).toLocaleDateString('es-MX', {
+                                  year: 'numeric',
+                                  month: 'long',
+                                  day: 'numeric'
+                                })}
+                              </span>
+                            </div>
+                            <div className="flex items-center text-gray-300">
+                              <FaBook className="mr-2 text-purple-400" />
+                              <span className="text-sm">{event.tipo_evento}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-4 border-t border-gray-700">
+                            <div className="text-sm text-gray-400">
+                              <span className="font-semibold text-blue-400">{event.total_inscritos || 0}</span> inscritos
+                              {event.cupos_disponibles && (
+                                <span className="ml-2">de <span className="font-semibold">{event.cupos_disponibles}</span> cupos</span>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => router.push(`/staff/eventos/${event.id_evento}`)}
+                              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition"
+                            >
+                              Ver Detalles
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               </div>
