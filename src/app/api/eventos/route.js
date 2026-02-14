@@ -71,17 +71,3 @@ export async function GET() {
     );
   }
 }
-        };
-    });
-    
-    return NextResponse.json(eventos);
-  } catch (error) {
-    console.error('Error en GET /api/eventos:', error);
-    return NextResponse.json(
-      { error: 'Error al obtener eventos: ' + error.message },
-      { status: 500 }
-    );
-  } finally {
-    client.release();
-  }
-}
