@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
 
 export async function POST(request) {
-  const client = await pool.connect();
+  let client;
+  
   try {
     const { qrToken } = await request.json();
     
@@ -47,6 +48,16 @@ export async function POST(request) {
         success: false, 
         error: 'Datos incompletos en el token' 
       }, { status: 400 });
+    }
+    
+    try {
+      client = await pool.connect();
+    } catch (connectionError) {
+      console.error('💥 Error de conexión en /api/eventos/verify-qr:', connectionError);
+      return NextResponse.json(
+        { success: false, error: 'No se pudo conectar con la base de datos. Intente nuevamente.', code: 'DB_CONNECTION_ERROR' },
+        { status: 503 }
+      );
     }
 
     await client.query('BEGIN');
@@ -122,13 +133,28 @@ export async function POST(request) {
     });
 
   } catch (error) {
-    await client.query('ROLLBACK');
-    console.error('Error en verificación QR:', error);
+    if (client) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('⚠️ Error en ROLLBACK:', rollbackError);
+      }
+    }
+    console.error('💥 Error en verificación QR:', error);
+    
+    // Manejo específico de errores de conexión
+    if (['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(error.code)) {
+      return NextResponse.json(
+        { success: false, error: 'Error de conexión con la base de datos. Intente nuevamente.', code: 'DB_CONNECTION_ERROR' },
+        { status: 503 }
+      );
+    }
+    
     return NextResponse.json({ 
       success: false, 
       error: 'Error al procesar la verificación' 
     }, { status: 500 });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }

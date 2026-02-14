@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
 
 export async function POST(request) {
+  let client;
+  
   try {
     const data = await request.json();
     const { eventoId, userId, tipo } = data;
@@ -12,7 +14,15 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'Datos de evento o usuario no válidos' }, { status: 400 });
     }
 
-    const client = await pool.connect();
+    try {
+      client = await pool.connect();
+    } catch (connectionError) {
+      console.error('💥 Error de conexión en /api/eventos/unregister:', connectionError);
+      return NextResponse.json(
+        { success: false, error: 'No se pudo conectar con la base de datos. Intente nuevamente.', code: 'DB_CONNECTION_ERROR' },
+        { status: 503 }
+      );
+    }
     
     try {
         await client.query('BEGIN');
@@ -96,8 +106,35 @@ export async function POST(request) {
         }
 
     } catch (error) {
-        await client.query('ROLLBACK');
-        console.error('Error en unregister:', error);
+        if (client) {
+          try {
+            await client.query('ROLLBACK');
+          } catch (rollbackError) {
+            console.error('⚠️ Error en ROLLBACK:', rollbackError);
+          }
+        }
+        console.error('💥 Error en unregister:', error);
+        
+        // Manejo específico de errores de conexión
+        if (['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(error.code)) {
+          return NextResponse.json(
+            { success: false, error: 'Error de conexión con la base de datos. Intente nuevamente.', code: 'DB_CONNECTION_ERROR' },
+            { status: 503 }
+          );
+        }
+        
+        return NextResponse.json({ success: false, error: 'Error al cancelar la inscripción: ' + error.message }, { status: 500 });
+    } finally {
+        if (client) client.release();
+    }
+  } catch (error) {
+    console.error('💥 Error en request:', error);
+    return NextResponse.json(
+      { success: false, error: 'Error al procesar la solicitud: ' + error.message },
+      { status: 500 }
+    );
+  }
+}
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     } finally {
         client.release();

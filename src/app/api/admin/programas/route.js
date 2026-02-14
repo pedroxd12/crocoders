@@ -49,7 +49,10 @@ export async function POST(request) {
       sesiones_requeridas_certificado,
       porcentaje_asistencia_minimo,
       ubicacion,
-      imagen_url
+      imagen_url,
+      dias_semana, // Array de números [1, 3, 5] (Lunes, Miércoles, Viernes)
+      hora_inicio,
+      hora_fin
     } = await request.json();
 
     // Validaciones
@@ -80,6 +83,63 @@ export async function POST(request) {
         imagen_url
       ]
     );
+
+    const programaId = result.rows[0].id_programa;
+
+    // Generar sesiones si se seleccionaron días
+    if (dias_semana && dias_semana.length > 0 && hora_inicio && hora_fin) {
+      const start = new Date(fecha_inicio + 'T00:00:00');
+      const end = new Date(fecha_fin + 'T00:00:00');
+      
+      // Iterar por cada día en el rango
+      let sessionCount = 1;
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        if (dias_semana.includes(d.getDay())) {
+          const fechaStr = d.toISOString().split('T')[0];
+          
+          // 1. Crear evento para esta sesión
+          const eventoRes = await client.query(
+            `INSERT INTO evento (
+               nombre, descripcion_html, id_tipo_evento, id_alcance,
+               fecha_inicio, hora_inicio, fecha_fin, hora_fin,
+               ubicacion, estado, cupos, cupos_disponibles, 
+               imagen_flyer_url, tiene_costo
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'publicado', 100, 100, $10, false)
+             RETURNING id_evento`,
+            [
+              `${nombre} - Sesión ${sessionCount}`, // Nombre del evento
+              descripcion,
+              id_tipo_evento,
+              id_alcance,
+              fechaStr,
+              hora_inicio,
+              fechaStr, // Asumimos sesiones de un solo día
+              hora_fin,
+              ubicacion,
+              imagen_url
+            ]
+          );
+          
+          const eventoId = eventoRes.rows[0].id_evento;
+
+          // 2. Crear registro en sesion_programa
+          await client.query(
+            `INSERT INTO sesion_programa (
+              id_programa, id_evento, numero_sesion, titulo, descripcion
+            ) VALUES ($1, $2, $3, $4, $5)`,
+            [
+              programaId,
+              eventoId,
+              sessionCount,
+              `Sesión ${sessionCount}: ${nombre}`,
+              descripcion
+            ]
+          );
+          
+          sessionCount++;
+        }
+      }
+    }
 
     return NextResponse.json(result.rows[0], { status: 201 });
   } catch (error) {

@@ -98,11 +98,25 @@ export async function POST(request) {
       if (carreraRes.rows.length > 0) {
         idCarrera = carreraRes.rows[0].id_carrera;
       } else {
-        await client.query('ROLLBACK');
-        return NextResponse.json(
-            { success: false, error: 'La carrera seleccionada no es válida. Use el nombre completo o las siglas (ej. ISC, Ingeniería en Sistemas Computacionales).' },
-            { status: 400 }
-        );
+        // Si la carrera no existe, la creamos dinámicamente
+        // Generar un código simple basado en las iniciales o primeras letras
+        const codigoGenerado = carrera
+          .substring(0, 3).toUpperCase() + Math.floor(Math.random() * 1000);
+        
+        try {
+            const nuevaCarreraRes = await client.query(
+                'INSERT INTO catalogo_carrera (nombre, codigo) VALUES ($1, $2) RETURNING id_carrera',
+                [carrera, codigoGenerado]
+            );
+            idCarrera = nuevaCarreraRes.rows[0].id_carrera;
+        } catch (err) {
+            console.error('Error creando nueva carrera:', err);
+            await client.query('ROLLBACK');
+            return NextResponse.json(
+                { success: false, error: 'Error al registrar la nueva carrera. Intente nuevamente.' },
+                { status: 500 }
+            );
+        }
       }
 
       // Plataformas

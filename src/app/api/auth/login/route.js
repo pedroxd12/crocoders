@@ -4,6 +4,8 @@ import bcrypt from 'bcryptjs';
 import { createToken } from '@/lib/auth';
 
 export async function POST(request) {
+  let client;
+  
   try {
     const { correo_electronico, contrasena } = await request.json();
 
@@ -17,7 +19,16 @@ export async function POST(request) {
       );
     }
 
-    const client = await pool.connect();
+    try {
+      client = await pool.connect();
+    } catch (connectionError) {
+      console.error('💥 Error de conexión en /api/auth/login:', connectionError);
+      return NextResponse.json(
+        { success: false, error: 'No se pudo conectar con la base de datos. Intente nuevamente.', code: 'DB_CONNECTION_ERROR' },
+        { status: 503 }
+      );
+    }
+    
     let userData = null;
 
     try {
@@ -46,8 +57,23 @@ export async function POST(request) {
       
       userData = result.rows[0];
 
+    } catch (dbError) {
+      console.error('💥 Error de base de datos en login:', dbError);
+      
+      // Manejo específico de errores de conexión
+      if (['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(dbError.code)) {
+        return NextResponse.json(
+          { success: false, error: 'Error de conexión con la base de datos. Intente nuevamente.', code: 'DB_CONNECTION_ERROR' },
+          { status: 503 }
+        );
+      }
+      
+      return NextResponse.json(
+        { success: false, error: 'Error al verificar credenciales' },
+        { status: 500 }
+      );
     } finally {
-      client.release();
+      if (client) client.release();
     }
 
     const passwordMatch = await bcrypt.compare(contrasena, userData.contrasena);
@@ -99,13 +125,19 @@ export async function POST(request) {
 
     return response;
   } catch (error) {
-    console.error("Error login:", error);
+    console.error('💥 Error en login:', error);
+    
+    // Manejo específico de errores de conexión
+    if (['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(error.code)) {
+      return NextResponse.json(
+        { success: false, error: 'Error de conexión con la base de datos. Intente nuevamente.', code: 'DB_CONNECTION_ERROR' },
+        { status: 503 }
+      );
+    }
+    
     return NextResponse.json(
-      {
-        success: false,
-        error: 'No se pudo procesar la solicitud'
-      },
-      { status: 200 }
+      { success: false, error: 'Error en el inicio de sesión' },
+      { status: 500 }
     );
   }
 }

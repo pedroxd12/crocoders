@@ -36,6 +36,7 @@ function AuthContent() {
   const [showRegisterPassword, setShowRegisterPassword] = useState(false);
   const [showRegisterConfirmPassword, setShowRegisterConfirmPassword] = useState(false);
   const [passwordsMatch, setPasswordsMatch] = useState(true);
+  const [showManualCarrera, setShowManualCarrera] = useState(false);
 
   // Estados para recuperación
   const [recoveryEmail, setRecoveryEmail] = useState('');
@@ -62,11 +63,12 @@ function AuthContent() {
   // Carreras disponibles
   const carreras = [
     'Ingeniería en Sistemas Computacionales',
-    'Ingeniería en Electronica',
+    'Ingeniería en Electrónica',
     'Ingeniería Industrial',
-    'Ingeniería Quimica',
-    'Ingeniería en Logistica',
-    'Ingeniería en Mecatronica',
+    'Ingeniería Química',
+    'Ingeniería en Logística',
+    'Ingeniería en Mecatrónica',
+    'Otra'
   ];
 
   // Manejador de registro post-login
@@ -834,15 +836,37 @@ function AuthContent() {
                 name="carrera"
                 className={`${styles.input} ${errors.carrera ? styles.inputError : ''}`}
                 style={{ paddingLeft: '1rem' }}
-                value={registerData.carrera}
-                onChange={handleRegisterChange}
+                value={showManualCarrera ? 'Otra' : registerData.carrera}
+                onChange={(e) => {
+                  if (e.target.value === 'Otra') {
+                    setShowManualCarrera(true);
+                    setRegisterData(prev => ({ ...prev, carrera: '' }));
+                  } else {
+                    setShowManualCarrera(false);
+                    handleRegisterChange(e);
+                  }
+                }}
                 required
               >
                 <option value="" style={{ color: 'black' }}>Selecciona...</option>
-                {carreras.map(carrera => (
-                  <option key={carrera} value={carrera} style={{ color: 'black' }}>{carrera}</option>
+                {carreras.map(c => (
+                  <option key={c} value={c} style={{ color: 'black' }}>{c}</option>
                 ))}
               </select>
+
+              {showManualCarrera && (
+                <input 
+                  type="text" 
+                  name="carrera"
+                  className={`${styles.input} mt-2 ${errors.carrera ? styles.inputError : ''}`}
+                  style={{ paddingLeft: '1rem' }}
+                  value={registerData.carrera} 
+                  onChange={handleRegisterChange}
+                  placeholder="Escribe el nombre de tu carrera"
+                  required 
+                />
+              )}
+
               {errors.carrera && (
                 <p className={styles.errorText}>{errors.carrera}</p>
               )}

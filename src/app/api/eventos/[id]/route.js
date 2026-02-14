@@ -12,11 +12,12 @@ export async function GET(request, context) {
       );
     }
 
-    const [evento] = await sql`
+    const eventos = await sql`
       SELECT 
         e.*,
         t.nombre as tipo_nombre,
         t.permite_equipos,
+        a.nombre as alcance_nombre,
         c.id_concurso,
         c.modalidad,
         c.max_integrantes_equipo,
@@ -31,9 +32,12 @@ export async function GET(request, context) {
         ) as asistentes_count
       FROM evento e
       LEFT JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
+      LEFT JOIN catalogo_alcance_evento a ON e.id_alcance = a.id_alcance
       LEFT JOIN concurso c ON e.id_evento = c.id_evento
       WHERE e.id_evento = ${id}
     `;
+    
+    const evento = eventos && eventos.length > 0 ? eventos[0] : null;
 
     if (!evento) {
       return NextResponse.json(
@@ -46,20 +50,25 @@ export async function GET(request, context) {
       ...evento,
       // Mapeo para retrocompatibilidad con frontend que espera 'fecha'
       fecha: evento.fecha_inicio instanceof Date ? evento.fecha_inicio.toISOString().split('T')[0] : evento.fecha_inicio,
+      fecha_inicio: evento.fecha_inicio instanceof Date ? evento.fecha_inicio.toISOString().split('T')[0] : evento.fecha_inicio,
       fecha_fin: evento.fecha_fin instanceof Date ? evento.fecha_fin.toISOString().split('T')[0] : evento.fecha_fin,
       fecha_limite_registro: evento.fecha_limite_registro instanceof Date ? evento.fecha_limite_registro.toISOString() : evento.fecha_limite_registro,
       hora_inicio: evento.hora_inicio?.toString?.() ?? null,
       hora_fin: evento.hora_fin?.toString?.() ?? null,
       tipo: evento.tipo_nombre || 'Evento',
+      tipo_evento: evento.tipo_nombre || 'Evento',
+      hermandad: evento.alcance_nombre || 'Club',
       costo: evento.costo !== null ? Number(evento.costo) : null,
       // Mapeo de descripción
       descripcion: evento.descripcion_html,
       // Alias si el frontend lo usa
-      nombre_evento: evento.nombre, 
+      nombre_evento: evento.nombre,
+      titulo: evento.nombre,
       cupos: evento.cupos !== null ? Number(evento.cupos) : null,
       // Usar columna directa de cupos_disponibles
       cupos_disponibles: evento.cupos_disponibles !== null ? Number(evento.cupos_disponibles) : null,
       asistentes_count: Number(evento.asistentes_count) || 0,
+      total_inscritos: Number(evento.asistentes_count) || 0,
       imagen_url: evento.imagen_flyer_url, // Alias si el front usa imagen_url
       url_concurso: evento.url_concurso
     };

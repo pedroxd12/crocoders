@@ -11,6 +11,18 @@ import Input from '@/components/ui/Input';
 import Textarea from '@/components/ui/Textarea';
 import Select from '@/components/ui/Select';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import { UploadButton } from "@/utils/uploadthing";
+import Image from 'next/image';
+
+const DIAS_SEMANA = [
+  { value: 1, label: 'Lunes' },
+  { value: 2, label: 'Martes' },
+  { value: 3, label: 'Miércoles' },
+  { value: 4, label: 'Jueves' },
+  { value: 5, label: 'Viernes' },
+  { value: 6, label: 'Sábado' },
+  { value: 0, label: 'Domingo' }
+];
 
 export default function ProgramasRecurrentes() {
   const router = useRouter();
@@ -31,7 +43,10 @@ export default function ProgramasRecurrentes() {
     sesiones_requeridas_certificado: 0,
     porcentaje_asistencia_minimo: 80.00,
     ubicacion: '',
-    imagen_url: ''
+    imagen_url: '',
+    dias_semana: [],
+    hora_inicio: '',
+    hora_fin: ''
   });
 
   // Catálogos
@@ -63,7 +78,7 @@ export default function ProgramasRecurrentes() {
       const res = await fetch('/api/admin/catalogos');
       if (res.ok) {
         const data = await res.json();
-        setTiposEvento(data.tiposEvento || []);
+        setTiposEvento(data.tipos || []); // Corrected property name
         setAlcances(data.alcances || []);
       }
     } catch (error) {
@@ -84,7 +99,10 @@ export default function ProgramasRecurrentes() {
         sesiones_requeridas_certificado: programa.sesiones_requeridas_certificado || 0,
         porcentaje_asistencia_minimo: programa.porcentaje_asistencia_minimo || 80.00,
         ubicacion: programa.ubicacion || '',
-        imagen_url: programa.imagen_url || ''
+        imagen_url: programa.imagen_url || '',
+        dias_semana: [], // No se editan los días para regenerar sesiones (complejo), solo para nuevas
+        hora_inicio: '',
+        hora_fin: ''
       });
     } else {
       setEditingPrograma(null);
@@ -98,10 +116,24 @@ export default function ProgramasRecurrentes() {
         sesiones_requeridas_certificado: 0,
         porcentaje_asistencia_minimo: 80.00,
         ubicacion: '',
-        imagen_url: ''
+        imagen_url: '',
+        dias_semana: [],
+        hora_inicio: '',
+        hora_fin: ''
       });
     }
     setIsModalOpen(true);
+  };
+
+  const handleDayChange = (dayValue) => {
+    setFormData(prev => {
+      const currentDays = prev.dias_semana || [];
+      if (currentDays.includes(dayValue)) {
+        return { ...prev, dias_semana: currentDays.filter(d => d !== dayValue) };
+      } else {
+        return { ...prev, dias_semana: [...currentDays, dayValue] };
+      }
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -283,6 +315,45 @@ export default function ProgramasRecurrentes() {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
+            <Input
+              label="Hora Inicio"
+              type="time"
+              value={formData.hora_inicio}
+              onChange={(e) => setFormData({ ...formData, hora_inicio: e.target.value })}
+            />
+            <Input
+              label="Hora Fin"
+              type="time"
+              value={formData.hora_fin}
+              onChange={(e) => setFormData({ ...formData, hora_fin: e.target.value })}
+            />
+          </div>
+
+          {!editingPrograma && (
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Días de la semana para generar sesiones
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {DIAS_SEMANA.map(dia => (
+                  <button
+                    key={dia.value}
+                    type="button"
+                    onClick={() => handleDayChange(dia.value)}
+                    className={`px-3 py-1 rounded-full text-sm transition-colors ${
+                      formData.dias_semana.includes(dia.value)
+                        ? 'bg-green-600 text-white'
+                        : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    }`}
+                  >
+                    {dia.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
             <Select
               label="Tipo de Evento *"
               value={formData.id_tipo_evento}
@@ -326,12 +397,50 @@ export default function ProgramasRecurrentes() {
             />
           </div>
 
-          <Input
-            label="URL de Imagen"
-            value={formData.imagen_url}
-            onChange={(e) => setFormData({ ...formData, imagen_url: e.target.value })}
-            placeholder="https://ejemplo.com/imagen.jpg"
-          />
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Imagen del Programa
+            </label>
+            {formData.imagen_url && (
+              <div className="mb-2 relative w-full h-48 bg-gray-700 rounded-lg overflow-hidden">
+                <Image 
+                  src={formData.imagen_url} 
+                  alt="Vista previa" 
+                  fill 
+                  className="object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => setFormData(prev => ({ ...prev, imagen_url: '' }))}
+                  className="absolute top-2 right-2 bg-red-600 p-1 rounded-full text-white hover:bg-red-700"
+                >
+                  <FaTrash size={12} />
+                </button>
+              </div>
+            )}
+            
+            {!formData.imagen_url && (
+              <UploadButton
+                endpoint="imageUploader"
+                onClientUploadComplete={(res) => {
+                  if (res && res[0]) {
+                    setFormData(prev => ({
+                      ...prev,
+                      imagen_url: res[0].url
+                    }));
+                    toast.success("Imagen cargada correctamente");
+                  }
+                }}
+                onUploadError={(error) => {
+                  toast.error(`Error al cargar imagen: ${error.message}`);
+                }}
+                appearance={{
+                  button: "bg-green-600 hover:bg-green-700 text-white text-sm px-4 py-2 rounded-md",
+                  allowedContent: "text-gray-400 text-xs"
+                }}
+              />
+            )}
+          </div>
 
           <div className="flex justify-end gap-2 pt-4">
             <Button type="button" onClick={() => setIsModalOpen(false)} variant="secondary">

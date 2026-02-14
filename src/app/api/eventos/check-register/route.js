@@ -18,17 +18,27 @@ export async function GET(request) {
       );
     }
     
-    // Se asume que si llega un userId, es un id_miembro porque el frontend
-    // solo llama a esta ruta con userId cuando el usuario está autenticado.
-    const [registro] = await sql`
-      SELECT ie.id_inscripcion, ie.id_evento, ie.fecha_inscripcion
+    // Query optimizada: primero buscar inscripción directa, luego inscripción por equipo
+    // Esto evita el problema de LEFT JOIN que puede retornar múltiples filas
+    const registros = await sql`
+      SELECT DISTINCT ie.id_inscripcion, ie.id_evento, ie.fecha_inscripcion
       FROM inscripcion_evento ie
-      LEFT JOIN equipo_concurso eq ON ie.id_equipo = eq.id_equipo
-      LEFT JOIN integrante_equipo int_eq ON eq.id_equipo = int_eq.id_equipo
-      WHERE ie.id_evento = ${eventoId} 
-        AND (ie.id_miembro = ${userId} OR int_eq.id_miembro = ${userId})
+      WHERE ie.id_evento = ${eventoId}
+        AND ie.id_miembro = ${userId}
+      
+      UNION
+      
+      SELECT DISTINCT ie.id_inscripcion, ie.id_evento, ie.fecha_inscripcion
+      FROM inscripcion_evento ie
+      INNER JOIN equipo_concurso eq ON ie.id_equipo = eq.id_equipo
+      INNER JOIN integrante_equipo int_eq ON eq.id_equipo = int_eq.id_equipo
+      WHERE ie.id_evento = ${eventoId}
+        AND int_eq.id_miembro = ${userId}
+      
       LIMIT 1
     `;
+    
+    const registro = registros && registros.length > 0 ? registros[0] : null;
     
     console.log(`[API check-register] Query Result for (evento: ${eventoId}, miembro: ${userId}):`, registro);
 
