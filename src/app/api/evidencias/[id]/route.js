@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server';
 // Remove: import { deleteFile } from '@/lib/storage-server'; // Local file deletion not needed
 import { UTApi } from "uploadthing/server";
+import { requireAdmin } from '@/lib/auth';
 
 const utapi = new UTApi();
 
@@ -17,6 +18,9 @@ async function deleteFromUploadThing(fileKey) {
 }
 
 export async function DELETE(request, { params }) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
+
   try {
     const { id } = params;
 

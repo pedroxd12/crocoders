@@ -1,6 +1,8 @@
 // src/app/api/evidencias/route.js
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server'; // Asegúrate que la ruta a tu conexión de DB sea correcta
+import { requireAdmin } from '@/lib/auth';
+import { sanitizeHtml } from '@/lib/sanitize';
 
 export const dynamic = 'force-dynamic'; // Asegura que la ruta se evalúe dinámicamente en cada solicitud
 
@@ -75,6 +77,9 @@ export async function GET(request) {
 
 // La función POST para subir metadatos de evidencias
 export async function POST(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
+
   console.log(`[API /api/evidencias] Solicitud POST recibida. URL: ${request.url}`);
   try {
     const data = await request.json();

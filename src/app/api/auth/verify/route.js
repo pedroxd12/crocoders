@@ -12,17 +12,10 @@ export async function GET(request) {
       );
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    if (!decoded) {
-      return NextResponse.json(
-        { success: false, error: 'Sesión expirada o inválida' },
-        { status: 200 }
-      );
-    }
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
 
-    return NextResponse.json({ 
-      success: true, 
+    return NextResponse.json({
+      success: true,
       user: {
         id: decoded.id,
         name: decoded.name,
@@ -31,10 +24,16 @@ export async function GET(request) {
       }
     });
   } catch (error) {
+    if (error.name === 'TokenExpiredError' || error.name === 'JsonWebTokenError') {
+      return NextResponse.json(
+        { success: false, error: 'Sesión expirada o inválida' },
+        { status: 200 }
+      );
+    }
     console.error('Error en verify:', error);
     return NextResponse.json(
       { success: false, error: 'Error al verificar la sesión' },
-      { status: 200 }
+      { status: 500 }
     );
   }
 }

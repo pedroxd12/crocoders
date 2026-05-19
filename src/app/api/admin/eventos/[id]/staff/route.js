@@ -1,11 +1,14 @@
 
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
 
 export async function GET(request, { params }) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const { id } = await params;
   const client = await pool.connect();
-  
+
   try {
     // Check if event exists
     const eventCheck = await client.query('SELECT nombre FROM evento WHERE id_evento = $1', [id]);
@@ -40,6 +43,8 @@ export async function GET(request, { params }) {
 }
 
 export async function POST(request, { params }) {
+    const guard = await requireAdmin(request);
+    if (!guard.ok) return guard.response;
     const { id } = await params; // id_evento
     const { id_miembro, id_rol } = await request.json();
 
@@ -68,6 +73,8 @@ export async function POST(request, { params }) {
 }
 
 export async function DELETE(request, { params }) {
+    const guard = await requireAdmin(request);
+    if (!guard.ok) return guard.response;
     const { searchParams } = new URL(request.url);
     const idStaff = searchParams.get('id_staff');
 

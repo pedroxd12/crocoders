@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState, Suspense } from 'react';
+import React, { useEffect, useRef, useState, Suspense } from 'react';
 const Spline = React.lazy(() => import('@splinetool/react-spline'));
 
 // Definir SKILLS localmente para la interacción
@@ -34,10 +34,11 @@ const SKILLS = {
 export default function BongoCatKeyboard() {
   const [splineApp, setSplineApp] = useState(null);
   const selectedSkillRef = useRef(null);
+  const cleanupRef = useRef({ resizeHandler: null, bongoInterval: null });
 
   const onLoad = (spline) => {
     setSplineApp(spline);
-    
+
     const updateLayout = () => {
         const keyboard = spline.findObjectByName("keyboard");
         const isMobile = window.matchMedia("(max-width: 768px)").matches;
@@ -87,23 +88,18 @@ export default function BongoCatKeyboard() {
         keycaps.forEach(k => k.visible = true);
     };
 
-    // Ejecutar layout inicial
     updateLayout();
 
-    // Escuchar cambios de tamaño
     window.addEventListener('resize', updateLayout);
-    // Guardar referencia para limpiar listener si fuera necesario (aunque onLoad es único del componente spline)
-    spline._resizeHandler = updateLayout;
+    cleanupRef.current.resizeHandler = updateLayout;
 
-    // Habilitar interacción
     spline.addEventListener("mouseHover", (e) => handleMouseHover(e, spline));
     spline.addEventListener("mouseDown", (e) => handleKeyPress(e, spline));
-    
-    // Habilitar eventos de teclado si existen en spline
+
     try {
         spline.addEventListener("keyDown", (e) => handleKeyPress(e, spline));
     } catch (err) {
-        // console.log("keyDown event not available");
+        // keyDown event not available in this scene
     }
 
     startBongoAnimation(spline);
@@ -132,38 +128,28 @@ export default function BongoCatKeyboard() {
 
   const handleKeyPress = (e, spline) => {
     if (!spline) return;
-    
-    // console.log("Key pressed:", e.target.name); // Para debug
-    
+
     const skill = SKILLS[e.target.name];
-    if (skill) {
-        console.log("Skill found:", skill.label);
-        
-        // Actualizar variables de texto en Spline cuando se presiona
-        try {
-            if (spline.getVariable("heading") !== undefined) {
-                spline.setVariable("heading", skill.label);
-                spline.setVariable("desc", skill.shortDescription);
+    if (!skill) return;
+
+    try {
+        if (spline.getVariable("heading") !== undefined) {
+            spline.setVariable("heading", skill.label);
+            spline.setVariable("desc", skill.shortDescription);
+        }
+    } catch (err) {
+        // Spline scene without heading/desc variables
+    }
+
+    const keycap = e.target;
+    if (keycap && keycap.position) {
+        const originalY = keycap.position.y;
+        keycap.position.y = originalY - 10;
+        setTimeout(() => {
+            if (keycap.position) {
+                keycap.position.y = originalY;
             }
-        } catch (err) {
-            console.log("Could not set variables:", err);
-        }
-        
-        // Efecto visual: hacer que la tecla baje un poco cuando se presiona
-        const keycap = e.target; // Usar directamente el target del evento
-        if (keycap && keycap.position) {
-            const originalY = keycap.position.y;
-            keycap.position.y = originalY - 10; // Bajar
-            
-            // Volver a la posición original después de un momento
-            setTimeout(() => {
-                if (keycap.position) {
-                    keycap.position.y = originalY;
-                }
-            }, 150);
-        }
-    } else {
-        console.log("No skill found for:", e.target.name);
+        }, 150);
     }
   };
 
@@ -190,27 +176,32 @@ export default function BongoCatKeyboard() {
         i++;
     }, 100);
 
-    spline._bongoInterval = interval; 
+    cleanupRef.current.bongoInterval = interval;
   };
-  
-  React.useEffect(() => {
-      return () => {
-          if (splineApp) {
-              if (splineApp._bongoInterval) {
-                  clearInterval(splineApp._bongoInterval);
-              }
-              if (splineApp._resizeHandler) {
-                  window.removeEventListener('resize', splineApp._resizeHandler);
-              }
-          }
-      };
-  }, [splineApp]);
+
+  useEffect(() => {
+    const cleanup = cleanupRef.current;
+    return () => {
+      if (cleanup.bongoInterval) {
+        clearInterval(cleanup.bongoInterval);
+      }
+      if (cleanup.resizeHandler) {
+        window.removeEventListener('resize', cleanup.resizeHandler);
+      }
+    };
+  }, []);
 
   return (
-    <Suspense fallback={<div className="w-full h-full flex items-center justify-center">Cargando...</div>}>
+    <Suspense
+      fallback={
+        <div className="w-full h-full flex items-center justify-center bg-gray-900/30 rounded-lg animate-pulse">
+          <span className="text-gray-500 text-sm">Cargando experiencia 3D...</span>
+        </div>
+      }
+    >
       <div className="w-full h-full relative" style={{ pointerEvents: 'auto' }}>
-        <Spline 
-          scene="/teclado/skills-keyboard.spline" 
+        <Spline
+          scene="/teclado/skills-keyboard.spline"
           onLoad={onLoad}
           className="w-full h-full"
           style={{ pointerEvents: 'auto' }}

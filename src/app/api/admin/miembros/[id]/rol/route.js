@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
 
 export async function PUT(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   try {
     // Extraer el ID de la URL
     const id = request.url.split('/').slice(-2, -1)[0];

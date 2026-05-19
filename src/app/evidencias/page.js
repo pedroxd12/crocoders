@@ -243,8 +243,7 @@ export default function EvidenciasPage() {
                 exit={{ opacity: 0 }}
                 onClick={() => setExpandedImage(null)}
             >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <motion.img 
+                <motion.img
                     src={expandedImage.imagen_url} 
                     alt={expandedImage.nombre}
                     className={styles.lightboxImage}

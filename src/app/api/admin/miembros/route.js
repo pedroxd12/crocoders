@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
 
-export async function GET() {
+export async function GET(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const client = await pool.connect();
   try {
     const query = `
-      SELECT 
+      SELECT
         m.id_miembro,
         m.nombre, 
         m.apellido_paterno,
@@ -53,6 +56,8 @@ export async function GET() {
 
 
 export async function PUT(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const client = await pool.connect();
   try {
     const { id_miembro, rol, estado } = await request.json();
@@ -121,6 +126,8 @@ export async function PUT(request) {
 }
 
 export async function DELETE(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
 

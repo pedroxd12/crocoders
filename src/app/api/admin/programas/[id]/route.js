@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
 
 // GET - Obtener detalles de un programa
 export async function GET(request, { params }) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const { id } = await params;
   const client = await pool.connect();
   
@@ -45,6 +48,8 @@ export async function GET(request, { params }) {
 
 // PUT - Actualizar programa
 export async function PUT(request, { params }) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const { id } = await params;
   const client = await pool.connect();
   
@@ -116,6 +121,8 @@ export async function PUT(request, { params }) {
 
 // DELETE - Eliminar programa
 export async function DELETE(request, { params }) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const { id } = await params;
   const client = await pool.connect();
   

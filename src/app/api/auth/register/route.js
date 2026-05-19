@@ -1,72 +1,38 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
 import bcrypt from 'bcryptjs';
+import { authRegisterSchema, parseOrError } from '@/lib/validation';
 
 export async function POST(request) {
+  let body;
   try {
-    const { 
-      nombre,
-      apellido_paterno,
-      apellido_materno,
-      correo_electronico,
-      contrasena,
-      confirmar_contrasena,
-      numero_telefono,
-      usuario_codeforces,
-      usuario_vjudge,
-      usuario_omegaup,
-      semestre,
-      carrera,
-      es_computer_society,
-      es_club_programacion,
-      numero_ieee
-    } = await request.json();
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ success: false, error: 'Cuerpo de la petición no es JSON válido' }, { status: 400 });
+  }
 
-    // Validaciones básicas
-    if (!nombre || !apellido_paterno || !correo_electronico || !contrasena || !confirmar_contrasena) {
-      return NextResponse.json(
-        { success: false, error: 'Nombre, apellido paterno, correo y contraseñas son requeridos.' },
-        { status: 400 }
-      );
-    }
+  const [data, errPayload] = parseOrError(authRegisterSchema, body);
+  if (errPayload) {
+    return NextResponse.json(errPayload, { status: 400 });
+  }
+  const {
+    nombre,
+    apellido_paterno,
+    apellido_materno,
+    correo_electronico,
+    contrasena,
+    numero_telefono,
+    usuario_codeforces,
+    usuario_vjudge,
+    usuario_omegaup,
+    semestre,
+    carrera,
+    es_computer_society,
+    es_club_programacion,
+    numero_ieee,
+  } = data;
 
-    if (contrasena !== confirmar_contrasena) {
-      return NextResponse.json(
-        { success: false, error: 'Las contraseñas no coinciden.' },
-        { status: 400 }
-      );
-    }
-    
-    if (!numero_telefono || !usuario_codeforces || !usuario_vjudge || !usuario_omegaup) {
-        return NextResponse.json(
-            { success: false, error: 'Número de teléfono y usuarios de plataformas (Codeforces, VJudge, OmegaUp) son requeridos.' },
-            { status: 400 }
-        );
-    }
-    
-    // Validación de semestre y carrera
-    if (!semestre || !carrera) {
-      return NextResponse.json(
-        { success: false, error: 'Semestre y carrera son requeridos' },
-        { status: 400 }
-      );
-    }
-    
-    // Validación de Afiliación
-    if (!es_club_programacion && !es_computer_society) {
-        return NextResponse.json(
-            { success: false, error: 'Debe seleccionar al menos una afiliación: Club de Programación o Computer Society.' },
-            { status: 400 }
-        );
-    }
-
-    if (es_computer_society && !numero_ieee) {
-        return NextResponse.json(
-            { success: false, error: 'El número IEEE es requerido para miembros de Computer Society.' },
-            { status: 400 }
-        );
-    }
-
+  try {
     const client = await pool.connect();
 
     try {
@@ -98,19 +64,29 @@ export async function POST(request) {
       if (carreraRes.rows.length > 0) {
         idCarrera = carreraRes.rows[0].id_carrera;
       } else {
-        // Si la carrera no existe, la creamos dinámicamente
-        // Generar un código simple basado en las iniciales o primeras letras
-        const codigoGenerado = carrera
-          .substring(0, 3).toUpperCase() + Math.floor(Math.random() * 1000);
-        
-        try {
-            const nuevaCarreraRes = await client.query(
-                'INSERT INTO catalogo_carrera (nombre, codigo) VALUES ($1, $2) RETURNING id_carrera',
-                [carrera, codigoGenerado]
-            );
-            idCarrera = nuevaCarreraRes.rows[0].id_carrera;
-        } catch (err) {
-            console.error('Error creando nueva carrera:', err);
+        // Generar un código único basado en iniciales + sufijo aleatorio,
+        // reintentando si hay colisión con la constraint UNIQUE.
+        const baseCodigo = carrera.replace(/[^A-Za-z0-9]/g, '').substring(0, 3).toUpperCase() || 'CAR';
+        const { randomBytes } = await import('crypto');
+        let inserted = false;
+        let lastErr;
+        for (let attempt = 0; attempt < 5 && !inserted; attempt++) {
+            const codigoGenerado = `${baseCodigo}${randomBytes(2).toString('hex').toUpperCase()}`;
+            try {
+                const nuevaCarreraRes = await client.query(
+                    'INSERT INTO catalogo_carrera (nombre, codigo) VALUES ($1, $2) RETURNING id_carrera',
+                    [carrera, codigoGenerado]
+                );
+                idCarrera = nuevaCarreraRes.rows[0].id_carrera;
+                inserted = true;
+            } catch (err) {
+                lastErr = err;
+                // Solo reintentar si es violación de unique constraint (23505)
+                if (err.code !== '23505') break;
+            }
+        }
+        if (!inserted) {
+            console.error('Error creando nueva carrera:', lastErr);
             await client.query('ROLLBACK');
             return NextResponse.json(
                 { success: false, error: 'Error al registrar la nueva carrera. Intente nuevamente.' },
@@ -211,7 +187,7 @@ export async function POST(request) {
       client.release();
     }
   } catch (error) {
-    console.error("Error general en registro:", error);
+    console.error('Error general en registro:', error);
     return NextResponse.json(
       { success: false, error: 'Error en el servidor' },
       { status: 500 }

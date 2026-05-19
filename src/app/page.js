@@ -6,8 +6,10 @@ import AnimatedSection from '@/components/AnimatedSection';
 import ImageGrid from '@/components/ImageGrid';
 
 export const metadata = {
-  title: 'Crocoders - Club de Algoritmia',
-  description: 'Club de algoritmia del ITLAC.',
+  title: 'Inicio',
+  description:
+    'Crocoders, el club de algoritmia y programación competitiva del ITLAC. Conferencias, talleres, concursos y comunidad.',
+  alternates: { canonical: '/' },
 };
 
 export default function Home() {
@@ -69,9 +71,9 @@ export default function Home() {
           <AnimatedSection className="w-full">
             <div className="flex flex-col md:flex-row items-center justify-between gap-6 md:gap-8">
               <div className="flex-1 text-center md:text-left w-full">
-                <h1 className={`${styles.noOffset} text-3xl md:text-6xl font-bold`}>Qué esperas,</h1>
-                <h1 className={`${styles.noOffset} text-3xl md:text-6xl font-bold`}>inicia ahora.</h1>
-                <p className={`${styles.heroDescription} text-base md:text-xl mt-4`}>Unete a nuestra comunidad y crece con nosotros.</p>
+                <h2 className={`${styles.noOffset} text-3xl md:text-6xl font-bold`}>Qué esperas,</h2>
+                <h2 className={`${styles.noOffset} text-3xl md:text-6xl font-bold`}>inicia ahora.</h2>
+                <p className={`${styles.heroDescription} text-base md:text-xl mt-4`}>Únete a nuestra comunidad y crece con nosotros.</p>
               </div>
               <div className="flex-1 w-full h-[350px] md:h-[600px]">
                 <BongoCatKeyboard />

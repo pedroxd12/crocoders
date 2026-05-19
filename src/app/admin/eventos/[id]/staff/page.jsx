@@ -37,11 +37,10 @@ export default function EventoStaff() {
         const res = await fetch(`/api/admin/eventos/${id}/staff`);
         if (res.ok) {
             const data = await res.json();
-            console.log('👨‍💼 Staff actual:', data);
             setStaff(data);
         }
     } catch (error) {
-        console.error(error);
+        console.error('Error al cargar staff:', error);
         toast.error('Error al cargar staff');
     }
   };
@@ -53,25 +52,23 @@ export default function EventoStaff() {
               const data = await res.json();
               setRoles(data.roles || []);
           }
-      } catch (error) { console.error(error); }
+      } catch (error) {
+          console.error('Error al cargar catálogos:', error);
+      }
   };
 
   const fetchMembers = async () => {
       try {
-          const res = await fetch('/api/admin/users'); 
+          const res = await fetch('/api/admin/users');
           if (res.ok) {
               const data = await res.json();
-              console.log('👥 Usuarios obtenidos:', data);
-              // Filter only members, no guests can be staff usually
               const members = data.filter(u => u.tipo === 'miembro');
-              console.log('✅ Miembros filtrados:', members);
-              setAvailableMembers(members); 
+              setAvailableMembers(members);
           } else {
-              console.error('❌ Error en respuesta:', res.status);
               toast.error('Error al cargar miembros');
           }
-      } catch (error) { 
-          console.error('❌ Error al cargar miembros:', error);
+      } catch (error) {
+          console.error('Error al cargar miembros:', error);
           toast.error('Error al cargar lista de miembros');
       }
   };
@@ -126,10 +123,7 @@ export default function EventoStaff() {
       }
   };
 
-  // Filter out members already in staff
   const membersNotInStaff = availableMembers.filter(m => !staff.some(s => s.id_miembro === m.id));
-  
-  console.log('📋 Miembros disponibles (no en staff):', membersNotInStaff);
 
   if (loading) return <LoadingSpinner />;
 

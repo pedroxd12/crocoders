@@ -713,7 +713,7 @@ export default function DashboardPage() {
                   </div>
 
                   <p className="text-gray-400 mb-6">
-                    Eventos donde estás asignado como staff. Haz clic en "Panel Completo" para acceder a las funciones de registro de asistencia.
+                    Eventos donde estás asignado como staff. Haz clic en &quot;Panel Completo&quot; para acceder a las funciones de registro de asistencia.
                   </p>
 
                   {staffEvents.length === 0 ? (

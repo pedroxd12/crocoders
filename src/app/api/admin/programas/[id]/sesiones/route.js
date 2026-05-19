@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
 
 // GET - Listar sesiones de un programa
 export async function GET(request, { params }) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const { id } = await params;
   const client = await pool.connect();
   
@@ -41,6 +44,8 @@ export async function GET(request, { params }) {
 
 // POST - Agregar sesión al programa (vincular evento existente)
 export async function POST(request, { params }) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const { id } = await params;
   const client = await pool.connect();
   

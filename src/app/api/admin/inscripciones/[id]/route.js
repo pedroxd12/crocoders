@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
 
 export async function PATCH(request, { params }) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const { id } = await params; // id_inscripcion
   const body = await request.json();
   const { action, value } = body; 

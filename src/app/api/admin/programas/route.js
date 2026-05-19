@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
+import { sanitizeHtml } from '@/lib/sanitize';
 
 // GET - Listar todos los programas recurrentes
-export async function GET() {
+export async function GET(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const client = await pool.connect();
   
   try {
@@ -36,8 +40,10 @@ export async function GET() {
 
 // POST - Crear nuevo programa
 export async function POST(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const client = await pool.connect();
-  
+
   try {
     const {
       nombre,
@@ -108,7 +114,7 @@ export async function POST(request) {
              RETURNING id_evento`,
             [
               `${nombre} - Sesión ${sessionCount}`, // Nombre del evento
-              descripcion,
+              sanitizeHtml(descripcion || ''),
               id_tipo_evento,
               id_alcance,
               fechaStr,

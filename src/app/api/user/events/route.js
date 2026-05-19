@@ -13,7 +13,7 @@ export async function GET(request) {
       );
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     
     const client = await pool.connect();
     

@@ -13,7 +13,7 @@ export async function GET(request) {
       );
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
 
     const userData = await sql`
       SELECT 
@@ -90,7 +90,7 @@ export async function PUT(request) {
       );
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     const data = await request.json();
 
     await sql`BEGIN`;

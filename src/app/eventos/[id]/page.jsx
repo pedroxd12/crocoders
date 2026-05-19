@@ -1,32 +1,31 @@
 ﻿// src/app/eventos/[id]/page.jsx
 'use client';
-import { useEffect, useState, useCallback, Suspense } from 'react';
+import { useEffect, useMemo, useState, useCallback, Suspense } from 'react';
 import { useRouter, useParams, usePathname, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'react-toastify';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
+import DOMPurify from 'isomorphic-dompurify';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import { 
-  Calendar, Users, Clock, ArrowLeft, CheckCircle, XCircle, UserPlus, 
+import {
+  Calendar, Users, Clock, ArrowLeft, CheckCircle, XCircle, UserPlus,
   LogIn, AlertTriangle, DollarSign, Loader, Info, Tag, BookOpen, Building, PartyPopper, QrCode, Trash2, Plus,
   Eye as EyeIcon, Shield, MapPin, Globe, ExternalLink
 } from 'lucide-react';
 
 async function sendEventRegistrationEmail(email, name, eventDetails, qrToken) {
-  try {
-    const response = await fetch('/api/confirmation', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, name, eventDetails, qrToken }),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Error al enviar correo');
-  } catch (error) {
-    console.error('Error al enviar correo de confirmación:', error);
+  const response = await fetch('/api/confirmation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, name, eventDetails, qrToken }),
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.error || 'No se pudo enviar el correo de confirmación');
   }
 }
 
@@ -77,6 +76,15 @@ function EventoDetalleContent() {
   const [formErrors, setFormErrors] = useState({});
 
   const semestres = Array.from({ length: 14 }, (_, i) => ({ value: (i + 1).toString(), label: `${i + 1}° Semestre` }));
+
+  const sanitizedDescripcion = useMemo(() => {
+    const html = evento?.descripcion || '<p>Sin descripción disponible.</p>';
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 's', 'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre', 'span', 'div'],
+      ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'style'],
+      ALLOW_DATA_ATTR: false,
+    });
+  }, [evento?.descripcion]);
 
   const fetchEventoDetails = useCallback(async () => {
     setLoading(true);
@@ -237,14 +245,16 @@ function EventoDetalleContent() {
       setShowTeamFormModal(false);
       setShowUnregisterModal(false);
 
-      // Enviar correo (simplificado) - Solo si no es unregister
+      // Enviar correo (no bloquea la UI; si falla, avisa al usuario)
       if (!isCancellation) {
          sendEventRegistrationEmail(
             isAuthenticated ? user.correo_electronico : (payload.guestData?.correo_electronico || payload.integrantes?.[0]?.email),
             isAuthenticated ? user.nombre_completo : (payload.guestData?.nombre_completo || payload.integrantes?.[0]?.nombre),
             result.event || evento,
             result.qrToken
-         );
+         ).catch(() => {
+            toast.warning('Tu inscripción se realizó, pero no pudimos enviarte el correo de confirmación.', { theme: 'dark' });
+         });
       }
 
     } catch (error) {
@@ -428,9 +438,9 @@ function EventoDetalleContent() {
                   <h3 className="text-2xl font-bold mb-6 flex items-center text-gray-100">
                       <BookOpen className="mr-3 text-purple-400" /> Sobre el evento
                   </h3>
-                  <div 
+                  <div
                     className="prose prose-invert prose-lg max-w-none prose-p:text-gray-400 prose-headings:text-gray-200 prose-a:text-green-400 hover:prose-a:text-green-300 prose-strong:text-white"
-                    dangerouslySetInnerHTML={{ __html: evento.descripcion || '<p>Sin descripción disponible.</p>' }}
+                    dangerouslySetInnerHTML={{ __html: sanitizedDescripcion }}
                   />
               </div>
 

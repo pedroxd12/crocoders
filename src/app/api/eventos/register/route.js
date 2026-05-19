@@ -1,25 +1,41 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
+import { eventoRegisterSchema, parseOrError } from '@/lib/validation';
+import { requireAuth } from '@/lib/auth';
 
 export async function POST(request) {
+  const auth = await requireAuth(request);
+  if (!auth.ok) return auth.response;
+  const userId = Number(auth.session.id);
+
+  let payload;
+  try {
+    payload = await request.json();
+  } catch {
+    return NextResponse.json({ success: false, error: 'Cuerpo de la petición no es JSON válido' }, { status: 400 });
+  }
+
+  const [data, errPayload] = parseOrError(eventoRegisterSchema, payload);
+  if (errPayload) {
+    return NextResponse.json(errPayload, { status: 400 });
+  }
+  const { eventoId, tipo } = data;
+  const equipo = data.tipo === 'equipo' ? data.equipo : undefined;
+  const integrantes = data.tipo === 'equipo' ? data.integrantes : undefined;
+  const asesor = data.tipo === 'equipo' ? data.asesor : undefined;
+
   let client;
   try {
     client = await pool.connect();
   } catch (connectionError) {
-    console.error('💥 Error de conexión en /api/eventos/register:', connectionError);
+    console.error('Error de conexión en /api/eventos/register:', connectionError);
     return NextResponse.json(
       { success: false, error: 'No se pudo conectar con la base de datos. Intente nuevamente.', code: 'DB_CONNECTION_ERROR' },
       { status: 503 }
     );
   }
-  
+
   try {
-    const data = await request.json();
-    const { eventoId, userId, tipo, equipo, integrantes, asesor } = data;
-    
-    if (!eventoId) {
-      return NextResponse.json({ success: false, error: 'ID de evento no válido' }, { status: 400 });
-    }
 
     await client.query('BEGIN');
 
@@ -42,17 +58,9 @@ export async function POST(request) {
 
     // Verificar fecha límite de registro
     if (evento.fecha_limite_registro) {
-      // Usar timestamps en milisegundos para comparación robusta
       const now = Date.now();
       const fechaLimite = new Date(evento.fecha_limite_registro).getTime();
-      
-      console.log('🕐 Validación fecha límite:', {
-        ahora: new Date(now).toISOString(),
-        limite: new Date(fechaLimite).toISOString(),
-        diferencia_ms: fechaLimite - now,
-        permite_registro: now <= fechaLimite
-      });
-      
+
       if (now > fechaLimite) {
         await client.query('ROLLBACK');
         return NextResponse.json({ 
@@ -195,7 +203,10 @@ export async function POST(request) {
 
     // Generar un token seguro antes de enviar la respuesta
     const crypto = await import('crypto');
-    const secret = process.env.Payload_SECRET || 'secret-key-crocoders-secure';
+    const secret = process.env.PAYLOAD_SECRET;
+    if (!secret) {
+      throw new Error('PAYLOAD_SECRET no configurado');
+    }
     const qrPayload = JSON.stringify({ id: inscripcionId, eid: eventoId, ts: Date.now() });
     const hash = crypto.createHmac('sha256', secret).update(qrPayload).digest('hex');
     const secureQrToken = Buffer.from(JSON.stringify({ data: qrPayload, sig: hash })).toString('base64');
@@ -236,17 +247,30 @@ export async function POST(request) {
       }
     }
     console.error('💥 Error en registro:', error);
-    
-    // Manejo específico de errores
+
+    // Conflicto único: ya existe una inscripción del mismo usuario / equipo en el evento.
+    if (error.code === '23505') {
+      const target = error.constraint || '';
+      let mensaje = 'Ya te encuentras registrado en este evento.';
+      if (target.includes('equipo')) {
+        mensaje = 'Ya existe un equipo con ese nombre o un integrante ya está inscrito.';
+      }
+      return NextResponse.json(
+        { success: false, error: mensaje, code: 'ALREADY_REGISTERED' },
+        { status: 409 }
+      );
+    }
+
+    // Manejo específico de errores de conexión
     if (['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(error.code)) {
       return NextResponse.json(
         { success: false, error: 'Error de conexión con la base de datos. Intente nuevamente.', code: 'DB_CONNECTION_ERROR' },
         { status: 503 }
       );
     }
-    
+
     return NextResponse.json(
-      { success: false, error: 'Error al registrarse: ' + error.message },
+      { success: false, error: 'Error al registrarse' },
       { status: 500 }
     );
   } finally {

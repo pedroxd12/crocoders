@@ -1,11 +1,9 @@
 // middleware.js
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
+import { APP_ROLES } from '@/lib/roles';
 
-const ROLES = {
-  ADMIN: 'administrador',
-  MEMBER: 'usuario'
-};
+const ROLES = APP_ROLES;
 
 const PUBLIC_PATHS = [
   '/',

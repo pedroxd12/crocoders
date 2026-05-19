@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { User, Lock, Mail, Phone, Check, X, Shield, Globe, Info, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import Image from 'next/image';
@@ -71,30 +71,30 @@ function AuthContent() {
     'Otra'
   ];
 
-  // Manejador de registro post-login
-  const handlePostLoginRegistration = useCallback(async (eventId) => {
+  // Manejador de registro post-login (no se memoriza para no entrar en
+  // el array de deps del useEffect; usamos un ref para garantizar que se
+  // dispare una sola vez por sesión y evitar bucles).
+  const handlePostLoginRegistration = async (eventId, currentUser) => {
     try {
-      if (!user?.id) {
+      if (!currentUser?.id) {
         throw new Error('Usuario no autenticado correctamente');
       }
-  
+
       const response = await fetch('/api/eventos/register', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           eventoId: eventId,
-          userId: user.id,
+          userId: currentUser.id,
           tipo: 'miembro'
         }),
       });
-      
+
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || 'Error al registrar');
       }
-  
+
       const fromPath = searchParams.get('from') || '/eventos';
       window.location.href = `${fromPath}?registered=true&eventId=${eventId}`;
     } catch (error) {
@@ -102,19 +102,27 @@ function AuthContent() {
       toast.error(`Error al registrar: ${error.message}`);
       router.push(searchParams.get('from') || '/eventos');
     }
-  }, [user, searchParams, router]);
+  };
+
+  const postLoginHandledRef = useRef(false);
 
   useEffect(() => {
     const recoveryParam = searchParams.get('recovery');
     const registerEvent = searchParams.get('registerEvent');
-    
+
     if (recoveryParam) {
       setView('recovery');
       window.history.replaceState({}, document.title, window.location.pathname);
-    } else if (registerEvent && user && !loading) {
-      handlePostLoginRegistration(registerEvent);
+      return;
     }
-  }, [searchParams, user, loading, handlePostLoginRegistration]);
+
+    if (registerEvent && user && !loading && !postLoginHandledRef.current) {
+      postLoginHandledRef.current = true;
+      handlePostLoginRegistration(registerEvent, user);
+    }
+    // handlePostLoginRegistration y router son estables; el ref evita doble disparo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, user, loading]);
 
   useEffect(() => {
     if (registerData.contrasena && registerData.confirmar_contrasena) {
@@ -260,7 +268,7 @@ function AuthContent() {
 
       const registerEvent = searchParams.get('registerEvent');
       if (registerEvent) {
-        await handlePostLoginRegistration(registerEvent);
+        await handlePostLoginRegistration(registerEvent, result.user);
       } else {
         const redirectPath = result.redirectTo || 
                          (result.user?.role === 'administrador' ? '/admin' : '/dashboard');
@@ -296,7 +304,7 @@ function AuthContent() {
       if (result.user) {
         // Auto-login exitoso
         if (registerEvent) {
-          await handlePostLoginRegistration(registerEvent);
+          await handlePostLoginRegistration(registerEvent, result.user);
         } else {
           window.location.href = result.redirectTo || '/dashboard';
         }
@@ -451,10 +459,10 @@ function AuthContent() {
       }
 
       toast.success('¡Contraseña actualizada correctamente! Iniciando sesión...');
-      
+
       const registerEvent = searchParams.get('registerEvent');
       if (registerEvent) {
-        await handlePostLoginRegistration(registerEvent);
+        await handlePostLoginRegistration(registerEvent, loginResponse.user);
       } else {
         window.location.href = searchParams.get('from') || '/dashboard';
       }

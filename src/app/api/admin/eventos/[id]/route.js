@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
 import { UTApi } from "uploadthing/server";
+import { sanitizeHtml } from '@/lib/sanitize';
 
 const utapi = new UTApi();
 
@@ -16,6 +18,8 @@ async function deleteFromUploadThing(fileKey) {
 }
 
 export async function GET(request, context) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const { id } = await context.params;
   const client = await pool.connect();
 
@@ -76,6 +80,8 @@ export async function GET(request, context) {
 }
 
 export async function PUT(request, context) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const { id } = await context.params;
   const client = await pool.connect();
 
@@ -148,7 +154,7 @@ export async function PUT(request, context) {
     const fechaFinValue = fecha_fin || fecha_inicio;
     
     await client.query(updateQuery, [
-        nombre, descripcion_html, id_tipo_evento, id_alcance,
+        nombre, sanitizeHtml(descripcion_html || ''), id_tipo_evento, id_alcance,
         fecha_inicio, fechaFinValue, fecha_limite_registro || null, hora_inicio, hora_fin,
         ubicacion, cupos, tiene_costo, costo,
         finalUrl, finalKey,
@@ -214,6 +220,8 @@ export async function PUT(request, context) {
 }
 
 export async function DELETE(request, context) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const { id } = await context.params;
   const client = await pool.connect();
 

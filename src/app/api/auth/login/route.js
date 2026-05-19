@@ -85,12 +85,8 @@ export async function POST(request) {
       );
     }
 
-    let normalizedRole = userData.rol || 'usuario';
-    
-    // Configuración de administradores (Fallback opcional o migración)
-    // Si la base de datos ya tiene el rol, esto es redundante pero seguro durante la transición
-    const ADMIN_EMAILS = ['admin@crocoders.com', 'admin@local.com'];
-    if (ADMIN_EMAILS.includes(userData.correo_electronico)) normalizedRole = 'administrador';
+    // Rol viene siempre de la base de datos. No hay fallback por email.
+    const normalizedRole = userData.rol || 'usuario';
 
     const nombreCompleto = `${userData.nombre} ${userData.apellido_paterno}`.trim();
 

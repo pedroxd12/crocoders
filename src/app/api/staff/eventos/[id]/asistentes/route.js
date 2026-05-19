@@ -1,28 +1,20 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
-import { verifyToken } from '@/lib/auth';
+import { requireStaff } from '@/lib/auth';
 
 // GET - Obtener asistentes del evento (para staff)
 export async function GET(request, { params }) {
+  const guard = await requireStaff(request);
+  if (!guard.ok) return guard.response;
+
   const { id } = await params;
   const client = await pool.connect();
-  
+
   try {
-    // Verificar token y permisos
-    const token = request.cookies.get('token')?.value;
-    if (!token) {
-      return NextResponse.json({ error: 'No autorizado' }, { status: 401 });
-    }
-
-    const decoded = await verifyToken(token);
-    if (!decoded || !decoded.id) {
-      return NextResponse.json({ error: 'Token inválido' }, { status: 401 });
-    }
-
     // Verificar que el usuario es staff del evento
     const staffCheck = await client.query(
       'SELECT id_staff FROM staff_evento WHERE id_evento = $1 AND id_miembro = $2',
-      [id, decoded.id]
+      [id, guard.session.id]
     );
 
     if (staffCheck.rows.length === 0) {

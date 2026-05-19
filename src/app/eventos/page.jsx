@@ -18,17 +18,14 @@ import { motion } from 'framer-motion';
 import styles from './page.module.css';
 
 async function sendEventRegistrationEmail(email, name, eventDetails) {
-  try {
-    const response = await fetch('/api/confirmation', { 
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, name, eventDetails }),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Error al enviar correo');
-    return result;
-  } catch (error) {
-    console.error('Error al enviar correo de confirmación:', error);
+  const response = await fetch('/api/confirmation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, name, eventDetails }),
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.error || 'No se pudo enviar el correo de confirmación');
   }
 }
 
@@ -133,21 +130,25 @@ function EventosContent() {
 
 
   const checkAllRegistrationStatuses = async (eventosData, currentUser) => {
-    if (!currentUser?.id_miembro) {
+    if (!currentUser?.id_miembro || eventosData.length === 0) {
       setRegistrationStatus({});
       return;
     }
     try {
-      const statusPromises = eventosData.map(evento => 
-        fetch(`/api/eventos/check-register?id=${evento.id_evento}&userId=${currentUser.id_miembro}`)
-          .then(res => res.ok ? res.json() : { registered: false })
-          .then(data => ({ id: evento.id_evento, registered: data.registered }))
-          .catch(() => ({ id: evento.id_evento, registered: false }))
-      );
-      const statuses = await Promise.all(statusPromises);
-      setRegistrationStatus(statuses.reduce((acc, curr) => ({ ...acc, [curr.id]: curr.registered }), {}));
+      const res = await fetch('/api/eventos/check-register-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventIds: eventosData.map(e => e.id_evento),
+          userId: currentUser.id_miembro,
+        }),
+      });
+      if (!res.ok) throw new Error('Error en lookup batch');
+      const data = await res.json();
+      setRegistrationStatus(data.registered || {});
     } catch (error) {
-      console.error("Error checking all registration statuses:", error);
+      console.error("Error checking registration statuses:", error);
+      setRegistrationStatus({});
     }
   };
 
@@ -220,7 +221,8 @@ function EventosContent() {
       setRegistrationStatus(prev => ({ ...prev, [evento.id_evento]: true }));
       setEventos(prevEventos => prevEventos.map(e => e.id_evento === evento.id_evento ? result.event : e));
       toast.success('¡Registro exitoso!', { theme: "dark" });
-      sendEventRegistrationEmail(user.correo_electronico, user.nombre_completo, result.event);
+      sendEventRegistrationEmail(user.correo_electronico, user.nombre_completo, result.event)
+        .catch(() => toast.warning('Te inscribiste, pero no pudimos enviar el correo de confirmación.', { theme: 'dark' }));
       setShowRegistrationTypeModal(false);
     } catch (error) {
       toast.error(`Error: ${error.message}`, { theme: "dark" });
@@ -256,7 +258,8 @@ function EventosContent() {
       setRegistrationStatus(prev => ({ ...prev, [selectedEventForRegistration.id_evento]: true }));
       setEventos(prevEventos => prevEventos.map(e => e.id_evento === selectedEventForRegistration.id_evento ? attendanceResult.event : e));
       toast.success('¡Registro como invitado exitoso!', { theme: "dark" });
-      sendEventRegistrationEmail(guestData.correo_electronico, guestData.nombre_completo, attendanceResult.event);
+      sendEventRegistrationEmail(guestData.correo_electronico, guestData.nombre_completo, attendanceResult.event)
+        .catch(() => toast.warning('Te inscribiste, pero no pudimos enviar el correo de confirmación.', { theme: 'dark' }));
       
       setShowGuestFormModal(false);
       setShowRegistrationTypeModal(false);

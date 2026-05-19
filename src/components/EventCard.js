@@ -1,11 +1,11 @@
 'use client';
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation'; 
+import { useRouter } from 'next/navigation';
 import { Calendar, Users, Clock, CheckCircle, XCircle, MapPin, ArrowRight, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-export default function EventCard({ evento, isRegistered, index }) {
+function EventCard({ evento, isRegistered, index }) {
   const router = useRouter();
   const [imageError, setImageError] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -68,15 +68,9 @@ export default function EventCard({ evento, isRegistered, index }) {
 
   const statusInfo = getEventStatusInfo();
 
-  // Lógica de clic modificada
   const handleCardClick = () => {
-    // Siempre navega a la página de detalles del evento
     if (evento && evento.id_evento) {
       router.push(`/eventos/${evento.id_evento}`);
-    } else {
-      console.error("Error: ID de evento no disponible en EventCard.");
-      // Opcionalmente, mostrar un toast de error si el ID no está disponible
-      // toast.error("No se pudo cargar el detalle del evento.", { theme: "dark" });
     }
   };
 
@@ -144,10 +138,7 @@ export default function EventCard({ evento, isRegistered, index }) {
                 sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                 priority={index < 3}
                 quality={90}
-                onError={() => {
-                  console.warn(`Error cargando imagen: ${evento.imagen_url}`);
-                  setImageError(true);
-                }}
+                onError={() => setImageError(true)}
               />
               {/* Gradient overlay */}
               <div className="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/40 to-transparent 
@@ -287,3 +278,5 @@ export default function EventCard({ evento, isRegistered, index }) {
     </motion.div>
   );
 }
+
+export default memo(EventCard);

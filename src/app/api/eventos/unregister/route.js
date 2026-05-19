@@ -1,17 +1,22 @@
 // app/api/eventos/unregister/route.js
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
+import { requireAuth } from '@/lib/auth';
 
 export async function POST(request) {
+  const auth = await requireAuth(request);
+  if (!auth.ok) return auth.response;
+  const userId = Number(auth.session.id);
+
   let client;
-  
+
   try {
     const data = await request.json();
-    const { eventoId, userId, tipo } = data;
-    
-    // Validaciones básicas
-    if (!eventoId || isNaN(Number(eventoId)) || !userId || isNaN(Number(userId))) {
-      return NextResponse.json({ success: false, error: 'Datos de evento o usuario no válidos' }, { status: 400 });
+    const { eventoId, tipo } = data;
+
+    // Validaciones básicas: solo eventoId proviene del body; userId viene del JWT
+    if (!eventoId || isNaN(Number(eventoId))) {
+      return NextResponse.json({ success: false, error: 'Datos de evento no válidos' }, { status: 400 });
     }
 
     try {
@@ -131,18 +136,6 @@ export async function POST(request) {
     console.error('💥 Error en request:', error);
     return NextResponse.json(
       { success: false, error: 'Error al procesar la solicitud: ' + error.message },
-      { status: 500 }
-    );
-  }
-}
-        return NextResponse.json({ success: false, error: error.message }, { status: 500 });
-    } finally {
-        client.release();
-    }
-  } catch (error) {
-    console.error('Error en POST /api/eventos/unregister:', error);
-    return NextResponse.json(
-      { success: false, error: 'Error interno del servidor: ' + error.message },
       { status: 500 }
     );
   }

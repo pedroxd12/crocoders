@@ -16,29 +16,27 @@ const transporter = nodemailer.createTransport({
 
 export async function sendRecoveryEmail(email, name, userId) {
   try {
-    // Generar token único y código de verificación
+    // Token criptográficamente fuerte y código de 6 dígitos generado con crypto.randomInt
     const token = crypto.randomBytes(32).toString('hex');
-    const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Establecer fecha de expiración (1 hora)
+    const verificationCode = crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
+
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 1);
 
-    // Guardar token en la base de datos
     await sql`
-      DELETE FROM password_reset_token 
+      DELETE FROM password_reset_token
       WHERE id_miembro = ${userId}
     `;
 
     await sql`
-      INSERT INTO password_reset_token 
-        (id_miembro, token, codigo_verificacion, expires_at) 
-      VALUES 
+      INSERT INTO password_reset_token
+        (id_miembro, token, codigo_verificacion, expires_at)
+      VALUES
         (${userId}, ${token}, ${verificationCode}, ${expiresAt})
     `;
 
     const resetLink = `${process.env.NEXT_PUBLIC_SITE_URL}/iniciar?recovery=true`;
-    
+
     const mailOptions = {
       from: `"Club Crocoders" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
       to: email,

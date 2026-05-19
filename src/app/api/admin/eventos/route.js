@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
+import { sanitizeHtml } from '@/lib/sanitize';
 
-export async function GET() {
+export async function GET(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const client = await pool.connect();
   try {
     const query = `
@@ -60,6 +64,8 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const client = await pool.connect();
   try {
     const body = await request.json();
@@ -125,7 +131,7 @@ export async function POST(request) {
 
     const eventoRes = await client.query(insertEventoQuery, [
       nombre,
-      descripcion_html || '',
+      sanitizeHtml(descripcion_html || ''),
       id_tipo_evento,
       id_alcance,
       fecha_inicio,

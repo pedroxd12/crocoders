@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from "react";
+import Image from "next/image";
 import { Trophy, Code, Globe, Award, Loader } from "lucide-react";
 import { motion } from "framer-motion";
 import styles from "./page.module.css";
@@ -32,11 +33,13 @@ const Leaderboard = ({ topPerformers, loading }) => {
             {miembro.codeforces?.avatar && (
               <div className="flex justify-center mb-4">
                  <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-white/10 shadow-lg relative">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img 
-                      src={miembro.codeforces.avatar} 
+                    <Image
+                      src={miembro.codeforces.avatar}
                       alt={`Avatar de ${miembro.nombre_completo}`}
-                      className="w-full h-full object-cover"
+                      fill
+                      sizes="96px"
+                      className="object-cover"
+                      unoptimized
                     />
                  </div>
               </div>

@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
 
 export async function PUT(request, { params }) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   try {
     // Solución para Next.js 13+ - Extraer parámetros de forma segura
     const { id } = params;

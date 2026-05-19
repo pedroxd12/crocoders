@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
 
 // DELETE - Eliminar sesión del programa
 export async function DELETE(request, { params }) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   const { id, idSesion } = await params;
   const client = await pool.connect();
   

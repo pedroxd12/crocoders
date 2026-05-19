@@ -1,10 +1,14 @@
 // src/app/api/evidencias/upload/route.js
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
+
   try {
     // Se espera JSON con la URL de la imagen de UploadThing y otros metadatos
     const data = await request.json();

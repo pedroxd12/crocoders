@@ -19,7 +19,7 @@ export async function POST(request) {
     let decoded;
     
     try {
-      decoded = jwt.verify(sessionToken, process.env.JWT_SECRET);
+      decoded = jwt.verify(sessionToken, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     } catch (err) {
       return NextResponse.json(
         { error: 'Sesión inválida o expirada' },

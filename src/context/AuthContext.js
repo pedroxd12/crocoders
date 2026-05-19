@@ -4,14 +4,12 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { loginUser, logoutUser, getUserData, registerUser } from '@/lib/db-client';
+import { APP_ROLES, isAdminRole, isMemberRole } from '@/lib/roles';
 
 export const AuthContext = createContext();
 
-export const ROLES = {
-  ADMIN: 'administrador',
-  MEMBER: 'miembro',
-  GUEST: 'invitado'
-};
+// Re-exportado para compatibilidad histórica.
+export const ROLES = APP_ROLES;
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -28,14 +26,18 @@ export function AuthProvider({ children }) {
       nombreCompleto = `${userData.nombre} ${userData.apellido_paterno || ''} ${userData.apellido_materno || ''}`.trim();
     }
 
+    const appRole = userData.role || userData.rol || APP_ROLES.MEMBER;
+
     return {
       ...userData,
       id: userData.id_miembro || userData.id,
       id_miembro: userData.id_miembro || userData.id,
       nombre_completo: nombreCompleto,
       correo_electronico: userData.correo_electronico || userData.email || '',
-      role: userData.role || userData.tipo || ROLES.MEMBER,
-      tipo: userData.tipo || userData.role || ROLES.MEMBER,
+      role: appRole,
+      // 'tipo' se conserva sólo si venía del backend (discriminador de inscripción),
+      // no se sobrescribe con el rol de aplicación.
+      tipo: userData.tipo || null,
       numero_telefono: userData.numero_telefono || '',
       semestre: userData.semestre || '',
       carrera: userData.carrera || ''
@@ -52,28 +54,39 @@ export function AuthProvider({ children }) {
     }
   }, [pathname, router]);
 
+  // Fetch del perfil una sola vez al montar el provider.
+  // No depende de `pathname` para evitar refetch en cada navegación.
   useEffect(() => {
+    let cancelled = false;
     const initializeAuth = async () => {
       try {
         const response = await getUserData();
-        
+        if (cancelled) return;
         if (response?.success && response.user) {
-          const normalizedUser = normalizeUser(response.user);
-          setUser(normalizedUser);
-          redirectUser(normalizedUser);
+          setUser(normalizeUser(response.user));
         } else {
           setUser(null);
         }
       } catch (error) {
-        console.error('Error initializing auth:', error);
-        setUser(null);
+        if (!cancelled) {
+          console.error('Error initializing auth:', error);
+          setUser(null);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
-
     initializeAuth();
-  }, [pathname, redirectUser, normalizeUser]);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Redirección reactiva: corre cuando cambian el pathname o el user,
+  // pero sin tocar la red.
+  useEffect(() => {
+    if (loading || !user) return;
+    redirectUser(user);
+  }, [pathname, user, loading, redirectUser]);
 
   const login = async (email, password) => {
     try {
@@ -153,9 +166,9 @@ export function AuthProvider({ children }) {
     register,
     logout,
     updateUser,
-    isAdmin: () => user?.role === ROLES.ADMIN || user?.tipo === ROLES.ADMIN,
+    isAdmin: () => isAdminRole(user?.role),
     isAuthenticated: !!user,
-    isMember: () => !!user?.id_miembro && (user.role === ROLES.MEMBER || user.tipo === ROLES.MEMBER),
+    isMember: () => !!user?.id_miembro && isMemberRole(user?.role),
     hasCompleteProfile: () => {
       if (!user) return false;
       return !!user.nombre_completo && !!user.correo_electronico && !!user.id_miembro;

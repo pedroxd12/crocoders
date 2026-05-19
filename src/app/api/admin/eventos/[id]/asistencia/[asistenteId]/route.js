@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
 
 export async function GET(request, { params }) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   try {
     const { id, asistenteId } = params;
     const url = new URL(request.url);
@@ -47,6 +50,8 @@ export async function GET(request, { params }) {
 }
 
 export async function PUT(request, { params }) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   try {
     const { id, asistenteId } = params;
     const { es_miembro, asistio } = await request.json();

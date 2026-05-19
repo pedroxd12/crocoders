@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
 
-export async function GET() {
+export async function GET(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   try {
     const invitados = await sql`
       SELECT * FROM invitado
@@ -18,6 +21,8 @@ export async function GET() {
 }
 
 export async function DELETE(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');

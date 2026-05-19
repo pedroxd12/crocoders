@@ -1,8 +1,12 @@
 
 import { NextResponse } from 'next/server';
 import pool from '@/lib/db-server';
+import { requireAdmin } from '@/lib/auth';
 
 export async function POST(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
+
   const body = await request.json();
   const { id_evento, id_usuario, tipo_usuario } = body;
 
@@ -83,6 +87,12 @@ export async function POST(request) {
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Admin register error:', error);
+    if (error.code === '23505') {
+      return NextResponse.json(
+        { error: 'El usuario ya está registrado en este evento', code: 'ALREADY_REGISTERED' },
+        { status: 409 }
+      );
+    }
     return NextResponse.json({ error: 'Error al registrar usuario' }, { status: 500 });
   } finally {
     client.release();
