@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Image from "next/image";
-import { Trophy, Code, Globe, Award, AlertTriangle, RefreshCw } from "lucide-react";
+import { Trophy, Code, Globe, Award, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 import styles from "./page.module.css";
 import LoadingSpinner from "@/components/LoadingSpinner";
@@ -177,11 +177,6 @@ const PuntajesPage = () => {
       );
   }, [puntajes, activePlatform]);
 
-  const someStale = useMemo(() => {
-    if (!activePlatform) return false;
-    return tableData.some((m) => m[activePlatform.key]?.stale);
-  }, [tableData, activePlatform]);
-
   const renderTable = () => {
     if (loading) {
       return (
@@ -194,7 +189,6 @@ const PuntajesPage = () => {
     if (error && puntajes.length === 0) {
       return (
         <div className={styles.emptyState}>
-          <AlertTriangle size={32} style={{ marginBottom: '0.75rem', color: '#f59e0b' }} />
           <div>{error}</div>
           <button
             onClick={() => fetchPuntajes()}
@@ -219,53 +213,40 @@ const PuntajesPage = () => {
     }
 
     return (
-      <>
-        {someStale && (
-          <div className={styles.staleNotice}>
-            <AlertTriangle size={14} />
-            Algunos datos provienen del último caché disponible — la plataforma no respondió.
-          </div>
-        )}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-          className={styles.tableContainer}
-        >
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Rank</th>
-                <th>Nombre</th>
-                <th>Usuario</th>
-                {activePlatform.columns.map((column) => (
-                  <th key={column.key}>{column.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {tableData.map((miembro, index) => {
-                const platformInfo = miembro[activePlatform.key];
-                return (
-                  <tr key={miembro.id_miembro}>
-                    <td className={styles.rankCell}>#{index + 1}</td>
-                    <td>
-                      {miembro.nombre_completo}
-                      {platformInfo.stale && (
-                        <span className={styles.staleTag} title="Datos en caché">caché</span>
-                      )}
-                    </td>
-                    <td className="font-mono text-sm text-gray-400">{platformInfo.usuario}</td>
-                    {activePlatform.columns.map((column) => (
-                      <td key={column.key}>{platformInfo[column.key] || '-'}</td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </motion.div>
-      </>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className={styles.tableContainer}
+      >
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Nombre</th>
+              <th>Usuario</th>
+              {activePlatform.columns.map((column) => (
+                <th key={column.key}>{column.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {tableData.map((miembro, index) => {
+              const platformInfo = miembro[activePlatform.key];
+              return (
+                <tr key={miembro.id_miembro}>
+                  <td className={styles.rankCell}>#{index + 1}</td>
+                  <td>{miembro.nombre_completo}</td>
+                  <td className="font-mono text-sm text-gray-400">{platformInfo.usuario}</td>
+                  {activePlatform.columns.map((column) => (
+                    <td key={column.key}>{platformInfo[column.key] || '-'}</td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </motion.div>
     );
   };
 
