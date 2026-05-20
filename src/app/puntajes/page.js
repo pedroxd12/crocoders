@@ -1,15 +1,43 @@
 'use client';
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Image from "next/image";
-import { Trophy, Code, Globe, Award, Loader } from "lucide-react";
+import { Trophy, Code, Globe, Award, AlertTriangle, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 import styles from "./page.module.css";
 import LoadingSpinner from "@/components/LoadingSpinner";
 
-// Componente Leaderboard definido fuera
-const Leaderboard = ({ topPerformers, loading }) => {
-  if (!loading && topPerformers.length === 0) return null;
+const MESES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+const PLATFORMS = [
+  {
+    name: "Codeforces",
+    key: "codeforces",
+    icon: <Code size={18} />,
+    columns: [
+      { key: "problemas_total", label: "Problemas Resueltos" },
+      { key: "problema_mas_dificil", label: "Problema Más Difícil" },
+    ],
+  },
+  {
+    name: "VJudge",
+    key: "vjudge",
+    icon: <Globe size={18} />,
+    columns: [{ key: "problemas_total", label: "Problemas Totales" }],
+  },
+  {
+    name: "OmegaUp",
+    key: "omegaup",
+    icon: <Trophy size={18} />,
+    columns: [{ key: "problemas_total", label: "Problemas Totales" }],
+  },
+];
+
+const Leaderboard = React.memo(function Leaderboard({ topPerformers }) {
+  if (topPerformers.length === 0) return null;
 
   return (
     <div className={styles.leaderboardSection}>
@@ -19,8 +47,8 @@ const Leaderboard = ({ topPerformers, loading }) => {
       </h2>
       <div className={styles.leaderboardGrid}>
         {topPerformers.map((miembro, index) => (
-          <motion.div 
-            key={miembro.id_miembro} 
+          <motion.div
+            key={miembro.id_miembro}
             className={styles.leaderboardCard}
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -32,196 +60,178 @@ const Leaderboard = ({ topPerformers, loading }) => {
 
             {miembro.codeforces?.avatar && (
               <div className="flex justify-center mb-4">
-                 <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-white/10 shadow-lg relative">
-                    <Image
-                      src={miembro.codeforces.avatar}
-                      alt={`Avatar de ${miembro.nombre_completo}`}
-                      fill
-                      sizes="96px"
-                      className="object-cover"
-                      unoptimized
-                    />
-                 </div>
+                <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-white/10 shadow-lg relative">
+                  <Image
+                    src={miembro.codeforces.avatar}
+                    alt={`Avatar de ${miembro.nombre_completo}`}
+                    fill
+                    sizes="96px"
+                    className="object-cover"
+                    unoptimized
+                  />
+                </div>
               </div>
             )}
 
             <h3 className={styles.memberName}>{miembro.nombre_completo}</h3>
             <p className={styles.totalSolved}>{miembro.totalSolved} problemas resueltos</p>
-            
+
             <div className={styles.platformStats}>
-                <div className={styles.statItem}>
-                    <span>CF</span>
-                    <span className={styles.statValue}>{miembro.codeforces?.problemas_total || 0}</span>
-                </div>
-                <div className={styles.statItem}>
-                    <span>VJ</span>
-                    <span className={styles.statValue}>{miembro.vjudge?.problemas_total || 0}</span>
-                </div>
-                <div className={styles.statItem}>
-                    <span>OU</span>
-                    <span className={styles.statValue}>{miembro.omegaup?.problemas_total || 0}</span>
-                </div>
+              <div className={styles.statItem}>
+                <span>CF</span>
+                <span className={styles.statValue}>{miembro.codeforces?.problemas_total || 0}</span>
+              </div>
+              <div className={styles.statItem}>
+                <span>VJ</span>
+                <span className={styles.statValue}>{miembro.vjudge?.problemas_total || 0}</span>
+              </div>
+              <div className={styles.statItem}>
+                <span>OU</span>
+                <span className={styles.statValue}>{miembro.omegaup?.problemas_total || 0}</span>
+              </div>
             </div>
           </motion.div>
         ))}
       </div>
     </div>
   );
-};
+});
 
 const PuntajesPage = () => {
   const [puntajes, setPuntajes] = useState([]);
-  const [mesActual, setMesActual] = useState("");
   const [activeTab, setActiveTab] = useState("Codeforces");
-  const [topPerformers, setTopPerformers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    // Obtener el mes actual
-    const meses = [
-      "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-      "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
-    ];
-    const mes = new Date().getMonth();
-    setMesActual(meses[mes]);
+  const mesActual = useMemo(() => MESES[new Date().getMonth()], []);
 
-    // Obtener los puntajes desde la API
-    const fetchPuntajes = async () => {
-      try {
-        setLoading(true);
-        const res = await fetch("/api/puntajes");
-        
-        if (!res.ok) {
-          if (res.status === 404) {
-            setPuntajes([]);
-            setLoading(false);
-            return;
-          }
-          throw new Error('Error al obtener puntajes');
-        }
+  const fetchPuntajes = useCallback(async ({ silent = false } = {}) => {
+    if (silent) setRefreshing(true);
+    else setLoading(true);
+    setError(null);
 
-        const data = await res.json();
-        const resultados = data.resultados || []; // Fallback if data.resultados is undefined
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-        // Mapear los datos de la API a la estructura esperada
-        const miembrosConPuntajes = resultados.map(miembro => {
-          return {
-            id_miembro: miembro.id_miembro,
-            nombre_completo: miembro.nombre_completo,
-            codeforces: miembro.codeforces,
-            vjudge: miembro.vjudge,
-            omegaup: miembro.omegaup
-          };
-        }).filter(miembro => 
-          miembro.codeforces || miembro.vjudge || miembro.omegaup
-        );
+      const res = await fetch("/api/puntajes", { signal: controller.signal });
+      clearTimeout(timeoutId);
 
-        setPuntajes(miembrosConPuntajes);
+      const data = await res.json().catch(() => ({ resultados: [] }));
+      const resultados = Array.isArray(data?.resultados) ? data.resultados : [];
 
-        // Calcular top performers
-        const performersWithTotalSolved = miembrosConPuntajes
-          .map(miembro => {
-            const totalSolved = 
-              (miembro.codeforces?.problemas_total || 0) +
-              (miembro.vjudge?.problemas_total || 0) +
-              (miembro.omegaup?.problemas_total || 0);
-            
-            return {
-              ...miembro,
-              totalSolved
-            };
-          })
-          .filter(miembro => miembro.totalSolved > 0)
-          .sort((a, b) => b.totalSolved - a.totalSolved)
-          .slice(0, 3);
+      const miembros = resultados.filter(
+        (m) => m && (m.codeforces || m.vjudge || m.omegaup),
+      );
 
-        setTopPerformers(performersWithTotalSolved);
-      } catch (err) {
-        console.error("Error al obtener puntajes:", err);
-        setError(err.message);
-      } finally {
-        setLoading(false);
+      setPuntajes(miembros);
+
+      if (data?.error && miembros.length === 0) {
+        setError("No pudimos obtener los puntajes en este momento.");
       }
-    };
-
-    fetchPuntajes();
+    } catch (err) {
+      console.error("Error al obtener puntajes:", err);
+      setError(
+        err.name === "AbortError"
+          ? "La solicitud tardó demasiado. Intenta nuevamente."
+          : "No pudimos conectar con el servidor.",
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  // Configuración de plataformas
-  const platforms = [
-    {
-      name: "Codeforces",
-      icon: <Code size={18} />,
-      columns: [
-        { key: "problemas_total", label: "Problemas Resueltos" },
-        { key: "problema_mas_dificil", label: "Problema Más Difícil" }
-      ]
-    },
-    {
-      name: "VJudge",
-      icon: <Globe size={18} />,
-      columns: [
-        { key: "problemas_total", label: "Problemas Totales" }
-      ]
-    },
-    {
-      name: "OmegaUp",
-      icon: <Trophy size={18} />,
-      columns: [
-        { key: "problemas_total", label: "Problemas Totales" }
-      ]
-    }
-  ];
+  useEffect(() => {
+    fetchPuntajes();
+  }, [fetchPuntajes]);
 
-  const renderTable = (platformData) => {
+  const topPerformers = useMemo(() => {
+    return puntajes
+      .map((m) => ({
+        ...m,
+        totalSolved:
+          (m.codeforces?.problemas_total || 0) +
+          (m.vjudge?.problemas_total || 0) +
+          (m.omegaup?.problemas_total || 0),
+      }))
+      .filter((m) => m.totalSolved > 0)
+      .sort((a, b) => b.totalSolved - a.totalSolved)
+      .slice(0, 3);
+  }, [puntajes]);
+
+  const activePlatform = useMemo(
+    () => PLATFORMS.find((p) => p.name === activeTab),
+    [activeTab],
+  );
+
+  const tableData = useMemo(() => {
+    if (!activePlatform) return [];
+    const key = activePlatform.key;
+    return puntajes
+      .filter((m) => m[key])
+      .sort(
+        (a, b) =>
+          (b[key]?.problemas_total || 0) - (a[key]?.problemas_total || 0),
+      );
+  }, [puntajes, activePlatform]);
+
+  const someStale = useMemo(() => {
+    if (!activePlatform) return false;
+    return tableData.some((m) => m[activePlatform.key]?.stale);
+  }, [tableData, activePlatform]);
+
+  const renderTable = () => {
     if (loading) {
-        return (
-            <div className={styles.loaderContainer}>
-                <LoadingSpinner size="lg" />
-            </div>
-        );
+      return (
+        <div className={styles.loaderContainer}>
+          <LoadingSpinner />
+        </div>
+      );
     }
 
-    if (error) {
+    if (error && puntajes.length === 0) {
       return (
         <div className={styles.emptyState}>
-          Error: {error}
+          <AlertTriangle size={32} style={{ marginBottom: '0.75rem', color: '#f59e0b' }} />
+          <div>{error}</div>
+          <button
+            onClick={() => fetchPuntajes()}
+            className={styles.retryButton}
+          >
+            <RefreshCw size={16} /> Reintentar
+          </button>
         </div>
       );
     }
 
     if (puntajes.length === 0) {
+      return <div className={styles.emptyState}>No hay competidores registrados aún.</div>;
+    }
+
+    if (tableData.length === 0) {
       return (
         <div className={styles.emptyState}>
-          No hay competidores registrados aún.
+          No hay datos para {activePlatform.name} en este momento.
         </div>
       );
     }
 
-    const activePlatform = platforms.find(p => p.name === platformData.name);
-    const platformKey = platformData.name.toLowerCase();
-    
-    // Sort logic for table could be added here, currently default order
-    const tableData = puntajes
-        .filter(miembro => miembro[platformKey])
-        .sort((a, b) => (b[platformKey]?.problemas_total || 0) - (a[platformKey]?.problemas_total || 0));
-
-    if (tableData.length === 0) {
-        return (
-            <div className={styles.emptyState}>
-                No hay datos para {platformData.name} en este momento.
-            </div>
-        );
-    }
-
     return (
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className={styles.tableContainer}
-      >
+      <>
+        {someStale && (
+          <div className={styles.staleNotice}>
+            <AlertTriangle size={14} />
+            Algunos datos provienen del último caché disponible — la plataforma no respondió.
+          </div>
+        )}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className={styles.tableContainer}
+        >
           <table className={styles.table}>
             <thead>
               <tr>
@@ -235,46 +245,58 @@ const PuntajesPage = () => {
             </thead>
             <tbody>
               {tableData.map((miembro, index) => {
-                  const platformInfo = miembro[platformKey];
-                  return (
-                    <tr key={miembro.id_miembro}>
-                      <td className={styles.rankCell}>#{index + 1}</td>
-                      <td>{miembro.nombre_completo}</td>
-                      <td className="font-mono text-sm text-gray-400">{platformInfo.usuario}</td>
-                      {activePlatform.columns.map((column) => (
-                        <td key={column.key}>
-                          {platformInfo[column.key] || '-'}
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
+                const platformInfo = miembro[activePlatform.key];
+                return (
+                  <tr key={miembro.id_miembro}>
+                    <td className={styles.rankCell}>#{index + 1}</td>
+                    <td>
+                      {miembro.nombre_completo}
+                      {platformInfo.stale && (
+                        <span className={styles.staleTag} title="Datos en caché">caché</span>
+                      )}
+                    </td>
+                    <td className="font-mono text-sm text-gray-400">{platformInfo.usuario}</td>
+                    {activePlatform.columns.map((column) => (
+                      <td key={column.key}>{platformInfo[column.key] || '-'}</td>
+                    ))}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
-      </motion.div>
+        </motion.div>
+      </>
     );
   };
-
-
 
   return (
     <div className={styles.pageWrapper}>
       <div className={styles.container}>
         <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6 }}
         >
+          <div className={styles.headerRow}>
             <h1 className={styles.title}>Tabla de Posiciones</h1>
-            <p className={styles.description}>
-                Ranking mensual de resolución de problemas en {mesActual}. ¡Sigue practicando!
-            </p>
+            <button
+              onClick={() => fetchPuntajes({ silent: true })}
+              className={styles.refreshButton}
+              disabled={loading || refreshing}
+              aria-label="Refrescar puntajes"
+            >
+              <RefreshCw size={18} className={refreshing ? styles.spinning : ''} />
+            </button>
+          </div>
+          <p className={styles.description}>
+            Ranking mensual de resolución de problemas en {mesActual}. ¡Sigue practicando!
+          </p>
         </motion.div>
 
-        {!loading && topPerformers.length > 0 && <Leaderboard topPerformers={topPerformers} loading={loading} />}
+        {!loading && <Leaderboard topPerformers={topPerformers} />}
 
         <div className={styles.tabsContainer}>
-          {platforms.map((platform) => (
+          {PLATFORMS.map((platform) => (
             <button
               key={platform.name}
               onClick={() => setActiveTab(platform.name)}
@@ -286,10 +308,10 @@ const PuntajesPage = () => {
           ))}
         </div>
 
-        {renderTable(platforms.find(p => p.name === activeTab))}
+        {renderTable()}
       </div>
     </div>
   );
-}
+};
 
 export default PuntajesPage;
