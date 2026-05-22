@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "standalone",
   poweredByHeader: false,
   compress: true,
+  serverExternalPackages: ['pg', 'pg-native', 'sharp', 'bcryptjs', 'cheerio'],
   images: {
     formats: ['image/avif', 'image/webp'],
     remotePatterns: [
