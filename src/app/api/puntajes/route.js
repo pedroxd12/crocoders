@@ -18,7 +18,33 @@ const CF_BATCH_SIZE = 4;
 const CF_BATCH_DELAY_MS = 600;
 const CF_RETRY_DELAY_MS = 1500;
 
+const DB_RETRY_ATTEMPTS = 4;
+const DB_RETRY_BASE_MS = 800;
+const TRANSIENT_DB_CODES = new Set(['57P03', '57P02', '57P01', 'ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED']);
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function isTransientDbError(err) {
+  if (!err) return false;
+  if (TRANSIENT_DB_CODES.has(err.code)) return true;
+  return /database system is starting up|shutting down|terminating connection/i.test(err.message || '');
+}
+
+async function queryWithRetry(text, params) {
+  let lastErr;
+  for (let attempt = 1; attempt <= DB_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await pool.query(text, params);
+    } catch (e) {
+      lastErr = e;
+      if (!isTransientDbError(e) || attempt === DB_RETRY_ATTEMPTS) throw e;
+      const delay = DB_RETRY_BASE_MS * attempt;
+      console.warn(`DB transient ${e.code || 'err'} (attempt ${attempt}/${DB_RETRY_ATTEMPTS}). Retrying in ${delay}ms`);
+      await sleep(delay);
+    }
+  }
+  throw lastErr;
+}
 
 async function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -278,8 +304,8 @@ async function processInBatches(items, batchSize, delayMs, worker) {
   return out;
 }
 
-async function buildResultados() {
-  const miembrosRes = await pool.query(`
+async function loadMiembros() {
+  const res = await queryWithRetry(`
     SELECT
       m.id_miembro,
       (m.nombre || ' ' || m.apellido_paterno) as nombre_completo,
@@ -299,18 +325,61 @@ async function buildResultados() {
     WHERE cp.activo = true
     GROUP BY m.id_miembro
   `);
+  return res.rows;
+}
 
-  if (miembrosRes.rows.length === 0) return [];
+function storedResultados(rows) {
+  const resultados = rows.map((m) => {
+    const codeforces = m.usuario_codeforces ? {
+      id_miembro: m.id_miembro,
+      usuario: m.usuario_codeforces,
+      problemas_total: m.stored_codeforces_total || 0,
+      problema_mas_dificil: m.stored_codeforces_max || '',
+      max_dificultad: m.stored_codeforces_rating || 0,
+      avatar: '',
+      stale: true,
+    } : null;
+    const vjudge = m.usuario_vjudge ? {
+      id_miembro: m.id_miembro,
+      usuario: m.usuario_vjudge,
+      problemas_total: m.stored_vjudge_total || 0,
+      stale: true,
+    } : null;
+    const omegaup = m.usuario_omegaup ? {
+      id_miembro: m.id_miembro,
+      usuario: m.usuario_omegaup,
+      problemas_total: m.stored_omegaup_total || 0,
+      stale: true,
+    } : null;
+    return {
+      id_miembro: m.id_miembro,
+      nombre_completo: m.nombre_completo,
+      codeforces,
+      vjudge,
+      omegaup,
+      total_problemas:
+        (codeforces?.problemas_total || 0) +
+        (vjudge?.problemas_total || 0) +
+        (omegaup?.problemas_total || 0),
+    };
+  });
+  resultados.sort((a, b) => b.total_problemas - a.total_problemas);
+  return resultados;
+}
+
+async function buildResultados() {
+  const rows = await loadMiembros();
+  if (rows.length === 0) return [];
 
   const cfResults = await processInBatches(
-    miembrosRes.rows,
+    rows,
     CF_BATCH_SIZE,
     CF_BATCH_DELAY_MS,
     (m) => fetchCodeforces(m),
   );
 
   const otherResults = await Promise.allSettled(
-    miembrosRes.rows.map(async (m) => {
+    rows.map(async (m) => {
       const [vj, ou] = await Promise.allSettled([
         fetchVJudge(m),
         fetchOmegaUp(m),
@@ -322,7 +391,7 @@ async function buildResultados() {
     }),
   );
 
-  const resultados = miembrosRes.rows.map((m, i) => {
+  const resultados = rows.map((m, i) => {
     const codeforces = cfResults[i] || null;
     const other = otherResults[i].status === 'fulfilled' ? otherResults[i].value : { vjudge: null, omegaup: null };
     return {
@@ -342,24 +411,8 @@ async function buildResultados() {
   return resultados;
 }
 
-export async function GET(request) {
-  const url = new URL(request.url);
-  const force = url.searchParams.get('refresh') === '1';
-  const now = Date.now();
-
-  if (!force && cachedResponse && now - cachedAt < CACHE_TTL_MS) {
-    return NextResponse.json({ resultados: cachedResponse, cached: true }, { status: 200 });
-  }
-
-  if (inflight) {
-    try {
-      const resultados = await inflight;
-      return NextResponse.json({ resultados, cached: true }, { status: 200 });
-    } catch {
-      // fall through to attempt a fresh load
-    }
-  }
-
+function startRefresh() {
+  if (inflight) return inflight;
   inflight = (async () => {
     try {
       const resultados = await buildResultados();
@@ -370,18 +423,54 @@ export async function GET(request) {
       inflight = null;
     }
   })();
+  return inflight;
+}
+
+export async function GET(request) {
+  const url = new URL(request.url);
+  const force = url.searchParams.get('refresh') === '1';
+  const now = Date.now();
+
+  if (!force && cachedResponse && now - cachedAt < CACHE_TTL_MS) {
+    return NextResponse.json({ resultados: cachedResponse, cached: true }, { status: 200 });
+  }
+
+  if (!force && cachedResponse && now - cachedAt < STALE_TTL_MS) {
+    startRefresh().catch((e) => console.error('Background refresh failed:', e.message));
+    return NextResponse.json(
+      { resultados: cachedResponse, cached: true, stale: true },
+      { status: 200 },
+    );
+  }
 
   try {
-    const resultados = await inflight;
+    const resultados = await startRefresh();
     return NextResponse.json({ resultados }, { status: 200 });
   } catch (error) {
-    console.error('Error general en puntajes:', error);
-    if (cachedResponse && now - cachedAt < STALE_TTL_MS) {
+    console.error('Error general en puntajes:', error.message);
+
+    if (cachedResponse) {
       return NextResponse.json(
-        { resultados: cachedResponse, cached: true, stale: true },
+        { resultados: cachedResponse, cached: true, stale: true, error: 'refresh_failed' },
         { status: 200 },
       );
     }
-    return NextResponse.json({ resultados: [], error: 'internal_error' }, { status: 200 });
+
+    try {
+      const rows = await loadMiembros();
+      const resultados = storedResultados(rows);
+      cachedResponse = resultados;
+      cachedAt = Date.now();
+      return NextResponse.json(
+        { resultados, stale: true, error: 'external_unavailable' },
+        { status: 200 },
+      );
+    } catch (dbErr) {
+      console.error('DB fallback failed:', dbErr.message);
+      return NextResponse.json(
+        { resultados: [], error: 'service_unavailable' },
+        { status: 503 },
+      );
+    }
   }
 }
