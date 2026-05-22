@@ -1,10 +1,11 @@
-// middleware.js
+// proxy.js
 import { NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth';
 import { APP_ROLES } from '@/lib/roles';
 
 const ROLES = APP_ROLES;
 
+// Rutas públicas precompiladas una sola vez al cargar el módulo
 const PUBLIC_PATHS = [
   '/',
   '/club',
@@ -14,59 +15,65 @@ const PUBLIC_PATHS = [
   '/contacto',
   '/puntajes',
   '/evidencias',
-  '/api/auth/(.*)',
-  '/api/eventos/(.*)',
-  '/api/uploadthing/(.*)',
-  '/api/evidencias/(.*)',
-  '/api/puntajes(.*)',
   '/favicon.ico',
-  '/eventos/(.*)', 
-  '/_next/(.*)',
-  '/public/(.*)',
-  '/video/(.*)',
-  '/public/uploads/eventos/(.*)',
-  '/evidencia/(.*)',
-  '/img/uploads/eventos/(.*)',
-  '/img/(.*)', 
-  '/fonts/(.*)' 
 ];
 
+const PUBLIC_PATH_PREFIXES = [
+  '/api/auth/',
+  '/api/eventos/',
+  '/api/uploadthing/',
+  '/api/evidencias/',
+  '/api/puntajes',
+  '/eventos/',
+  '/evidencia/',
+  '/img/',
+  '/fonts/',
+  '/video/',
+  '/_next/',
+  '/public/',
+  '/uploads/',
+  '/teclado/',
+  '/capitulo/',
+  '/club/',
+];
+
+// El matcher excluye archivos estáticos para que el proxy ni se invoque en ellos.
 export const config = {
   matcher: [
-    '/((?!api|_next/static|_next/image|favicon.ico|img/|fonts/|teclado/|evidencia/|capitulo/|club/).*)',
-  ]
+    '/((?!api|_next/static|_next/image|_next/data|favicon.ico|img/|fonts/|teclado/|evidencia/|capitulo/|club/|uploads/|video/).*)',
+  ],
 };
 
-export async function middleware(request) {
+function isStaticOrApi(pathname) {
+  // Short-circuit barato (no regex) para evitar trabajo en cada request.
+  // El matcher ya filtra la mayoría, pero esto cubre cualquier edge case.
+  if (pathname === '/favicon.ico') return true;
+  for (let i = 0; i < PUBLIC_PATH_PREFIXES.length; i++) {
+    if (pathname.startsWith(PUBLIC_PATH_PREFIXES[i])) return true;
+  }
+  return pathname.startsWith('/api/');
+}
+
+function isPublicPath(pathname) {
+  if (PUBLIC_PATHS.includes(pathname)) return true;
+  for (let i = 0; i < PUBLIC_PATH_PREFIXES.length; i++) {
+    if (pathname.startsWith(PUBLIC_PATH_PREFIXES[i])) return true;
+  }
+  return false;
+}
+
+export async function proxy(request) {
   const { pathname } = request.nextUrl;
-  
+
   // Permitir archivos estáticos y recursos públicos sin autenticación
-  if (
-    pathname.startsWith('/_next/') || 
-    pathname === '/favicon.ico' ||
-    pathname.startsWith('/img/') ||
-    pathname.startsWith('/uploads/') ||
-    pathname.startsWith('/public/') ||
-    pathname.startsWith('/fonts/') ||
-    pathname.startsWith('/teclado/') ||
-    pathname.startsWith('/evidencia/') ||
-    pathname.startsWith('/capitulo/') ||
-    pathname.startsWith('/club/') ||
-    pathname.startsWith('/api/')
-  ) {
+  if (isStaticOrApi(pathname)) {
     return NextResponse.next();
   }
 
   const token = request.cookies.get('token')?.value;
 
-  // Verificar si la ruta es pública
-  const isPublicPath = PUBLIC_PATHS.some(publicPath => {
-    const regex = new RegExp(`^${publicPath.replace(/\*/g, '.*').replace(/\//g, '\\/')}$`);
-    return regex.test(pathname);
-  });
-
   // Manejar rutas públicas
-  if (isPublicPath) {
+  if (isPublicPath(pathname)) {
     // Redirigir usuarios autenticados que intentan acceder a login/registro
     if (token && (pathname === '/iniciar' || pathname === '/')) {
       try {
@@ -88,14 +95,14 @@ export async function middleware(request) {
   // Proteger rutas privadas
   if (!token) {
     const loginUrl = new URL('/iniciar', request.url);
-    loginUrl.searchParams.set('from', request.nextUrl.pathname);
+    loginUrl.searchParams.set('from', pathname);
     return NextResponse.redirect(loginUrl);
   }
 
   // Verificar token para rutas protegidas
   try {
     const user = await verifyToken(token);
-    
+
     if (!user) {
       throw new Error('Token inválido');
     }
@@ -113,7 +120,7 @@ export async function middleware(request) {
     }
 
     // Redirigir a la página correcta si el usuario está autenticado pero en una ruta no adecuada
-    if ((pathname === '/dashboard' && user.role === ROLES.ADMIN) || 
+    if ((pathname === '/dashboard' && user.role === ROLES.ADMIN) ||
         (pathname === '/admin' && user.role !== ROLES.ADMIN)) {
       const redirectUrl = user.role === ROLES.ADMIN ? '/admin' : '/dashboard';
       return NextResponse.redirect(new URL(redirectUrl, request.url));

@@ -46,9 +46,15 @@ export async function sql(strings, ...values) {
     } catch (error) {
       lastError = error;
       
-      // Si es error de conexión y no es el último intento, reintentar
-      if (['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(error.code) && attempt < maxRetries) {
-        console.warn(`⚠️ Intento ${attempt}/${maxRetries} falló. Reintentando en ${attempt * 1000}ms...`);
+      const transientNetCodes = ['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'];
+      const transientPgCodes = ['57P03', '57P02', '57P01'];
+      const isTransient =
+        transientNetCodes.includes(error.code) ||
+        transientPgCodes.includes(error.code) ||
+        /database system is starting up|the database system is shutting down|terminating connection/i.test(error.message || '');
+
+      if (isTransient && attempt < maxRetries) {
+        console.warn(`⚠️ Intento ${attempt}/${maxRetries} falló (${error.code || 'transient'}). Reintentando en ${attempt * 1000}ms...`);
         await new Promise(resolve => setTimeout(resolve, attempt * 1000));
         continue;
       }

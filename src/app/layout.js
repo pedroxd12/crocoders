@@ -4,7 +4,7 @@ import AppShell from '@/components/AppShell';
 
 const poppins = Poppins({
   subsets: ['latin'],
-  weight: ['100', '200', '300', '400', '500', '600', '700', '800', '900'],
+  weight: ['300', '400', '500', '600', '700'],
   variable: '--font-poppins',
   display: 'swap',
 });
@@ -64,7 +64,7 @@ export const viewport = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="es">
+    <html lang="es" data-scroll-behavior="smooth">
       <body className={`${poppins.className} bg-gray-900 min-h-screen flex flex-col font-sans`}>
         <AppShell>{children}</AppShell>
       </body>

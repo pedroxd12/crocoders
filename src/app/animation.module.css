@@ -1,15 +1,17 @@
 .pageWrapper {
-    min-height: 100vh;
     margin: 0;
     padding: 0;
     height: 100vh;
     overflow-y: auto;
-    /* scroll-snap-type: y proximity; Removed to fix scrolling fluidity */
-    /* scroll-behavior: smooth; Removed to avoid conflict */
+    overflow-x: hidden;
     color: #e0e0e0;
     background: #1a1a1a;
     position: relative;
-    scrollbar-width: thin;
+    scrollbar-width: none; /* Oculta scrollbar en Firefox */
+}
+
+.pageWrapper::-webkit-scrollbar {
+    display: none; /* Oculta scrollbar en Chrome/Safari/Edge */
 }
 
 .pageWrapper::before {

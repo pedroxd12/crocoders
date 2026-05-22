@@ -1,9 +1,9 @@
 import styles from './animation.module.css';
-import Footer from '@/components/Footer';
 import Image from 'next/image';
 import BongoCatKeyboard from '@/components/BongoCatKeyboard';
 import AnimatedSection from '@/components/AnimatedSection';
-import ImageGrid from '@/components/ImageGrid';
+import Footer from '@/components/Footer';
+import HomeBodyScrollLock from './HomeBodyScrollLock';
 
 export const metadata = {
   title: 'Inicio',
@@ -30,6 +30,7 @@ export default function Home() {
 
   return (
     <div className={styles.pageWrapper}>
+      <HomeBodyScrollLock />
       <main className={styles.container}>
         <section className={styles.hero}>
           <AnimatedSection className="w-full">
@@ -42,11 +43,12 @@ export default function Home() {
                   Club de algoritmia.
                 </p>
               </div>
-              <Image 
-                src="/img/logo.png" 
-                alt="Crocoders Logo" 
-                width={300} 
+              <Image
+                src="/img/logo.png"
+                alt="Crocoders Logo"
+                width={300}
                 height={300}
+                priority
                 className="w-40 h-40 md:w-100 md:h-100 object-contain flex-shrink-0"
               />
             </div>

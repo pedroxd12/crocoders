@@ -8,6 +8,18 @@ export const revalidate = 0;
 const FETCH_TIMEOUT_MS = 8000;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
 
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const STALE_TTL_MS = 30 * 60 * 1000;
+let cachedResponse = null;
+let cachedAt = 0;
+let inflight = null;
+
+const CF_BATCH_SIZE = 4;
+const CF_BATCH_DELAY_MS = 600;
+const CF_RETRY_DELAY_MS = 1500;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
@@ -23,11 +35,29 @@ async function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT_MS) {
   }
 }
 
-function safeUpdate(client, sql, params) {
-  client.query(sql, params).catch((e) => console.error('DB update failed:', e.message));
+function safeUpdate(sql, params) {
+  pool.query(sql, params).catch((e) => console.error('DB update failed:', e.message));
 }
 
-async function fetchCodeforces(client, memberData) {
+async function fetchCodeforcesOnce(usuario_codeforces) {
+  const [statusRes, infoRes] = await Promise.all([
+    fetchWithTimeout(`https://codeforces.com/api/user.status?handle=${encodeURIComponent(usuario_codeforces)}`),
+    fetchWithTimeout(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(usuario_codeforces)}`),
+  ]);
+
+  if (!statusRes.ok || !infoRes.ok) {
+    const err = new Error(`CF HTTP ${statusRes.status}/${infoRes.status}`);
+    err.transient = [429, 500, 502, 503, 504].includes(statusRes.status)
+      || [429, 500, 502, 503, 504].includes(infoRes.status);
+    throw err;
+  }
+
+  const [statusData, infoData] = await Promise.all([statusRes.json(), infoRes.json()]);
+  if (statusData.status !== 'OK' || infoData.status !== 'OK') throw new Error('CF API non-OK');
+  return { statusData, infoData };
+}
+
+async function fetchCodeforces(memberData) {
   const {
     id_miembro,
     usuario_codeforces,
@@ -48,17 +78,26 @@ async function fetchCodeforces(client, memberData) {
     stale: true,
   };
 
+  let data;
   try {
-    const [statusRes, infoRes] = await Promise.all([
-      fetchWithTimeout(`https://codeforces.com/api/user.status?handle=${encodeURIComponent(usuario_codeforces)}`),
-      fetchWithTimeout(`https://codeforces.com/api/user.info?handles=${encodeURIComponent(usuario_codeforces)}`),
-    ]);
+    data = await fetchCodeforcesOnce(usuario_codeforces);
+  } catch (e) {
+    if (e.transient) {
+      await sleep(CF_RETRY_DELAY_MS);
+      try {
+        data = await fetchCodeforcesOnce(usuario_codeforces);
+      } catch (e2) {
+        console.warn(`Codeforces fallback for ${usuario_codeforces}: ${e2.message}`);
+        return fallback;
+      }
+    } else {
+      console.warn(`Codeforces fallback for ${usuario_codeforces}: ${e.message}`);
+      return fallback;
+    }
+  }
 
-    if (!statusRes.ok || !infoRes.ok) throw new Error(`CF HTTP ${statusRes.status}/${infoRes.status}`);
-
-    const [statusData, infoData] = await Promise.all([statusRes.json(), infoRes.json()]);
-    if (statusData.status !== 'OK' || infoData.status !== 'OK') throw new Error('CF API non-OK');
-
+  try {
+    const { statusData, infoData } = data;
     const avatarUrl = infoData.result[0]?.titlePhoto || infoData.result[0]?.avatar || '';
 
     const resueltos = new Set();
@@ -77,7 +116,6 @@ async function fetchCodeforces(client, memberData) {
     const total = resueltos.size;
 
     safeUpdate(
-      client,
       `UPDATE cuenta_plataforma cp
          SET problemas_resueltos_total = $1, problema_mas_dificil = $2, rating = $3, ultima_actualizacion = NOW()
          FROM catalogo_plataforma p
@@ -100,7 +138,7 @@ async function fetchCodeforces(client, memberData) {
   }
 }
 
-async function fetchVJudge(client, memberData) {
+async function fetchVJudge(memberData) {
   const { id_miembro, usuario_vjudge, stored_vjudge_total } = memberData;
   if (!usuario_vjudge) return null;
 
@@ -113,7 +151,6 @@ async function fetchVJudge(client, memberData) {
 
   const user = encodeURIComponent(usuario_vjudge);
 
-  // Strategy 1: JSON endpoint (most reliable). Returns { acRecords: { OJ: [ids] }, ... }
   try {
     const res = await fetchWithTimeout(`https://vjudge.net/user/solveDetail/${user}`, {
       method: 'POST',
@@ -139,7 +176,6 @@ async function fetchVJudge(client, memberData) {
         const total = uniqueSolved.size;
 
         safeUpdate(
-          client,
           `UPDATE cuenta_plataforma cp
              SET problemas_resueltos_total = $1, ultima_actualizacion = NOW()
              FROM catalogo_plataforma p
@@ -154,7 +190,6 @@ async function fetchVJudge(client, memberData) {
     console.warn(`VJudge JSON failed for ${usuario_vjudge}: ${e.message}`);
   }
 
-  // Strategy 2: HTML scraping fallback
   try {
     const res = await fetchWithTimeout(`https://vjudge.net/user/${user}`);
     if (!res.ok) throw new Error(`HTML HTTP ${res.status}`);
@@ -178,7 +213,6 @@ async function fetchVJudge(client, memberData) {
 
     if (total > 0) {
       safeUpdate(
-        client,
         `UPDATE cuenta_plataforma cp
            SET problemas_resueltos_total = $1, ultima_actualizacion = NOW()
            FROM catalogo_plataforma p
@@ -194,7 +228,7 @@ async function fetchVJudge(client, memberData) {
   }
 }
 
-async function fetchOmegaUp(client, memberData) {
+async function fetchOmegaUp(memberData) {
   let { id_miembro, usuario_omegaup, stored_omegaup_total } = memberData;
   if (!usuario_omegaup) return null;
 
@@ -219,7 +253,6 @@ async function fetchOmegaUp(client, memberData) {
     const solvedCount = data.rankinfo.problems_solved || 0;
 
     safeUpdate(
-      client,
       `UPDATE cuenta_plataforma cp
          SET problemas_resueltos_total = $1, ultima_actualizacion = NOW()
          FROM catalogo_plataforma p
@@ -234,77 +267,121 @@ async function fetchOmegaUp(client, memberData) {
   }
 }
 
-export async function GET() {
-  let client;
-  try {
-    client = await pool.connect();
-  } catch (e) {
-    console.error('DB connect failed:', e.message);
-    return NextResponse.json({ resultados: [], error: 'database_unavailable' }, { status: 200 });
+async function processInBatches(items, batchSize, delayMs, worker) {
+  const out = new Array(items.length);
+  for (let i = 0; i < items.length; i += batchSize) {
+    const slice = items.slice(i, i + batchSize);
+    const results = await Promise.all(slice.map((item, j) => worker(item, i + j)));
+    for (let j = 0; j < results.length; j++) out[i + j] = results[j];
+    if (i + batchSize < items.length) await sleep(delayMs);
+  }
+  return out;
+}
+
+async function buildResultados() {
+  const miembrosRes = await pool.query(`
+    SELECT
+      m.id_miembro,
+      (m.nombre || ' ' || m.apellido_paterno) as nombre_completo,
+      NULLIF(TRIM(MAX(CASE WHEN p.nombre = 'Codeforces' THEN cp.usuario END)), '') as usuario_codeforces,
+      COALESCE(MAX(CASE WHEN p.nombre = 'Codeforces' THEN cp.problemas_resueltos_total END), 0) as stored_codeforces_total,
+      COALESCE(MAX(CASE WHEN p.nombre = 'Codeforces' THEN cp.problema_mas_dificil END), '') as stored_codeforces_max,
+      COALESCE(MAX(CASE WHEN p.nombre = 'Codeforces' THEN cp.rating END), 0) as stored_codeforces_rating,
+
+      NULLIF(TRIM(MAX(CASE WHEN p.nombre = 'VJudge' THEN cp.usuario END)), '') as usuario_vjudge,
+      COALESCE(MAX(CASE WHEN p.nombre = 'VJudge' THEN cp.problemas_resueltos_total END), 0) as stored_vjudge_total,
+
+      NULLIF(TRIM(MAX(CASE WHEN p.nombre = 'OmegaUp' THEN cp.usuario END)), '') as usuario_omegaup,
+      COALESCE(MAX(CASE WHEN p.nombre = 'OmegaUp' THEN cp.problemas_resueltos_total END), 0) as stored_omegaup_total
+    FROM miembro m
+    JOIN cuenta_plataforma cp ON m.id_miembro = cp.id_miembro
+    JOIN catalogo_plataforma p ON cp.id_plataforma = p.id_plataforma
+    WHERE cp.activo = true
+    GROUP BY m.id_miembro
+  `);
+
+  if (miembrosRes.rows.length === 0) return [];
+
+  const cfResults = await processInBatches(
+    miembrosRes.rows,
+    CF_BATCH_SIZE,
+    CF_BATCH_DELAY_MS,
+    (m) => fetchCodeforces(m),
+  );
+
+  const otherResults = await Promise.allSettled(
+    miembrosRes.rows.map(async (m) => {
+      const [vj, ou] = await Promise.allSettled([
+        fetchVJudge(m),
+        fetchOmegaUp(m),
+      ]);
+      return {
+        vjudge: vj.status === 'fulfilled' ? vj.value : null,
+        omegaup: ou.status === 'fulfilled' ? ou.value : null,
+      };
+    }),
+  );
+
+  const resultados = miembrosRes.rows.map((m, i) => {
+    const codeforces = cfResults[i] || null;
+    const other = otherResults[i].status === 'fulfilled' ? otherResults[i].value : { vjudge: null, omegaup: null };
+    return {
+      id_miembro: m.id_miembro,
+      nombre_completo: m.nombre_completo,
+      codeforces,
+      vjudge: other.vjudge,
+      omegaup: other.omegaup,
+      total_problemas:
+        (codeforces?.problemas_total || 0) +
+        (other.vjudge?.problemas_total || 0) +
+        (other.omegaup?.problemas_total || 0),
+    };
+  });
+
+  resultados.sort((a, b) => b.total_problemas - a.total_problemas);
+  return resultados;
+}
+
+export async function GET(request) {
+  const url = new URL(request.url);
+  const force = url.searchParams.get('refresh') === '1';
+  const now = Date.now();
+
+  if (!force && cachedResponse && now - cachedAt < CACHE_TTL_MS) {
+    return NextResponse.json({ resultados: cachedResponse, cached: true }, { status: 200 });
   }
 
-  try {
-    const miembrosRes = await client.query(`
-      SELECT
-        m.id_miembro,
-        (m.nombre || ' ' || m.apellido_paterno) as nombre_completo,
-        MAX(CASE WHEN p.nombre = 'Codeforces' THEN cp.usuario END) as usuario_codeforces,
-        COALESCE(MAX(CASE WHEN p.nombre = 'Codeforces' THEN cp.problemas_resueltos_total END), 0) as stored_codeforces_total,
-        COALESCE(MAX(CASE WHEN p.nombre = 'Codeforces' THEN cp.problema_mas_dificil END), '') as stored_codeforces_max,
-        COALESCE(MAX(CASE WHEN p.nombre = 'Codeforces' THEN cp.rating END), 0) as stored_codeforces_rating,
-
-        MAX(CASE WHEN p.nombre = 'VJudge' THEN cp.usuario END) as usuario_vjudge,
-        COALESCE(MAX(CASE WHEN p.nombre = 'VJudge' THEN cp.problemas_resueltos_total END), 0) as stored_vjudge_total,
-
-        MAX(CASE WHEN p.nombre = 'OmegaUp' THEN cp.usuario END) as usuario_omegaup,
-        COALESCE(MAX(CASE WHEN p.nombre = 'OmegaUp' THEN cp.problemas_resueltos_total END), 0) as stored_omegaup_total
-      FROM miembro m
-      JOIN cuenta_plataforma cp ON m.id_miembro = cp.id_miembro
-      JOIN catalogo_plataforma p ON cp.id_plataforma = p.id_plataforma
-      WHERE cp.activo = true
-      GROUP BY m.id_miembro
-    `);
-
-    if (miembrosRes.rows.length === 0) {
-      return NextResponse.json({ resultados: [] }, { status: 200 });
+  if (inflight) {
+    try {
+      const resultados = await inflight;
+      return NextResponse.json({ resultados, cached: true }, { status: 200 });
+    } catch {
+      // fall through to attempt a fresh load
     }
+  }
 
-    const settled = await Promise.allSettled(
-      miembrosRes.rows.map(async (m) => {
-        const [cf, vj, ou] = await Promise.allSettled([
-          fetchCodeforces(client, m),
-          fetchVJudge(client, m),
-          fetchOmegaUp(client, m),
-        ]);
+  inflight = (async () => {
+    try {
+      const resultados = await buildResultados();
+      cachedResponse = resultados;
+      cachedAt = Date.now();
+      return resultados;
+    } finally {
+      inflight = null;
+    }
+  })();
 
-        const codeforces = cf.status === 'fulfilled' ? cf.value : null;
-        const vjudge = vj.status === 'fulfilled' ? vj.value : null;
-        const omegaup = ou.status === 'fulfilled' ? ou.value : null;
-
-        return {
-          id_miembro: m.id_miembro,
-          nombre_completo: m.nombre_completo,
-          codeforces,
-          vjudge,
-          omegaup,
-          total_problemas:
-            (codeforces?.problemas_total || 0) +
-            (vjudge?.problemas_total || 0) +
-            (omegaup?.problemas_total || 0),
-        };
-      }),
-    );
-
-    const resultados = settled
-      .filter((r) => r.status === 'fulfilled')
-      .map((r) => r.value)
-      .sort((a, b) => b.total_problemas - a.total_problemas);
-
+  try {
+    const resultados = await inflight;
     return NextResponse.json({ resultados }, { status: 200 });
   } catch (error) {
     console.error('Error general en puntajes:', error);
+    if (cachedResponse && now - cachedAt < STALE_TTL_MS) {
+      return NextResponse.json(
+        { resultados: cachedResponse, cached: true, stale: true },
+        { status: 200 },
+      );
+    }
     return NextResponse.json({ resultados: [], error: 'internal_error' }, { status: 200 });
-  } finally {
-    client.release();
   }
 }

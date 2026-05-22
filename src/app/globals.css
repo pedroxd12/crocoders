@@ -32,8 +32,8 @@ body {
 }
 
 html, body {
-  /* scroll-behavior: smooth; Disabled to prevent conflict with Lenis */
   overflow-x: hidden;
+  scroll-behavior: smooth;
 }
 
 /* Removed unused main-container and scroll-snap rules to prevent Lenis conflicts */
@@ -103,11 +103,6 @@ html, body {
   50% {
     border-color: transparent;
   }
-}
-
-html, body {
-  scroll-behavior: smooth;
-  overflow-x: hidden;
 }
 
 /* Animaciones para los globos mejorados */

@@ -32,13 +32,11 @@ const SKILLS = {
 };
 
 export default function BongoCatKeyboard() {
-  const [splineApp, setSplineApp] = useState(null);
-  const selectedSkillRef = useRef(null);
+  const [shouldLoad, setShouldLoad] = useState(false);
+  const containerRef = useRef(null);
   const cleanupRef = useRef({ resizeHandler: null, bongoInterval: null });
 
   const onLoad = (spline) => {
-    setSplineApp(spline);
-
     const updateLayout = () => {
         const keyboard = spline.findObjectByName("keyboard");
         const isMobile = window.matchMedia("(max-width: 768px)").matches;
@@ -191,22 +189,58 @@ export default function BongoCatKeyboard() {
     };
   }, []);
 
+  // Solo cargar la escena 3D cuando entre al viewport para no bloquear el render inicial.
+  useEffect(() => {
+    if (shouldLoad) return;
+    const el = containerRef.current;
+    if (!el) return;
+
+    if (typeof IntersectionObserver === 'undefined') {
+      setShouldLoad(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldLoad(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '200px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [shouldLoad]);
+
+  const sceneUrl = "/teclado/skills-keyboard.splinecode";
+
   return (
-    <Suspense
-      fallback={
-        <div className="w-full h-full flex items-center justify-center bg-gray-900/30 rounded-lg animate-pulse">
-          <span className="text-gray-500 text-sm">Cargando experiencia 3D...</span>
-        </div>
-      }
+    <div
+      ref={containerRef}
+      className="w-full h-full relative"
+      style={{ pointerEvents: 'auto', minHeight: '300px' }}
     >
-      <div className="w-full h-full relative" style={{ pointerEvents: 'auto' }}>
-        <Spline
-          scene="/teclado/skills-keyboard.spline"
-          onLoad={onLoad}
-          className="w-full h-full"
-          style={{ pointerEvents: 'auto' }}
-        />
-      </div>
-    </Suspense>
+      {shouldLoad ? (
+        <Suspense
+          fallback={
+            <div className="w-full h-full flex items-center justify-center bg-gray-900/30 rounded-lg animate-pulse">
+              <span className="text-gray-500 text-sm">Cargando experiencia 3D...</span>
+            </div>
+          }
+        >
+          <Spline
+            scene={sceneUrl}
+            onLoad={onLoad}
+            className="w-full h-full"
+            style={{ pointerEvents: 'auto' }}
+          />
+        </Suspense>
+      ) : (
+        <div className="w-full h-full flex items-center justify-center bg-gray-900/30 rounded-lg">
+          <span className="text-gray-500 text-sm">Experiencia 3D</span>
+        </div>
+      )}
+    </div>
   );
 }

@@ -9,12 +9,14 @@ import { AuthProvider } from '@/context/AuthContext';
 
 export default function AppShell({ children }) {
   const pathname = usePathname();
+  // La home tiene su propio scroll container y renderiza su Footer internamente.
+  const showFooter = pathname !== '/';
 
   return (
     <AuthProvider>
       <Header />
       <main className="flex-grow">{children}</main>
-      {pathname !== '/' && <Footer />}
+      {showFooter && <Footer />}
       <ToastContainer
         position="top-right"
         autoClose={4000}
