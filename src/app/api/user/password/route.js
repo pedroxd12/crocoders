@@ -29,8 +29,13 @@ export async function PUT(request) {
       );
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
-    
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    } catch {
+      return NextResponse.json({ success: false, error: 'No autorizado' }, { status: 401 });
+    }
+
     // Obtener contraseña actual
     const user = await sql`
       SELECT contrasena FROM miembro WHERE id_miembro = ${decoded.id}
@@ -53,7 +58,7 @@ export async function PUT(request) {
     }
 
     // Hash de la nueva contraseña
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
 
     // Actualizar contraseña
     await sql`

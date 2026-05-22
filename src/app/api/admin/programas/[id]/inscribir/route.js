@@ -20,16 +20,15 @@ export async function POST(request, { params }) {
       );
     }
 
-    // Verificar que el programa existe
     const programaCheck = await client.query(
-      'SELECT id_programa FROM programa_recurrente WHERE id_programa = $1 AND activo = true',
-      [id]
+      'SELECT id_programa FROM programa_recurrente WHERE id_programa = $1',
+      [id],
     );
 
     if (programaCheck.rows.length === 0) {
       return NextResponse.json(
-        { error: 'Programa no encontrado o inactivo' },
-        { status: 404 }
+        { error: 'Programa no encontrado' },
+        { status: 404 },
       );
     }
 

@@ -25,7 +25,7 @@ export async function GET(request) {
             m.apellido_paterno,
             m.correo_electronico, 
             m.numero_telefono, 
-            'usuario' as role, -- Mock role
+            m.rol as role,
             MAX(CASE WHEN p.nombre = 'Codeforces' THEN cp.usuario END) as usuario_codeforces,
             MAX(CASE WHEN p.nombre = 'VJudge' THEN cp.usuario END) as usuario_vjudge,
             MAX(CASE WHEN p.nombre = 'OmegaUp' THEN cp.usuario END) as usuario_omegaup
@@ -130,7 +130,7 @@ export async function PUT(request) {
                 INSERT INTO cuenta_plataforma (id_miembro, id_plataforma, usuario, activo)
                 VALUES ($1, $2, $3, true)
                 ON CONFLICT (id_miembro, id_plataforma) 
-                DO UPDATE SET usuario = $3, ultima_actualizacion = NOW()
+                DO UPDATE SET usuario = $3, activo = true
             `, [decoded.id, idPlataforma, usuario]);
         };
 

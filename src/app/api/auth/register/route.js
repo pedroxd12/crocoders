@@ -106,7 +106,7 @@ export async function POST(request) {
       });
 
       // 3. Preparar datos del miembro
-      const saltRounds = 10;
+      const saltRounds = 12;
       const hashedPassword = await bcrypt.hash(contrasena, saltRounds);
       
       // Calcular periodo ingreso

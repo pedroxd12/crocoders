@@ -101,14 +101,28 @@ CREATE TABLE IF NOT EXISTS invitado (
 CREATE INDEX IF NOT EXISTS idx_invitado_correo_lower ON invitado (LOWER(correo_electronico));
 
 CREATE TABLE IF NOT EXISTS cuenta_plataforma (
-    id_cuenta     SERIAL PRIMARY KEY,
-    id_miembro    INT NOT NULL REFERENCES miembro(id_miembro) ON DELETE CASCADE,
-    id_plataforma INT NOT NULL REFERENCES catalogo_plataforma(id_plataforma) ON DELETE CASCADE,
-    usuario       VARCHAR(100) NOT NULL,
-    activo        BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    id_cuenta                 SERIAL PRIMARY KEY,
+    id_miembro                INT NOT NULL REFERENCES miembro(id_miembro) ON DELETE CASCADE,
+    id_plataforma             INT NOT NULL REFERENCES catalogo_plataforma(id_plataforma) ON DELETE CASCADE,
+    usuario                   VARCHAR(100) NOT NULL,
+    activo                    BOOLEAN NOT NULL DEFAULT TRUE,
+    problemas_resueltos_total INT NOT NULL DEFAULT 0,
+    problema_mas_dificil      VARCHAR(255),
+    rating                    INT NOT NULL DEFAULT 0,
+    ultima_actualizacion      TIMESTAMPTZ,
+    created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_cuenta_plataforma_miembro_plataforma UNIQUE (id_miembro, id_plataforma)
 );
+
+-- Asegurar columnas en instalaciones existentes (idempotente).
+ALTER TABLE cuenta_plataforma
+    ADD COLUMN IF NOT EXISTS problemas_resueltos_total INT NOT NULL DEFAULT 0;
+ALTER TABLE cuenta_plataforma
+    ADD COLUMN IF NOT EXISTS problema_mas_dificil VARCHAR(255);
+ALTER TABLE cuenta_plataforma
+    ADD COLUMN IF NOT EXISTS rating INT NOT NULL DEFAULT 0;
+ALTER TABLE cuenta_plataforma
+    ADD COLUMN IF NOT EXISTS ultima_actualizacion TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_cuenta_plataforma_miembro    ON cuenta_plataforma (id_miembro);
 CREATE INDEX IF NOT EXISTS idx_cuenta_plataforma_plataforma ON cuenta_plataforma (id_plataforma);

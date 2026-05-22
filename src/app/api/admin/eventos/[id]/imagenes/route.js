@@ -22,7 +22,7 @@ export async function POST(request, { params }) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
   try {
-    const { id } = params;
+    const { id } = await params;
 
     if (!id || !isValidId(id)) {
       return NextResponse.json({ message: 'ID de evento inválido' }, { status: 400 });
@@ -116,7 +116,7 @@ export async function GET(request, { params }) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
   try {
-    const { id } = params;
+    const { id } = await params;
 
     const imagenes = await sql`
       SELECT * FROM evento_imagenes

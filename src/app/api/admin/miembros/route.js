@@ -5,18 +5,20 @@ import { requireAdmin } from '@/lib/auth';
 export async function GET(request) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
-  const client = await pool.connect();
+
+  let client;
   try {
+    client = await pool.connect();
     const query = `
       SELECT
         m.id_miembro,
-        m.nombre, 
+        m.nombre,
         m.apellido_paterno,
         m.apellido_materno,
         m.correo_electronico,
         m.numero_telefono,
         m.semestre_actual,
-        m.fecha_registro,
+        m.created_at AS fecha_registro,
         m.periodo_ingreso,
         m.estado, 
         m.rol,
@@ -50,27 +52,35 @@ export async function GET(request) {
       { status: 500 }
     );
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }
 
 
+const ROLES_VALIDOS = new Set(['administrador', 'usuario', 'staff']);
+const ESTADOS_VALIDOS = new Set(['activo', 'inactivo', 'baja']);
+
 export async function PUT(request) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
-  const client = await pool.connect();
+
+  let client;
   try {
+    client = await pool.connect();
     const { id_miembro, rol, estado } = await request.json();
 
-    if (!id_miembro) {
-      return NextResponse.json(
-        { error: 'ID de miembro requerido' },
-        { status: 400 }
-      );
+    const idNum = Number(id_miembro);
+    if (!Number.isInteger(idNum) || idNum <= 0) {
+      return NextResponse.json({ error: 'ID de miembro inválido' }, { status: 400 });
+    }
+    if (rol !== undefined && !ROLES_VALIDOS.has(rol)) {
+      return NextResponse.json({ error: 'Rol inválido' }, { status: 400 });
+    }
+    if (estado !== undefined && !ESTADOS_VALIDOS.has(estado)) {
+      return NextResponse.json({ error: 'Estado inválido' }, { status: 400 });
     }
 
-    // Verify if member exists
-    const checkRes = await client.query('SELECT id_miembro FROM miembro WHERE id_miembro = $1', [id_miembro]);
+    const checkRes = await client.query('SELECT id_miembro FROM miembro WHERE id_miembro = $1', [idNum]);
     if (checkRes.rowCount === 0) {
       return NextResponse.json({ error: 'Miembro no encontrado' }, { status: 404 });
     }
@@ -87,41 +97,35 @@ export async function PUT(request) {
     if (estado) {
       updates.push(`estado = $${queryIdx++}`);
       values.push(estado);
-      
-      // If setting to inactive/baja, we might want to also set deleted_at if usage implies soft-delete
+
       if (estado === 'baja') {
-         updates.push(`deleted_at = NOW()`);
+        updates.push(`deleted_at = NOW()`);
       } else if (estado === 'activo') {
-         updates.push(`deleted_at = NULL`);
+        updates.push(`deleted_at = NULL`);
       }
     }
-    
-    // Always update timestamp
+
     updates.push(`updated_at = NOW()`);
 
-    if (updates.length > 1) { // >1 because updated_at is always added
-       values.push(id_miembro);
-       const query = `
-         UPDATE miembro 
-         SET ${updates.join(', ')} 
-         WHERE id_miembro = $${queryIdx}
-         RETURNING id_miembro, nombre, apellido_paterno, rol, estado
-       `;
-       
-       const updateRes = await client.query(query, values);
-       return NextResponse.json({ success: true, member: updateRes.rows[0] });
+    if (updates.length > 1) {
+      values.push(idNum);
+      const query = `
+        UPDATE miembro
+        SET ${updates.join(', ')}
+        WHERE id_miembro = $${queryIdx}
+        RETURNING id_miembro, nombre, apellido_paterno, rol, estado
+      `;
+
+      const updateRes = await client.query(query, values);
+      return NextResponse.json({ success: true, member: updateRes.rows[0] });
     }
 
-    return NextResponse.json({ success: true, message: "No data changed" });
-
+    return NextResponse.json({ success: true, message: 'No data changed' });
   } catch (error) {
     console.error('Error en PUT /api/admin/miembros:', error);
-    return NextResponse.json(
-      { error: 'Error al actualizar miembro: ' + error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Error al actualizar miembro' }, { status: 500 });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }
 
@@ -135,13 +139,9 @@ export async function DELETE(request) {
     return NextResponse.json({ error: 'ID es requerido' }, { status: 400 });
   }
 
-  const client = await pool.connect();
+  let client;
   try {
-    // 1. Check if trying to delete the last admin
-    // Assuming 'rol' column exists based on login logic. 
-    // If not, we should count based on a different logic, but let's stick to 'rol' = 'administrador'.
-    
-    // First, get the user to be deleted to check their role
+    client = await pool.connect();
     const userCheck = await client.query('SELECT rol FROM miembro WHERE id_miembro = $1', [id]);
     
     if (userCheck.rows.length === 0) {
@@ -171,11 +171,8 @@ export async function DELETE(request) {
     return NextResponse.json({ success: true, message: 'Miembro y sus datos asociados eliminados correctamente' });
   } catch (error) {
     console.error('Error en DELETE /api/admin/miembros:', error);
-    return NextResponse.json(
-      { error: 'Error al eliminar miembro: ' + error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Error al eliminar miembro' }, { status: 500 });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }

@@ -83,13 +83,14 @@ export async function PUT(request, context) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
   const { id } = await context.params;
-  const client = await pool.connect();
 
   if (!id) {
     return NextResponse.json({ error: 'ID de evento es requerido' }, { status: 400 });
   }
 
+  let client;
   try {
+    client = await pool.connect();
     const body = await request.json();
     const {
         nombre, descripcion_html, id_tipo_evento, id_alcance,
@@ -109,23 +110,34 @@ export async function PUT(request, context) {
     await client.query('BEGIN');
 
     // 1. Get current event to handle image deletion if needed
-    const currentRes = await client.query('SELECT imagen_flyer_key FROM evento WHERE id_evento = $1', [id]);
+    const currentRes = await client.query(
+      'SELECT imagen_flyer_url, imagen_flyer_key FROM evento WHERE id_evento = $1',
+      [id],
+    );
     if (currentRes.rows.length === 0) {
         await client.query('ROLLBACK');
         return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
     }
+    const oldUrl = currentRes.rows[0].imagen_flyer_url;
     const oldKey = currentRes.rows[0].imagen_flyer_key;
 
-    // Handle Image Logic
-    let finalKey = oldKey;
-    let finalUrl = imagen_flyer_url;
+    // Si la propiedad no viene en el body, conservar el valor actual. Solo se
+    // toca cuando el cliente envía explícitamente la propiedad (incluso como null
+    // para indicar borrado).
+    const hasKeyField = Object.prototype.hasOwnProperty.call(body, 'imagen_flyer_key');
+    const hasUrlField = Object.prototype.hasOwnProperty.call(body, 'imagen_flyer_url');
 
-    // If explicit removal or change
-    if (imagen_flyer_key !== undefined) { // Check if key provided in update (even as null)
-        if (imagen_flyer_key !== oldKey) {
-             if (oldKey) await deleteFromUploadThing(oldKey);
-             finalKey = imagen_flyer_key;
-        }
+    let finalKey = oldKey;
+    let finalUrl = oldUrl;
+
+    if (hasKeyField) {
+      finalKey = imagen_flyer_key ?? null;
+      if (oldKey && oldKey !== finalKey) {
+        await deleteFromUploadThing(oldKey);
+      }
+    }
+    if (hasUrlField) {
+      finalUrl = imagen_flyer_url ?? null;
     }
 
     // 2. Update Evento
@@ -211,11 +223,13 @@ export async function PUT(request, context) {
     return NextResponse.json({ success: true, message: 'Evento actualizado correctamente' });
 
   } catch (error) {
-    await client.query('ROLLBACK');
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+    }
     console.error('Error en PUT /api/admin/eventos/[id]:', error);
-    return NextResponse.json({ error: 'Error al actualizar evento: ' + error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Error al actualizar evento' }, { status: 500 });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }
 
@@ -223,13 +237,14 @@ export async function DELETE(request, context) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
   const { id } = await context.params;
-  const client = await pool.connect();
 
   if (!id || isNaN(Number(id))) {
     return NextResponse.json({ error: 'ID de evento inválido' }, { status: 400 });
   }
 
+  let client;
   try {
+    client = await pool.connect();
     // Get image key to delete from storage
     const imgRes = await client.query('SELECT imagen_flyer_key FROM evento WHERE id_evento = $1', [id]);
     
@@ -239,19 +254,20 @@ export async function DELETE(request, context) {
 
     const { imagen_flyer_key } = imgRes.rows[0];
 
-    // Delete from storage
-    if (imagen_flyer_key) {
-        await deleteFromUploadThing(imagen_flyer_key);
-    }
-    
-    // Delete from DB (Cascade handles dependencies like inscripcion_evento, concurso, evidencia, etc.)
+    // Borrar primero de BD (cascade) y solo si tiene éxito eliminar del CDN.
+    // Si invertimos el orden, un fallo de BD dejaría el archivo eliminado del
+    // CDN pero el evento intacto.
     await client.query('DELETE FROM evento WHERE id_evento = $1', [id]);
 
-    return NextResponse.json({ success: true, message: "Evento eliminado correctamente" });
+    if (imagen_flyer_key) {
+      deleteFromUploadThing(imagen_flyer_key);
+    }
+
+    return NextResponse.json({ success: true, message: 'Evento eliminado correctamente' });
   } catch (error) {
     console.error('Error en DELETE /api/admin/eventos/[id]:', error);
-    return NextResponse.json({ error: 'Error al eliminar evento: ' + error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Error al eliminar evento' }, { status: 500 });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }

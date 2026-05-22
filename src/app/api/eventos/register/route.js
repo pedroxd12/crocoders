@@ -197,8 +197,15 @@ export async function POST(request) {
         inscripcionId = insRes.rows[0].id_inscripcion;
     }
 
-    // Actualizar cupos (Simple update, trigger might handle detailed stats but we decr usable cups)
-    // await client.query('UPDATE evento SET cupos_disponibles = cupos_disponibles - 1 WHERE id_evento = $1', [eventoId]);
+    const cupoRes = await client.query(
+      'UPDATE evento SET cupos_disponibles = cupos_disponibles - 1 WHERE id_evento = $1 AND cupos_disponibles > 0 RETURNING cupos_disponibles',
+      [eventoId],
+    );
+    if (cupoRes.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return NextResponse.json({ success: false, error: 'No hay cupos disponibles para este evento' }, { status: 400 });
+    }
+
     await client.query('COMMIT');
 
     // Generar un token seguro antes de enviar la respuesta

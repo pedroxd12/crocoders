@@ -23,7 +23,6 @@ export async function GET(request, context) {
         c.max_integrantes_equipo,
         c.min_integrantes_equipo,
         c.requiere_asesor,
-        c.requiere_cuenta_especial,
         c.url_concurso,
         (
           SELECT COUNT(*) 
@@ -77,8 +76,8 @@ export async function GET(request, context) {
   } catch (error) {
     console.error('Error en GET /api/eventos/[id]:', error);
     return NextResponse.json(
-      { error: 'Error al obtener evento: ' + error.message },
-      { status: 500 }
+      { error: 'Error al obtener evento' },
+      { status: 500 },
     );
   }
 }

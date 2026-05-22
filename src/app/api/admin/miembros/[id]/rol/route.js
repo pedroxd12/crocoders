@@ -2,50 +2,51 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
-export async function PUT(request) {
+const ROLES_VALIDOS = new Set(['administrador', 'usuario', 'staff']);
+
+export async function PUT(request, { params }) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
+
   try {
-    // Extraer el ID de la URL
-    const id = request.url.split('/').slice(-2, -1)[0];
-    
-    // Obtener el cuerpo de la petición
-    const { tipo } = await request.json();
+    const { id } = await params;
+    const idNum = Number(id);
+    if (!Number.isInteger(idNum) || idNum <= 0) {
+      return NextResponse.json({ error: 'ID de miembro inválido' }, { status: 400 });
+    }
 
-    // Validar el tipo de rol
-    if (!['administrador', 'usuario'].includes(tipo)) {
+    const body = await request.json().catch(() => ({}));
+    const rol = body.rol ?? body.tipo;
+
+    if (!ROLES_VALIDOS.has(rol)) {
       return NextResponse.json(
-        { error: 'Tipo de rol no válido. Use "administrador" o "usuario"' },
-        { status: 400 }
+        { error: 'Rol no válido. Use "administrador", "staff" o "usuario"' },
+        { status: 400 },
       );
     }
 
-    // Verificar que el miembro existe
-    const [miembro] = await sql`
-      SELECT id_miembro FROM miembro WHERE id_miembro = ${id}
-    `;
-
+    const [miembro] = await sql`SELECT id_miembro FROM miembro WHERE id_miembro = ${idNum}`;
     if (!miembro) {
-      return NextResponse.json(
-        { error: 'Miembro no encontrado' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: 'Miembro no encontrado' }, { status: 404 });
     }
 
-    // Actualizar el rol y devolver el miembro actualizado
-    const [updatedMiembro] = await sql`
-      UPDATE miembro 
-      SET tipo = ${tipo}
-      WHERE id_miembro = ${id}
-      RETURNING id_miembro, nombre_completo, correo_electronico, tipo
+    const [updated] = await sql`
+      UPDATE miembro
+         SET rol = ${rol}, updated_at = NOW()
+       WHERE id_miembro = ${idNum}
+      RETURNING id_miembro, nombre, apellido_paterno, apellido_materno, correo_electronico, rol
     `;
 
-    return NextResponse.json(updatedMiembro);
+    const nombre_completo = `${updated.nombre} ${updated.apellido_paterno} ${updated.apellido_materno || ''}`.trim();
+
+    return NextResponse.json({
+      id_miembro: updated.id_miembro,
+      nombre_completo,
+      correo_electronico: updated.correo_electronico,
+      rol: updated.rol,
+    });
   } catch (error) {
     console.error('Error en PUT /api/admin/miembros/[id]/rol:', error);
-    return NextResponse.json(
-      { error: 'Error al actualizar el rol: ' + error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Error al actualizar el rol' }, { status: 500 });
   }
 }

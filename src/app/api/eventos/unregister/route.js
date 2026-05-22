@@ -12,9 +12,10 @@ export async function POST(request) {
 
   try {
     const data = await request.json();
-    const { eventoId, tipo } = data;
+    const { eventoId } = data;
 
-    // Validaciones básicas: solo eventoId proviene del body; userId viene del JWT
+    // Validaciones básicas: solo eventoId proviene del body. La identidad y el "tipo"
+    // (siempre miembro, porque solo los miembros tienen JWT) se derivan del token.
     if (!eventoId || isNaN(Number(eventoId))) {
       return NextResponse.json({ success: false, error: 'Datos de evento no válidos' }, { status: 400 });
     }
@@ -32,23 +33,15 @@ export async function POST(request) {
     try {
         await client.query('BEGIN');
         
-        // 1. Verificar si hay inscripción directa (Individual)
-        let unregisterQuery = '';
-        let queryParams = [];
-        
-        if (tipo === 'miembro') {
-            unregisterQuery = 'DELETE FROM inscripcion_evento WHERE id_evento = $1 AND id_miembro = $2 RETURNING id_inscripcion, id_equipo';
-            queryParams = [eventoId, userId];
-        } else {
-            unregisterQuery = 'DELETE FROM inscripcion_evento WHERE id_evento = $1 AND id_invitado = $2 RETURNING id_inscripcion, id_equipo';
-            queryParams = [eventoId, userId];
-        }
-
-        let res = await client.query(unregisterQuery, queryParams);
+        // 1. Verificar si hay inscripción directa (individual) del miembro autenticado
+        let res = await client.query(
+          'DELETE FROM inscripcion_evento WHERE id_evento = $1 AND id_miembro = $2 RETURNING id_inscripcion, id_equipo',
+          [eventoId, userId],
+        );
         let idEquipoToDelete = null;
 
         // 2. Si no se borró nada, verificar si pertenece a un equipo (Inscripción indirecta)
-        if (res.rowCount === 0 && tipo === 'miembro') {
+        if (res.rowCount === 0) {
              // Buscar el equipo al que pertenece el usuario en este evento
              const teamRes = await client.query(`
                 SELECT ie.id_inscripcion, ie.id_equipo 
@@ -74,16 +67,17 @@ export async function POST(request) {
         }
 
         if (res.rowCount > 0) {
-            // 3. Restaurar Cupo (asegurando no exceder el máximo definido en 'cupos')
-            // Se usa LEAST para mantener la integridad si cupos_disponibles se hubiera desincronizado
-            /* await client.query(`
-                UPDATE evento 
-                SET cupos_disponibles = LEAST(cupos, cupos_disponibles + 1) 
-                WHERE id_evento = $1
-            `, [eventoId]); */
-            
-            // 4. Limpieza opcional de equipo huérfano si fuera necesario (cascade delete lo maneja en DB si está configurado)
-            
+            await client.query(
+              `UPDATE evento
+                  SET cupos_disponibles = LEAST(cupos, cupos_disponibles + 1)
+                WHERE id_evento = $1`,
+              [eventoId],
+            );
+
+            if (idEquipoToDelete) {
+              await client.query('DELETE FROM equipo_concurso WHERE id_equipo = $1', [idEquipoToDelete]);
+            }
+
             await client.query('COMMIT');
             
             // Obtener datos actualizados para el cliente

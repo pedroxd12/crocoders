@@ -43,21 +43,23 @@ export async function POST(request) {
       );
     }
 
-    // Verificar que el token de recuperación aún sea válido
+    // Verificar que el token de recuperación aún exista y no haya expirado
     const [token] = await sql`
-      SELECT * FROM password_reset_token 
-      WHERE id_token = ${decoded.tokenId} AND id_miembro = ${decoded.id}
+      SELECT id_token FROM password_reset_token
+      WHERE id_token = ${decoded.tokenId}
+        AND id_miembro = ${decoded.id}
+        AND expires_at > NOW()
     `;
 
     if (!token) {
       return NextResponse.json(
         { error: 'La solicitud de recuperación ya no es válida' },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
     // Hash de la nueva contraseña
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
 
     // Actualizar contraseña
     await sql`

@@ -5,52 +5,50 @@ import { requireAdmin } from '@/lib/auth';
 export async function PUT(request, { params }) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
+
   try {
-    // Solución para Next.js 13+ - Extraer parámetros de forma segura
-    const { id } = params;
-    await Promise.resolve(); // Asegura que los params estén disponibles
-    
+    const { id } = await params;
     const { id_asistente, es_miembro, asistio } = await request.json();
 
     if (!id || !id_asistente || typeof asistio !== 'boolean') {
       return NextResponse.json(
         { error: 'Parámetros requeridos faltantes o inválidos' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    let result;
-    if (es_miembro) {
-      // Actualizar asistencia de miembro
-      result = await sql`
-        UPDATE asistencia_miembro 
-        SET asistio = ${asistio}
-        WHERE id_evento = ${id} AND id_miembro = ${id_asistente}
-        RETURNING *
-      `;
-    } else {
-      // Actualizar asistencia de invitado
-      result = await sql`
-        UPDATE asistencia_invitado 
-        SET asistio = ${asistio}
-        WHERE id_evento = ${id} AND id_invitado = ${id_asistente}
-        RETURNING *
-      `;
+    const idEvento = Number(id);
+    const idAsistente = Number(id_asistente);
+    if (!Number.isInteger(idEvento) || !Number.isInteger(idAsistente)) {
+      return NextResponse.json({ error: 'IDs inválidos' }, { status: 400 });
     }
+
+    const targetCol = es_miembro ? 'id_miembro' : 'id_invitado';
+    const result = es_miembro
+      ? await sql`
+          UPDATE inscripcion_evento
+             SET asistio = ${asistio},
+                 hora_registro_asistencia = CASE WHEN ${asistio} THEN NOW() ELSE NULL END,
+                 updated_at = NOW()
+           WHERE id_evento = ${idEvento} AND id_miembro = ${idAsistente}
+        RETURNING id_inscripcion
+        `
+      : await sql`
+          UPDATE inscripcion_evento
+             SET asistio = ${asistio},
+                 hora_registro_asistencia = CASE WHEN ${asistio} THEN NOW() ELSE NULL END,
+                 updated_at = NOW()
+           WHERE id_evento = ${idEvento} AND id_invitado = ${idAsistente}
+        RETURNING id_inscripcion
+        `;
 
     if (result.length === 0) {
-      return NextResponse.json(
-        { error: 'Asistencia no encontrada' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: 'Inscripción no encontrada' }, { status: 404 });
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error en PUT /api/admin/eventos/[id]/asistencia:', error);
-    return NextResponse.json(
-      { error: 'Error al actualizar asistencia' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Error al actualizar asistencia' }, { status: 500 });
   }
 }

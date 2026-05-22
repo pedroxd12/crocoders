@@ -23,12 +23,13 @@ export async function sendRecoveryEmail(email, name, userId) {
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 1);
 
+    // Atómico: borrar tokens previos del usuario e insertar el nuevo en una sola
+    // consulta. Evita la ventana en que un fallo entre DELETE e INSERT dejaría
+    // al usuario sin token.
     await sql`
-      DELETE FROM password_reset_token
-      WHERE id_miembro = ${userId}
-    `;
-
-    await sql`
+      WITH purge AS (
+        DELETE FROM password_reset_token WHERE id_miembro = ${userId}
+      )
       INSERT INTO password_reset_token
         (id_miembro, token, codigo_verificacion, expires_at)
       VALUES

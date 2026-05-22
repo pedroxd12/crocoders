@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
-import pool, { sql } from '@/lib/db-server';
+import pool from '@/lib/db-server';
 import bcrypt from 'bcryptjs';
 import { createToken } from '@/lib/auth';
+
+// Hash dummy precomputado (cost 12, valor irrelevante) para igualar el costo de
+// `bcrypt.compare` cuando el correo no existe. Evita timing attacks de
+// enumeración de cuentas.
+const DUMMY_HASH = '$2a$12$CwTycUXWue0Thq9StjUM0uJ8U.HRZ8kIfMz9p3FvGz4PIK1H1RXja';
 
 export async function POST(request) {
   let client;
@@ -48,15 +53,7 @@ export async function POST(request) {
         LIMIT 1
       `, [correo_electronico]);
 
-      if (result.rows.length === 0) {
-        return NextResponse.json(
-          { success: false, error: 'Credenciales inválidas' },
-          { status: 200 }
-        );
-      }
-      
-      userData = result.rows[0];
-
+      userData = result.rows[0] || null;
     } catch (dbError) {
       console.error('💥 Error de base de datos en login:', dbError);
       
@@ -76,12 +73,15 @@ export async function POST(request) {
       if (client) client.release();
     }
 
-    const passwordMatch = await bcrypt.compare(contrasena, userData.contrasena);
+    const passwordMatch = await bcrypt.compare(
+      contrasena,
+      userData?.contrasena || DUMMY_HASH,
+    );
 
-    if (!passwordMatch) {
+    if (!userData || !passwordMatch) {
       return NextResponse.json(
         { success: false, error: 'Credenciales inválidas' },
-        { status: 200 }
+        { status: 200 },
       );
     }
 

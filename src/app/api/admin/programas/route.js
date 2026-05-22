@@ -7,9 +7,10 @@ import { sanitizeHtml } from '@/lib/sanitize';
 export async function GET(request) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
-  const client = await pool.connect();
-  
+
+  let client;
   try {
+    client = await pool.connect();
     const result = await client.query(`
       SELECT 
         pr.*,
@@ -29,12 +30,9 @@ export async function GET(request) {
     return NextResponse.json(result.rows);
   } catch (error) {
     console.error('Error fetching programas:', error);
-    return NextResponse.json(
-      { error: 'Error al obtener programas' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Error al obtener programas' }, { status: 500 });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }
 
@@ -42,9 +40,10 @@ export async function GET(request) {
 export async function POST(request) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
-  const client = await pool.connect();
 
+  let client;
   try {
+    client = await pool.connect();
     const {
       nombre,
       descripcion,
@@ -61,13 +60,11 @@ export async function POST(request) {
       hora_fin
     } = await request.json();
 
-    // Validaciones
     if (!nombre || !fecha_inicio || !fecha_fin || !id_tipo_evento || !id_alcance) {
-      return NextResponse.json(
-        { error: 'Faltan campos requeridos' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Faltan campos requeridos' }, { status: 400 });
     }
+
+    await client.query('BEGIN');
 
     const result = await client.query(
       `INSERT INTO programa_recurrente (
@@ -84,77 +81,72 @@ export async function POST(request) {
         id_tipo_evento,
         id_alcance,
         sesiones_requeridas_certificado || 0,
-        porcentaje_asistencia_minimo || 80.00,
+        porcentaje_asistencia_minimo || 80.0,
         ubicacion,
-        imagen_url
-      ]
+        imagen_url,
+      ],
     );
 
     const programaId = result.rows[0].id_programa;
 
-    // Generar sesiones si se seleccionaron días
     if (dias_semana && dias_semana.length > 0 && hora_inicio && hora_fin) {
-      const start = new Date(fecha_inicio + 'T00:00:00');
-      const end = new Date(fecha_fin + 'T00:00:00');
-      
-      // Iterar por cada día en el rango
-      let sessionCount = 1;
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        if (dias_semana.includes(d.getDay())) {
-          const fechaStr = d.toISOString().split('T')[0];
-          
-          // 1. Crear evento para esta sesión
-          const eventoRes = await client.query(
-            `INSERT INTO evento (
-               nombre, descripcion_html, id_tipo_evento, id_alcance,
-               fecha_inicio, hora_inicio, fecha_fin, hora_fin,
-               ubicacion, estado, cupos, cupos_disponibles, 
-               imagen_flyer_url, tiene_costo
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'publicado', 100, 100, $10, false)
-             RETURNING id_evento`,
-            [
-              `${nombre} - Sesión ${sessionCount}`, // Nombre del evento
-              sanitizeHtml(descripcion || ''),
-              id_tipo_evento,
-              id_alcance,
-              fechaStr,
-              hora_inicio,
-              fechaStr, // Asumimos sesiones de un solo día
-              hora_fin,
-              ubicacion,
-              imagen_url
-            ]
-          );
-          
-          const eventoId = eventoRes.rows[0].id_evento;
+      // Las fechas vienen como YYYY-MM-DD (DATE en Postgres, sin TZ). Las
+      // tratamos como UTC para que getUTCDay() devuelva el día correcto en
+      // cualquier servidor sin importar su zona horaria.
+      const start = new Date(`${fecha_inicio}T00:00:00Z`);
+      const end = new Date(`${fecha_fin}T00:00:00Z`);
 
-          // 2. Crear registro en sesion_programa
-          await client.query(
-            `INSERT INTO sesion_programa (
-              id_programa, id_evento, numero_sesion, titulo, descripcion
-            ) VALUES ($1, $2, $3, $4, $5)`,
-            [
-              programaId,
-              eventoId,
-              sessionCount,
-              `Sesión ${sessionCount}: ${nombre}`,
-              descripcion
-            ]
-          );
-          
-          sessionCount++;
-        }
+      let sessionCount = 1;
+      for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+        if (!dias_semana.includes(d.getUTCDay())) continue;
+
+        const fechaStr = d.toISOString().split('T')[0];
+
+        const eventoRes = await client.query(
+          `INSERT INTO evento (
+             nombre, descripcion_html, id_tipo_evento, id_alcance,
+             fecha_inicio, hora_inicio, fecha_fin, hora_fin,
+             ubicacion, estado, cupos, cupos_disponibles,
+             imagen_flyer_url, tiene_costo
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'publicado', 100, 100, $10, false)
+           RETURNING id_evento`,
+          [
+            `${nombre} - Sesión ${sessionCount}`,
+            sanitizeHtml(descripcion || ''),
+            id_tipo_evento,
+            id_alcance,
+            fechaStr,
+            hora_inicio,
+            fechaStr,
+            hora_fin,
+            ubicacion,
+            imagen_url,
+          ],
+        );
+
+        const eventoId = eventoRes.rows[0].id_evento;
+
+        await client.query(
+          `INSERT INTO sesion_programa (
+            id_programa, id_evento, numero_sesion, titulo, descripcion
+          ) VALUES ($1, $2, $3, $4, $5)`,
+          [programaId, eventoId, sessionCount, `Sesión ${sessionCount}: ${nombre}`, descripcion],
+        );
+
+        sessionCount++;
       }
     }
 
+    await client.query('COMMIT');
+
     return NextResponse.json(result.rows[0], { status: 201 });
   } catch (error) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+    }
     console.error('Error creating programa:', error);
-    return NextResponse.json(
-      { error: 'Error al crear programa' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Error al crear programa' }, { status: 500 });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }

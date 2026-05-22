@@ -6,16 +6,17 @@ export async function GET(request, { params }) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
   const { id } = await params;
-  const client = await pool.connect();
 
+  let client;
   try {
+    client = await pool.connect();
     const query = `
-      SELECT 
-        ie.id_inscripcion, 
-        ie.estado, 
-        ie.asistio, 
+      SELECT
+        ie.id_inscripcion,
+        ie.estado,
+        ie.asistio,
         ie.pago_completado,
-        ie.requiere_pago,
+        e.tiene_costo AS requiere_pago,
         ie.fecha_inscripcion,
         CASE 
             WHEN m.id_miembro IS NOT NULL THEN CONCAT(m.nombre, ' ', m.apellido_paterno, ' ', COALESCE(m.apellido_materno, '')) 
@@ -52,6 +53,6 @@ export async function GET(request, { params }) {
       { status: 500 }
     );
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }

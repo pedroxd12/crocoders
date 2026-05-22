@@ -431,16 +431,39 @@ export async function GET(request) {
   const force = url.searchParams.get('refresh') === '1';
   const now = Date.now();
 
+  // Cache fresca → servir directo.
   if (!force && cachedResponse && now - cachedAt < CACHE_TTL_MS) {
     return NextResponse.json({ resultados: cachedResponse, cached: true }, { status: 200 });
   }
 
+  // Cache stale → servir y refrescar en background.
   if (!force && cachedResponse && now - cachedAt < STALE_TTL_MS) {
     startRefresh().catch((e) => console.error('Background refresh failed:', e.message));
     return NextResponse.json(
       { resultados: cachedResponse, cached: true, stale: true },
       { status: 200 },
     );
+  }
+
+  // Sin cache en memoria. En vez de hacer esperar al usuario 20-30s mientras se
+  // consultan APIs externas, devolvemos los datos almacenados en BD al instante
+  // y disparamos la actualización en background. Solo si la BD también falla
+  // pasamos al flujo de espera completo (que rara vez se ejecutará en práctica
+  // porque el primer hit pobló cachedResponse).
+  if (!force) {
+    try {
+      const rows = await loadMiembros();
+      const resultados = storedResultados(rows);
+      cachedResponse = resultados;
+      cachedAt = now;
+      startRefresh().catch((e) => console.error('Background refresh failed:', e.message));
+      return NextResponse.json(
+        { resultados, cached: true, stale: true },
+        { status: 200 },
+      );
+    } catch (dbErr) {
+      console.error('DB read failed, falling back to live fetch:', dbErr.message);
+    }
   }
 
   try {

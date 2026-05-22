@@ -22,40 +22,41 @@ export async function DELETE(request, { params }) {
   if (!guard.ok) return guard.response;
 
   try {
-    const { id } = params;
+    const { id } = await params;
 
-    if (!id || isNaN(Number(id))) {
+    const idNum = Number(id);
+    if (!Number.isInteger(idNum) || idNum <= 0) {
       return NextResponse.json(
         { error: 'ID de evidencia es requerido y debe ser un número válido' },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     const [evidencia] = await sql`
-      SELECT imagen_url, imagen_key FROM evidencias WHERE id_evidencia = ${id}
+      SELECT url, storage_key FROM evidencia WHERE id_evidencia = ${idNum}
     `;
 
     if (!evidencia) {
       return NextResponse.json(
         { error: 'Evidencia no encontrada' },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
-    if (evidencia.imagen_key) {
-      await deleteFromUploadThing(evidencia.imagen_key);
+    await sql`DELETE FROM evidencia WHERE id_evidencia = ${idNum}`;
+
+    if (evidencia.storage_key) {
+      // Best-effort: el archivo del CDN se borra después de la BD para evitar
+      // que un fallo de UploadThing impida borrar el registro.
+      deleteFromUploadThing(evidencia.storage_key);
     }
 
-    await sql`
-      DELETE FROM evidencias WHERE id_evidencia = ${id}
-    `;
-
-    return NextResponse.json({ success: true, message: "Evidencia eliminada." });
+    return NextResponse.json({ success: true, message: 'Evidencia eliminada.' });
   } catch (error) {
     console.error('Error al eliminar evidencia:', error);
     return NextResponse.json(
-      { error: 'Error al eliminar evidencia: ' + error.message },
-      { status: 500 }
+      { error: 'Error al eliminar evidencia' },
+      { status: 500 },
     );
   }
 }

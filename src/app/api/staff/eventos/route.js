@@ -7,22 +7,22 @@ export async function GET(request) {
   const guard = await requireStaff(request);
   if (!guard.ok) return guard.response;
 
-  const client = await pool.connect();
-
+  let client;
   try {
+    client = await pool.connect();
     const id_miembro = guard.session.id;
 
     const result = await client.query(
-      `SELECT 
+      `SELECT
         e.id_evento,
         e.nombre,
-        e.descripcion,
+        e.descripcion_html AS descripcion,
         e.fecha_inicio,
         e.hora_inicio,
         e.fecha_fin,
         e.hora_fin,
         e.ubicacion,
-        e.imagen_url,
+        e.imagen_flyer_url AS imagen_url,
         te.nombre as tipo_evento,
         ae.nombre as alcance,
         r.nombre as mi_rol,
@@ -49,6 +49,6 @@ export async function GET(request) {
       { status: 500 }
     );
   } finally {
-    client.release();
+    if (client) client.release();
   }
 }

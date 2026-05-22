@@ -65,7 +65,6 @@ export async function PUT(request, { params }) {
       porcentaje_asistencia_minimo,
       ubicacion,
       imagen_url,
-      activo
     } = await request.json();
 
     const result = await client.query(
@@ -80,9 +79,8 @@ export async function PUT(request, { params }) {
         porcentaje_asistencia_minimo = $8,
         ubicacion = $9,
         imagen_url = $10,
-        activo = $11,
         updated_at = NOW()
-      WHERE id_programa = $12
+      WHERE id_programa = $11
       RETURNING *`,
       [
         nombre,
@@ -95,9 +93,8 @@ export async function PUT(request, { params }) {
         porcentaje_asistencia_minimo,
         ubicacion,
         imagen_url,
-        activo,
-        id
-      ]
+        id,
+      ],
     );
 
     if (result.rows.length === 0) {

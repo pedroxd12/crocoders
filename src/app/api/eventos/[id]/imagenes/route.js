@@ -13,15 +13,15 @@ export async function GET(request, context) {
     }
 
     const imagenes = await sql`
-      SELECT 
-        id_evidencia as id_imagen,
+      SELECT
+        id_evidencia AS id_imagen,
         id_evento,
-        nombre as nombre_archivo,
-        imagen_url as ruta,
-        fecha as fecha_subida
-      FROM evidencias
-      WHERE id_evento = ${id}
-      ORDER BY fecha DESC
+        titulo AS nombre_archivo,
+        url AS ruta,
+        fecha_captura AS fecha_subida
+      FROM evidencia
+      WHERE id_evento = ${id} AND publica = true
+      ORDER BY orden ASC, fecha_captura DESC
     `;
 
     const imagenesFormateadas = imagenes.map((img) => ({
@@ -35,8 +35,8 @@ export async function GET(request, context) {
   } catch (error) {
     console.error('Error en GET /api/eventos/[id]/imagenes:', error);
     return NextResponse.json(
-      { error: 'Error al obtener imágenes del evento: ' + error.message },
-      { status: 500 }
+      { error: 'Error al obtener imágenes del evento' },
+      { status: 500 },
     );
   }
 }

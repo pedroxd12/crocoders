@@ -111,13 +111,11 @@ const PuntajesPage = () => {
     else setLoading(true);
     setError(null);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
+
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-
       const res = await fetch("/api/puntajes", { signal: controller.signal });
-      clearTimeout(timeoutId);
-
       const data = await res.json().catch(() => ({ resultados: [] }));
       const resultados = Array.isArray(data?.resultados) ? data.resultados : [];
 
@@ -131,13 +129,16 @@ const PuntajesPage = () => {
         setError("No pudimos obtener los puntajes en este momento.");
       }
     } catch (err) {
-      console.error("Error al obtener puntajes:", err);
-      setError(
-        err.name === "AbortError"
-          ? "La solicitud tardó demasiado. Intenta nuevamente."
-          : "No pudimos conectar con el servidor.",
-      );
+      if (err.name === "AbortError") {
+        // Timeout: el servidor tarda demasiado. No es un error reportable —
+        // probablemente está calentando cache, el siguiente intento será rápido.
+        setError("La solicitud tardó demasiado. Intenta nuevamente.");
+      } else {
+        console.error("Error al obtener puntajes:", err);
+        setError("No pudimos conectar con el servidor.");
+      }
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
       setRefreshing(false);
     }
