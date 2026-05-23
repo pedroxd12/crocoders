@@ -3,128 +3,124 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import styles from "./Header.module.css";
-import gsap from "gsap";
 import { useAuth } from "@/context/AuthContext";
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const tl = useRef(null);
+  const gsapCtxRef = useRef(null);
   const pathRef = useRef(null);
   const hamburgerRef = useRef(null);
   const toggleBtnRef = useRef(null);
   const menuRef = useRef(null);
   const btnOutline1Ref = useRef(null);
   const btnOutline2Ref = useRef(null);
-  
+
   const { user, logout } = useAuth();
 
   useEffect(() => {
     setIsMounted(true);
-  }, []); 
+  }, []);
 
-  useEffect(() => {
-    // Context for cleanup
-    let ctx = gsap.context(() => {
-        // Setup timeline
-        tl.current = gsap.timeline({ paused: true });
-        
-        // Initial sets
-        gsap.set(menuRef.current, { autoAlpha: 0 }); // autoAlpha handles visibility + opacity
-        
-        // Animation paths
-        const start = "M0 502S175 272 500 272s500 230 500 230V0H0Z";
-        const end = "M0,1005S175,995,500,995s500,5,500,5V0H0Z";
-        const power4 = "power4.inOut";
-        const power2 = "power2.inOut";
+  // Inicializa GSAP de forma diferida — sólo cargamos la librería cuando el
+  // usuario realmente intenta abrir el menú. Esto evita ~70KB de JS bloqueante
+  // y CPU al cargar la home.
+  const ensureTimeline = async () => {
+    if (tl.current) return tl.current;
 
-        // 1. Hamburger move
-        tl.current.to(hamburgerRef.current, {
+    const gsapModule = await import('gsap');
+    const gsap = gsapModule.default || gsapModule.gsap || gsapModule;
+
+    gsapCtxRef.current = gsap.context(() => {
+      tl.current = gsap.timeline({ paused: true });
+
+      gsap.set(menuRef.current, { autoAlpha: 0 });
+
+      const start = "M0 502S175 272 500 272s500 230 500 230V0H0Z";
+      const end = "M0,1005S175,995,500,995s500,5,500,5V0H0Z";
+      const power4 = "power4.inOut";
+
+      tl.current.to(hamburgerRef.current, {
         duration: 1.25,
         marginTop: "-5px",
         x: -40,
         y: 40,
         ease: power4,
-        });
-        
-        // 2. Button Outline morph/move
-        const outlines = [btnOutline1Ref.current, btnOutline2Ref.current];
-        
-        tl.current.to(
+      });
+
+      const outlines = [btnOutline1Ref.current, btnOutline2Ref.current];
+
+      tl.current.to(
         outlines,
         {
-            duration: 1.25,
-            x: -40,
-            y: 40,
-            width: "140px",
-            height: "140px",
-            border: "1px solid #e2e2dc",
-            ease: power4,
+          duration: 1.25,
+          x: -40,
+          y: 40,
+          width: "140px",
+          height: "140px",
+          border: "1px solid #e2e2dc",
+          ease: power4,
         },
         "<"
-        );
+      );
 
-        // 3. Overlay Path Animation
-        tl.current
+      tl.current
         .to(pathRef.current, { duration: 0.8, attr: { d: start }, ease: "power2.in" }, "<")
         .to(pathRef.current, { duration: 0.8, attr: { d: end }, ease: "power2.out" }, "-=0.5");
 
-        // 4. Reveal Menu (autoAlpha handles visibility: visible + opacity: 1)
-        tl.current.to(menuRef.current, { duration: 1, autoAlpha: 1 }, "-=0.5");
+      tl.current.to(menuRef.current, { duration: 1, autoAlpha: 1 }, "-=0.5");
 
-        // 5. Stagger Links (using y instead of top)
-        const menuLinks = menuRef.current.querySelectorAll(`.${styles.menuItem} > a`);
+      const menuLinks = menuRef.current.querySelectorAll(`.${styles.menuItem} > a`);
 
-        tl.current.to(
+      tl.current.to(
         menuLinks,
         {
-            duration: 1,
-            y: 0, // Transform Y
-            ease: "power3.out",
-            stagger: {
-            amount: 0.5,
-            },
+          duration: 1,
+          y: 0,
+          ease: "power3.out",
+          stagger: { amount: 0.5 },
         },
         "-=1"
-        );
-        
-        // Instead of tl.reverse(), we just start paused at 0.
-        // If we want to ensure it's at start:
-        // tl.current.progress(0);
+      );
     });
 
-    return () => ctx.revert();
+    return tl.current;
+  };
+
+  useEffect(() => {
+    return () => {
+      if (gsapCtxRef.current) gsapCtxRef.current.revert();
+    };
   }, []);
 
-  const toggleMenu = () => {
-    // Check if timeline exists but remove the isActive check for click responsiveness
-    // if (!tl.current || tl.current.isActive()) return; 
-    if (!tl.current) return;
-    
+  const toggleMenu = async () => {
+    const timeline = await ensureTimeline();
+    if (!timeline) return;
+
     const nextState = !isOpen;
     setIsOpen(nextState);
-    
+
     if (nextState) {
-      tl.current.play();
+      timeline.play();
     } else {
-      tl.current.reverse();
+      timeline.reverse();
     }
   };
 
   const handleLinkClick = () => {
-      // Direct state set instead of toggle logic which might depend on async timeline
-      if (isOpen) {
-        setIsOpen(false);
-        if (tl.current) {
-            tl.current.reverse();
-        }
+    if (isOpen) {
+      setIsOpen(false);
+      if (tl.current) {
+        tl.current.reverse();
       }
+    }
   };
 
   const handleLogout = async (e) => {
-      e.preventDefault();
-      handleLinkClick();
-      if (logout) await logout();
+    e.preventDefault();
+    handleLinkClick();
+    if (logout) await logout();
   };
 
   return (
@@ -140,7 +136,7 @@ export default function Header() {
 
         {/* Overlay SVG */}
         <div className={styles.overlay}>
-             <svg viewBox="0 0 1000 1000" preserveAspectRatio="none"> 
+             <svg viewBox="0 0 1000 1000" preserveAspectRatio="none">
                 <path ref={pathRef} d="M0 2S175 1 500 1s500 1 500 1V0H0Z"></path>
             </svg>
         </div>
@@ -183,11 +179,11 @@ export default function Header() {
                                 </Link>
                             )}
                         </div>
-                        
+
                         <div className={styles.menuItem}>
                              <Link href="/puntajes" onClick={handleLinkClick}>Puntajes</Link>
                         </div>
-                        
+
                          <div className={styles.menuItem}>
                              <Link href="/evidencias" onClick={handleLinkClick}>Evidencias</Link>
                         </div>
@@ -203,7 +199,7 @@ export default function Header() {
                              </div>
                          )}
                     </div>
-                    
+
                     <div className={styles.wrapper} style={{ flex: 0, marginTop: 'auto' }}>
                          <div className={styles.menuItem}>
                              <span className="text-gray-500 text-sm">© 2026 Crocoders</span>

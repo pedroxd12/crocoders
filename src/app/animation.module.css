@@ -8,6 +8,8 @@
     background: #1a1a1a;
     position: relative;
     scrollbar-width: none; /* Oculta scrollbar en Firefox */
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .pageWrapper::-webkit-scrollbar {
@@ -32,6 +34,10 @@
     mask-size: 100% 100%;
     mask-repeat: no-repeat;
     pointer-events: none;
+    /* Promovemos a su propia capa de composición para que el scroll no
+       fuerce repintado del patrón completo en cada frame. */
+    will-change: transform;
+    transform: translateZ(0);
 }
 
 .container {

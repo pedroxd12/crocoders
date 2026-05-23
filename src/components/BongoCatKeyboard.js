@@ -34,45 +34,43 @@ const SKILLS = {
 export default function BongoCatKeyboard() {
   const [shouldLoad, setShouldLoad] = useState(false);
   const containerRef = useRef(null);
-  const cleanupRef = useRef({ resizeHandler: null, bongoInterval: null });
+  const splineRef = useRef(null);
+  const isVisibleRef = useRef(true);
+  const cleanupRef = useRef({ resizeHandler: null, bongoInterval: null, visibilityObserver: null });
 
   const onLoad = (spline) => {
+    splineRef.current = spline;
+
     const updateLayout = () => {
         const keyboard = spline.findObjectByName("keyboard");
         const isMobile = window.matchMedia("(max-width: 768px)").matches;
 
         if (keyboard) {
             if (isMobile) {
-                // Configuración MÓVIL - Aún más pequeña y ajustada
-                 keyboard.scale.x = 0.07; 
+                 keyboard.scale.x = 0.07;
                  keyboard.scale.y = 0.07;
                  keyboard.scale.z = 0.07;
-                 
-                 // Centrado y levantado ligeramente
                  keyboard.position.x = 0;
-                 keyboard.position.y = 15; 
+                 keyboard.position.y = 15;
                  keyboard.position.z = 0;
             } else {
-                 // Configuración DESKTOP
                  keyboard.scale.x = 0.18;
                  keyboard.scale.y = 0.18;
                  keyboard.scale.z = 0.18;
-                 
                  keyboard.position.x = 0;
-                 keyboard.position.y = 20; 
+                 keyboard.position.y = 20;
                  keyboard.position.z = 0;
             }
-            
+
             keyboard.rotation.x = Math.PI;
             keyboard.rotation.y = Math.PI / 3;
             keyboard.rotation.z = Math.PI;
         }
 
-        // Asegurar visibilidad de objetos
         const allObjects = spline.getAllObjects();
         const desktopKeyCaps = allObjects.filter((obj) => obj.name === "keycap-desktop");
         const mobileKeyCaps = allObjects.filter((obj) => obj.name === "keycap-mobile");
-        
+
         if (isMobile) {
             desktopKeyCaps.forEach(k => k.visible = false);
             mobileKeyCaps.forEach(k => k.visible = true);
@@ -81,15 +79,21 @@ export default function BongoCatKeyboard() {
             mobileKeyCaps.forEach(k => k.visible = false);
         }
 
-        // Asegurar que las teclas base sean visibles siempre
         const keycaps = allObjects.filter((obj) => obj.name === "keycap");
         keycaps.forEach(k => k.visible = true);
     };
 
     updateLayout();
 
-    window.addEventListener('resize', updateLayout);
-    cleanupRef.current.resizeHandler = updateLayout;
+    // Debounced resize handler para no spammear updateLayout durante el resize
+    let resizeTimeout = null;
+    const debouncedResize = () => {
+      if (resizeTimeout) clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(updateLayout, 150);
+    };
+
+    window.addEventListener('resize', debouncedResize, { passive: true });
+    cleanupRef.current.resizeHandler = debouncedResize;
 
     spline.addEventListener("mouseHover", (e) => handleMouseHover(e, spline));
     spline.addEventListener("mouseDown", (e) => handleKeyPress(e, spline));
@@ -107,7 +111,6 @@ export default function BongoCatKeyboard() {
     if (!spline) return;
 
     if (e.target.name === "body" || e.target.name === "platform") {
-       // Resetear si se sale del teclado
        if (spline.getVariable("heading") && spline.getVariable("desc")) {
             spline.setVariable("heading", "");
             spline.setVariable("desc", "");
@@ -115,7 +118,6 @@ export default function BongoCatKeyboard() {
     } else {
        const skill = SKILLS[e.target.name];
        if (skill) {
-           // Actualizar variables de texto en Spline si existen
            if (spline.getVariable("heading") !== undefined) {
                spline.setVariable("heading", skill.label);
                spline.setVariable("desc", skill.shortDescription);
@@ -163,7 +165,11 @@ export default function BongoCatKeyboard() {
     framesParent.visible = true;
 
     let i = 0;
+    // Reducimos la frecuencia de 100ms (10fps) a 200ms (5fps) — la animación
+    // de gato bongo es lo suficientemente sutil a 5fps y consume mucho menos CPU.
+    // Además, pausamos la animación cuando el componente no está visible.
     const interval = setInterval(() => {
+        if (!isVisibleRef.current) return;
         if (i % 2) {
           frame1.visible = false;
           frame2.visible = true;
@@ -172,7 +178,7 @@ export default function BongoCatKeyboard() {
           frame2.visible = false;
         }
         i++;
-    }, 100);
+    }, 200);
 
     cleanupRef.current.bongoInterval = interval;
   };
@@ -186,10 +192,15 @@ export default function BongoCatKeyboard() {
       if (cleanup.resizeHandler) {
         window.removeEventListener('resize', cleanup.resizeHandler);
       }
+      if (cleanup.visibilityObserver) {
+        cleanup.visibilityObserver.disconnect();
+      }
     };
   }, []);
 
-  // Solo cargar la escena 3D cuando entre al viewport para no bloquear el render inicial.
+  // Cargar la escena 3D cuando esté cerca del viewport. Usamos rootMargin
+  // generoso para que la escena empiece a descargar antes de que el usuario
+  // llegue a verla — así no aparece el placeholder "Cargando experiencia 3D".
   useEffect(() => {
     if (shouldLoad) return;
     const el = containerRef.current;
@@ -207,9 +218,30 @@ export default function BongoCatKeyboard() {
           observer.disconnect();
         }
       },
-      { rootMargin: '200px' }
+      { rootMargin: '800px' }
     );
     observer.observe(el);
+    return () => observer.disconnect();
+  }, [shouldLoad]);
+
+  // Pausar render/animaciones cuando el canvas no está en pantalla. Spline
+  // sigue corriendo su loop interno aunque no se vea, así que ocultarlo
+  // libera GPU/CPU en el resto de la página.
+  useEffect(() => {
+    if (!shouldLoad) return;
+    const el = containerRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry) return;
+        isVisibleRef.current = entry.isIntersecting;
+      },
+      { rootMargin: '100px', threshold: 0 }
+    );
+    observer.observe(el);
+    cleanupRef.current.visibilityObserver = observer;
     return () => observer.disconnect();
   }, [shouldLoad]);
 
@@ -219,12 +251,12 @@ export default function BongoCatKeyboard() {
     <div
       ref={containerRef}
       className="w-full h-full relative"
-      style={{ pointerEvents: 'auto', minHeight: '300px' }}
+      style={{ pointerEvents: 'auto', minHeight: '300px', contain: 'layout paint' }}
     >
       {shouldLoad ? (
         <Suspense
           fallback={
-            <div className="w-full h-full flex items-center justify-center bg-gray-900/30 rounded-lg animate-pulse">
+            <div className="w-full h-full flex items-center justify-center bg-gray-900/30 rounded-lg">
               <span className="text-gray-500 text-sm">Cargando experiencia 3D...</span>
             </div>
           }

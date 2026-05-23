@@ -29,11 +29,12 @@ body {
   mask-image: radial-gradient(circle at center, #000 0%, transparent 85%);
   mask-size: 100% 100%;
   pointer-events: none;
+  will-change: transform;
+  transform: translateZ(0);
 }
 
 html, body {
   overflow-x: hidden;
-  scroll-behavior: smooth;
 }
 
 /* Removed unused main-container and scroll-snap rules to prevent Lenis conflicts */
