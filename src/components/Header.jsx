@@ -18,19 +18,22 @@ export default function Header() {
   const btnOutline2Ref = useRef(null);
 
   const { user, logout } = useAuth();
+  const gsapRef = useRef(null);
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
-  // Inicializa GSAP de forma diferida — sólo cargamos la librería cuando el
-  // usuario realmente intenta abrir el menú. Esto evita ~70KB de JS bloqueante
-  // y CPU al cargar la home.
-  const ensureTimeline = async () => {
-    if (tl.current) return tl.current;
-
-    const gsapModule = await import('gsap');
-    const gsap = gsapModule.default || gsapModule.gsap || gsapModule;
+  // Construye (o reconstruye) el timeline a partir del DOM actual. Lo separamos
+  // de la carga de la librería para poder rehacerlo cuando cambian los enlaces
+  // del menú (p. ej. al iniciar/cerrar sesión).
+  const buildTimeline = (gsap) => {
+    // Limpia un timeline previo antes de reconstruir.
+    if (gsapCtxRef.current) {
+      gsapCtxRef.current.revert();
+      gsapCtxRef.current = null;
+      tl.current = null;
+    }
 
     gsapCtxRef.current = gsap.context(() => {
       tl.current = gsap.timeline({ paused: true });
@@ -88,18 +91,55 @@ export default function Header() {
     return tl.current;
   };
 
+  // Cargamos GSAP de forma diferida en un efecto tras el montaje — no en el
+  // handler de clic. Bajo Turbopack dev, `await import()` dentro del handler de
+  // un evento puede quedar colgado sin resolver, dejando el menú sin responder.
+  // Cargarlo aquí evita ese problema y sigue sin bloquear el render inicial.
+  useEffect(() => {
+    let cancelled = false;
+    import("gsap")
+      .then((mod) => {
+        if (cancelled) return;
+        gsapRef.current = mod.default || mod.gsap || mod;
+      })
+      .catch((err) => {
+        console.error("No se pudo cargar GSAP para el menú:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const ensureTimeline = () => {
+    if (tl.current) return tl.current;
+    if (!gsapRef.current) return null;
+    return buildTimeline(gsapRef.current);
+  };
+
+  // Si el contenido del menú cambia (login/logout añade o quita enlaces) y el
+  // timeline ya existía, lo reconstruimos para que los nuevos enlaces se animen
+  // en vez de quedarse ocultos en translateY(100px). Preservamos el estado
+  // abierto saltando al final del timeline reconstruido.
+  useEffect(() => {
+    if (gsapRef.current && tl.current) {
+      buildTimeline(gsapRef.current);
+      if (isOpen && tl.current) tl.current.progress(1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMounted, user]);
+
   useEffect(() => {
     return () => {
       if (gsapCtxRef.current) gsapCtxRef.current.revert();
     };
   }, []);
 
-  const toggleMenu = async () => {
-    const timeline = await ensureTimeline();
-    if (!timeline) return;
-
+  const toggleMenu = () => {
     const nextState = !isOpen;
     setIsOpen(nextState);
+
+    const timeline = ensureTimeline();
+    if (!timeline) return; // GSAP aún no terminó de cargar; al cargar se podrá reabrir
 
     if (nextState) {
       timeline.play();

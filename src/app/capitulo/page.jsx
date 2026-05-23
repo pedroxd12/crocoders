@@ -50,11 +50,16 @@ export default function AnimationPage() {
           ease: 'linear',
         };
 
+        // Antes animábamos `fontWeight` de cada carácter con scrub: eso fuerza
+        // re-layout del texto en CADA frame de scroll (las métricas de la fuente
+        // cambian), provocando tareas largas de 300ms+ y scroll trabado.
+        // Animamos `opacity` en su lugar — es compositado por el GPU, no toca el
+        // layout, y da un efecto de "revelado" equivalente y fluido.
         gsap.fromTo(
           chars,
-          { fontWeight: 100 },
+          { opacity: 0.25 },
           {
-            fontWeight: 900,
+            opacity: 1,
             duration: 1,
             ease: 'none',
             stagger: staggerOptions,

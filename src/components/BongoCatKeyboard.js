@@ -31,6 +31,8 @@ const SKILLS = {
   vercel: { label: "Vercel", shortDescription: "Vercel" },
 };
 
+const sceneUrl = "/teclado/skills-keyboard.splinecode";
+
 export default function BongoCatKeyboard() {
   const [shouldLoad, setShouldLoad] = useState(false);
   const containerRef = useRef(null);
@@ -198,9 +200,14 @@ export default function BongoCatKeyboard() {
     };
   }, []);
 
-  // Cargar la escena 3D cuando esté cerca del viewport. Usamos rootMargin
-  // generoso para que la escena empiece a descargar antes de que el usuario
-  // llegue a verla — así no aparece el placeholder "Cargando experiencia 3D".
+  // Separamos dos acciones con costes muy distintos:
+  //   1. PREFETCH del .splinecode (barato, sólo descarga bytes) — con margen
+  //      amplio para que esté en caché cuando llegue el momento de montar.
+  //   2. MONTAR el visor Spline (caro: parsea ~500KB de runtime y construye la
+  //      escena 3D de forma síncrona, bloqueando el hilo ~1s). Esto sólo debe
+  //      ocurrir cuando el teclado está a punto de entrar en pantalla.
+  // Antes ambas cosas pasaban con rootMargin 800px, así que el visor se montaba
+  // mientras el usuario aún recorría los marquees y congelaba el scroll.
   useEffect(() => {
     if (shouldLoad) return;
     const el = containerRef.current;
@@ -211,17 +218,43 @@ export default function BongoCatKeyboard() {
       return;
     }
 
-    const observer = new IntersectionObserver(
+    // 1. Prefetch temprano (margen amplio).
+    const prefetchObserver = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setShouldLoad(true);
-          observer.disconnect();
+        if (entries.some((e) => e.isIntersecting)) {
+          if (!document.querySelector('link[data-spline-preload]')) {
+            const link = document.createElement('link');
+            link.rel = 'prefetch';
+            link.as = 'fetch';
+            link.href = sceneUrl;
+            link.crossOrigin = 'anonymous';
+            link.setAttribute('data-spline-preload', '');
+            document.head.appendChild(link);
+          }
+          prefetchObserver.disconnect();
         }
       },
-      { rootMargin: '800px' }
+      { rootMargin: '600px' }
     );
-    observer.observe(el);
-    return () => observer.disconnect();
+    prefetchObserver.observe(el);
+
+    // 2. Montaje tardío (margen pequeño): el congelamiento de init ocurre cuando
+    // el usuario ya está mirando la sección, no en medio del scroll anterior.
+    const mountObserver = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setShouldLoad(true);
+          mountObserver.disconnect();
+        }
+      },
+      { rootMargin: '150px' }
+    );
+    mountObserver.observe(el);
+
+    return () => {
+      prefetchObserver.disconnect();
+      mountObserver.disconnect();
+    };
   }, [shouldLoad]);
 
   // Pausar render/animaciones cuando el canvas no está en pantalla. Spline
@@ -244,8 +277,6 @@ export default function BongoCatKeyboard() {
     cleanupRef.current.visibilityObserver = observer;
     return () => observer.disconnect();
   }, [shouldLoad]);
-
-  const sceneUrl = "/teclado/skills-keyboard.splinecode";
 
   return (
     <div

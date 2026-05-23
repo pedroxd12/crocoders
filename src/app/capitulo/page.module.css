@@ -161,6 +161,9 @@
   transform: translateY(-50%);
   display: flex;
   gap: 1em;
+  /* Promueve el marquee a su propia capa de composición para que el desplazamiento
+     horizontal en scroll no fuerce repintados del resto de la página. */
+  will-change: transform;
 }
 
 .offsetOdd {
@@ -186,6 +189,7 @@
   line-height: 1;
   white-space: nowrap;
   margin: 0;
+  font-weight: 700;
 }
 
 @media (max-width: 900px) {

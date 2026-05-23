@@ -65,16 +65,6 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="es">
-      <head>
-        {/* Pre-descarga de la escena 3D para que esté lista cuando el usuario
-            llegue a la sección del teclado. */}
-        <link
-          rel="preload"
-          href="/teclado/skills-keyboard.splinecode"
-          as="fetch"
-          crossOrigin="anonymous"
-        />
-      </head>
       <body className={`${poppins.className} bg-gray-900 min-h-screen flex flex-col font-sans`}>
         <AppShell>{children}</AppShell>
       </body>

@@ -49,6 +49,7 @@ export default function Home() {
                 width={300}
                 height={300}
                 priority
+                sizes="(max-width: 768px) 160px, 300px"
                 className="w-40 h-40 md:w-100 md:h-100 object-contain flex-shrink-0"
               />
             </div>

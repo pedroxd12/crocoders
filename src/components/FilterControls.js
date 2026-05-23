@@ -63,10 +63,6 @@ export default function FilterControls({ filters, onFilterChange }) {
       className="relative w-full bg-gradient-to-br from-gray-900/80 via-gray-900/90 to-black/90 
                  rounded-2xl shadow-2xl overflow-hidden backdrop-blur-sm border border-gray-800/50"
     >
-      {/* Glow effect */}
-      <div className="absolute -inset-0.5 bg-gradient-to-r from-green-500/20 to-emerald-500/20 
-                    rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-      
       {/* Content wrapper */}
       <div className="relative">
         {/* Header */}
@@ -169,11 +165,7 @@ export default function FilterControls({ filters, onFilterChange }) {
               <div className="p-5">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {/* Tipo de Evento */}
-                  <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.1 }}
-                  >
+                  <div>
                     <label className="block text-sm font-semibold text-gray-300 mb-2">
                       Tipo de Evento
                     </label>
@@ -192,14 +184,10 @@ export default function FilterControls({ filters, onFilterChange }) {
                         </option>
                       ))}
                     </select>
-                  </motion.div>
-                  
+                  </div>
+
                   {/* Estado */}
-                  <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.15 }}
-                  >
+                  <div>
                     <label className="block text-sm font-semibold text-gray-300 mb-2">
                       Estado
                     </label>
@@ -218,15 +206,10 @@ export default function FilterControls({ filters, onFilterChange }) {
                         </option>
                       ))}
                     </select>
-                  </motion.div>
-                  
+                  </div>
+
                   {/* Comunidades */}
-                  <motion.div
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: 0.2 }}
-                    className="sm:col-span-2 lg:col-span-1"
-                  >
+                  <div className="sm:col-span-2 lg:col-span-1">
                     <label className="block text-sm font-semibold text-gray-300 mb-2">
                       Comunidades
                     </label>
@@ -245,7 +228,7 @@ export default function FilterControls({ filters, onFilterChange }) {
                         </option>
                       ))}
                     </select>
-                  </motion.div>
+                  </div>
                 </div>
               </div>
             </motion.div>

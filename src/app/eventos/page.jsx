@@ -1,8 +1,10 @@
 // src/app/eventos/page.jsx
 'use client';
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useMemo, useState, Suspense } from 'react';
+import useSWR from 'swr';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { fetcher, postFetcher } from '@/lib/fetcher';
 import { toast } from 'react-toastify';
 import EventCard from '@/components/EventCard';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -30,11 +32,10 @@ async function sendEventRegistrationEmail(email, name, eventDetails) {
 }
 
 function EventosContent() {
-  const [eventos, setEventos] = useState([]);
   const [filteredEvents, setFilteredEvents] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [registrationStatus, setRegistrationStatus] = useState({});
+  // Overrides locales de estado de registro tras inscribirse, para reflejar el
+  // cambio al instante sin esperar a que SWR revalide.
+  const [registrationOverrides, setRegistrationOverrides] = useState({});
   const [filters, setFilters] = useState({
     tipo: 'todos',
     estado: 'proximos', 
@@ -66,111 +67,84 @@ function EventosContent() {
   const semestres = Array.from({ length: 14 }, (_, i) => ({ value: (i + 1).toString(), label: `${i + 1}° Semestre` }));
 
 
+  // SWR: la lista de eventos se cachea y revalida sola; al volver a la página
+  // se muestra al instante desde caché en lugar de refetch bloqueante.
+  const {
+    data: eventosRaw,
+    error: eventosError,
+    isLoading: eventosLoading,
+    mutate: mutateEventos,
+  } = useSWR('/api/eventos', fetcher, { revalidateOnFocus: false });
+
+  // Procesa fechas/estados una sola vez por cambio de datos (antes en cada fetch).
+  const eventos = useMemo(() => {
+    if (!Array.isArray(eventosRaw)) return [];
+    const now = new Date();
+    return eventosRaw.map((evento) => {
+      let registroCerrado = false;
+      if (evento.fecha_limite_registro) {
+        registroCerrado = now > new Date(evento.fecha_limite_registro);
+      }
+      const fechaFin = evento.fecha_fin || evento.fecha;
+      const horaFin = evento.hora_fin || '23:59';
+      const fechaFinCompleta = `${fechaFin}T${horaFin}`;
+      return {
+        ...evento,
+        fecha: new Date(evento.fecha + 'T00:00:00').toISOString().split('T')[0],
+        isPastEvent: new Date(fechaFinCompleta) < now,
+        registroCerrado,
+      };
+    });
+  }, [eventosRaw]);
+
+  // Estado de registro del usuario. Corre en paralelo (no en cascada bloqueante):
+  // la lista de eventos se muestra de inmediato y este lookup llega después.
+  const eventIds = useMemo(() => eventos.map((e) => e.id_evento), [eventos]);
+  const canCheckRegistration =
+    isAuthenticated && user?.id_miembro && eventIds.length > 0;
+
+  const { data: batchData, mutate: mutateBatch } = useSWR(
+    canCheckRegistration
+      ? ['/api/eventos/check-register-batch', { eventIds, userId: user.id_miembro }]
+      : null,
+    postFetcher,
+    { revalidateOnFocus: false }
+  );
+
+  const registrationStatus = useMemo(
+    () => ({ ...(batchData?.registered || {}), ...registrationOverrides }),
+    [batchData, registrationOverrides]
+  );
+
+  const loading = eventosLoading;
+  const error = eventosError ? 'Error al cargar eventos' : null;
+  const fetchEventos = () => mutateEventos();
+
   useEffect(() => {
-    if (authLoading) return;
-    
-    fetchEventos();
-    
     const registered = searchParams.get('registered');
     const eventId = searchParams.get('eventId');
-    
     if (registered === 'true' && eventId) {
-      setRegistrationStatus(prev => ({ ...prev, [eventId]: true }));
+      setRegistrationOverrides((prev) => ({ ...prev, [eventId]: true }));
       toast.success('¡Registro exitoso!');
-      router.replace('/eventos', { scroll: false }); 
+      router.replace('/eventos', { scroll: false });
     }
-  }, [isAuthenticated, user?.id_miembro, authLoading, searchParams, router]);
-
-  const fetchEventos = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/eventos');
-      if (!res.ok) throw new Error('Error al cargar eventos');
-      const data = await res.json();
-      if (!Array.isArray(data)) throw new Error('Formato de datos inesperado');
-      
-      const now = new Date();
-      const formattedEvents = data.map(evento => {
-        let registroCerrado = false;
-        if (evento.fecha_limite_registro) {
-          const fechaLimiteRegistro = new Date(evento.fecha_limite_registro);
-          registroCerrado = now > fechaLimiteRegistro;
-        }
-        
-        // Usar fecha_fin si existe, si no usar fecha_inicio para determinar si finalizó
-        const fechaFin = evento.fecha_fin || evento.fecha;
-        const horaFin = evento.hora_fin || '23:59';
-        // Agregar 'T' para asegurar interpretación en timezone local
-        const fechaFinCompleta = `${fechaFin}T${horaFin}`;
-        
-        return {
-          ...evento,
-          fecha: new Date(evento.fecha + 'T00:00:00').toISOString().split('T')[0],
-          isPastEvent: new Date(fechaFinCompleta) < now,
-          registroCerrado: registroCerrado
-        };
-      });
-      
-      setEventos(formattedEvents);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-  
- useEffect(() => {
-    if (eventos.length > 0 && isAuthenticated && user?.id_miembro) {
-      checkAllRegistrationStatuses(eventos, user);
-    } else if (!isAuthenticated) {
-      setRegistrationStatus({});
-    }
-  }, [eventos, isAuthenticated, user?.id_miembro]);
-
-
-  const checkAllRegistrationStatuses = async (eventosData, currentUser) => {
-    if (!currentUser?.id_miembro || eventosData.length === 0) {
-      setRegistrationStatus({});
-      return;
-    }
-    try {
-      const res = await fetch('/api/eventos/check-register-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventIds: eventosData.map(e => e.id_evento),
-          userId: currentUser.id_miembro,
-        }),
-      });
-      if (!res.ok) throw new Error('Error en lookup batch');
-      const data = await res.json();
-      setRegistrationStatus(data.registered || {});
-    } catch (error) {
-      console.error("Error checking registration statuses:", error);
-      setRegistrationStatus({});
-    }
-  };
+  }, [searchParams, router]);
 
   useEffect(() => {
-    applyFilters();
-  }, [filters, eventos]);
-
-  const applyFilters = () => {
     let tempFiltered = [...eventos];
     if (filters.tipo !== 'todos') {
-      tempFiltered = tempFiltered.filter(e => e.tipo === filters.tipo);
+      tempFiltered = tempFiltered.filter((e) => e.tipo === filters.tipo);
     }
     if (filters.estado === 'proximos') {
-      tempFiltered = tempFiltered.filter(e => !e.isPastEvent);
+      tempFiltered = tempFiltered.filter((e) => !e.isPastEvent);
     } else if (filters.estado === 'pasados') {
-      tempFiltered = tempFiltered.filter(e => e.isPastEvent);
+      tempFiltered = tempFiltered.filter((e) => e.isPastEvent);
     }
     if (filters.hermandad !== 'todos') {
-      tempFiltered = tempFiltered.filter(e => e.hermandad === filters.hermandad);
+      tempFiltered = tempFiltered.filter((e) => e.hermandad === filters.hermandad);
     }
     setFilteredEvents(tempFiltered);
-  };
+  }, [filters, eventos]);
 
   const handleFilterChange = (name, value) => {
     setFilters(prev => ({ ...prev, [name]: value }));
@@ -217,9 +191,10 @@ function EventosContent() {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Error al registrar');
-      
-      setRegistrationStatus(prev => ({ ...prev, [evento.id_evento]: true }));
-      setEventos(prevEventos => prevEventos.map(e => e.id_evento === evento.id_evento ? result.event : e));
+
+      setRegistrationOverrides(prev => ({ ...prev, [evento.id_evento]: true }));
+      mutateEventos(); // refresca cupos desde el servidor
+      mutateBatch();   // revalida estado de registro real
       toast.success('¡Registro exitoso!', { theme: "dark" });
       sendEventRegistrationEmail(user.correo_electronico, user.nombre_completo, result.event)
         .catch(() => toast.warning('Te inscribiste, pero no pudimos enviar el correo de confirmación.', { theme: 'dark' }));
@@ -255,8 +230,8 @@ function EventosContent() {
       const attendanceResult = await attendanceRes.json();
       if (!attendanceRes.ok) throw new Error(attendanceResult.error || 'Error al registrar asistencia');
 
-      setRegistrationStatus(prev => ({ ...prev, [selectedEventForRegistration.id_evento]: true }));
-      setEventos(prevEventos => prevEventos.map(e => e.id_evento === selectedEventForRegistration.id_evento ? attendanceResult.event : e));
+      setRegistrationOverrides(prev => ({ ...prev, [selectedEventForRegistration.id_evento]: true }));
+      mutateEventos(); // refresca cupos desde el servidor
       toast.success('¡Registro como invitado exitoso!', { theme: "dark" });
       sendEventRegistrationEmail(guestData.correo_electronico, guestData.nombre_completo, attendanceResult.event)
         .catch(() => toast.warning('Te inscribiste, pero no pudimos enviar el correo de confirmación.', { theme: 'dark' }));

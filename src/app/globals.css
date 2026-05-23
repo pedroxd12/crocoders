@@ -64,20 +64,6 @@ html, body {
     border-color: transparent;
   }
 }
-@keyframes bounce {
-  0%, 100% {
-    transform: translateY(-15%);
-    animation-timing-function: cubic-bezier(0.8,0,1,1);
-  }
-  50% {
-    transform: translateY(0);
-    animation-timing-function: cubic-bezier(0,0,0.2,1);
-  }
-}
-
-.animate-bounce {
-  animation: bounce 1s infinite;
-}
 
 
 .typewriter-text1 {
@@ -198,7 +184,17 @@ html, body {
   0%, 100% { transform: translateY(-25%) translateX(-50%); }
   50% { transform: translateY(0) translateX(-50%); }
 }
-.animate-balloon-float-alternate { animation: balloon-float-alternate 25s infinite linear; }
-.animate-scrollDown { animation: scrollDown 1.5s infinite ease-in-out; }
+
+/* El contenedor de toasts es position:fixed con z-index 9999 en la esquina
+   superior derecha — la misma zona que el botón del menú. Sin esto, el
+   contenedor (aunque esté vacío) intercepta los clics del botón hamburguesa.
+   Dejamos pasar los clics a través del contenedor y los reactivamos sólo en
+   los toasts visibles para que sigan siendo interactivos/cerrables. */
+.Toastify__toast-container {
+  pointer-events: none;
+}
+.Toastify__toast {
+  pointer-events: auto;
+}
 .animate-gradient-x { background-size: 200% 200%; animation: gradient-x 10s ease infinite; }
 .animate-fadeIn { animation: fadeIn 0.5s ease-out; }
