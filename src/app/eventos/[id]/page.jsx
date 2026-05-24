@@ -622,10 +622,12 @@ function EventoDetalleContent() {
                                 <div className="md:col-span-2">
                                     <p className="text-xs text-blue-300 mb-2">* Si el integrante es miembro del club, asegúrese de usar su correo registrado para vincular su cuenta automáticamente.</p>
                                 </div>
-                                {/* Campos extendidos para invitados/no detectados (siempre pedirlos para asegurar datos) */}
-                                <Input label="Teléfono" value={member.telefono} onChange={e => updateTeamMember(idx, 'telefono', e.target.value)} required className="bg-gray-700 text-sm"/>
-                                <Input label="Institución" value={member.institucion} onChange={e => updateTeamMember(idx, 'institucion', e.target.value)} required className="bg-gray-700 text-sm"/>
-                                <Input label="Carrera/Bachillerato" value={member.carrera} onChange={e => updateTeamMember(idx, 'carrera', e.target.value)} required className="bg-gray-700 text-sm"/>
+                                {/* Campos extendidos: obligatorios para asegurar datos del concurso.
+                                    El label lleva '*' para que la obligatoriedad sea visible (antes
+                                    sólo el atributo HTML required la imponía, sin pista visual). */}
+                                <Input label="Teléfono *" value={member.telefono} onChange={e => updateTeamMember(idx, 'telefono', e.target.value.replace(/\D/g, '').slice(0, 15))} required placeholder="10 dígitos" className="bg-gray-700 text-sm"/>
+                                <Input label="Institución *" value={member.institucion} onChange={e => updateTeamMember(idx, 'institucion', e.target.value)} required className="bg-gray-700 text-sm"/>
+                                <Input label="Carrera/Bachillerato *" value={member.carrera} onChange={e => updateTeamMember(idx, 'carrera', e.target.value)} required className="bg-gray-700 text-sm"/>
                              </div>
                         </div>
                     ))}

@@ -7,7 +7,6 @@ import { FaArrowLeft, FaPlus, FaTrash, FaCalendarCheck, FaUsers } from 'react-ic
 import Button from '@/components/ui/Button';
 import Table from '@/components/ui/Table';
 import Modal from '@/components/ui/Modal';
-import Select from '@/components/ui/Select';
 import Input from '@/components/ui/Input';
 import Textarea from '@/components/ui/Textarea';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -17,24 +16,25 @@ export default function ProgramaSesiones() {
   const router = useRouter();
   const [programa, setPrograma] = useState(null);
   const [sesiones, setSesiones] = useState([]);
-  const [eventos, setEventos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [formData, setFormData] = useState({
-    id_evento: '',
     numero_sesion: 1,
     titulo: '',
     descripcion: '',
+    fecha: '',
+    hora_inicio: '',
+    hora_fin: '',
+    ubicacion: '',
     es_obligatoria: true
   });
 
   useEffect(() => {
     Promise.all([
       fetchPrograma(),
-      fetchSesiones(),
-      fetchEventosDisponibles()
+      fetchSesiones()
     ]).finally(() => setLoading(false));
   }, [id]);
 
@@ -63,29 +63,19 @@ export default function ProgramaSesiones() {
     }
   };
 
-  const fetchEventosDisponibles = async () => {
-    try {
-      // Obtener eventos que aún no están asignados a ningún programa
-      const res = await fetch('/api/admin/eventos');
-      if (res.ok) {
-        const data = await res.json();
-        setEventos(data);
-      }
-    } catch (error) {
-      console.error('Error loading eventos:', error);
-    }
-  };
-
   const handleOpenModal = () => {
-    const siguienteNumero = sesiones.length > 0 
-      ? Math.max(...sesiones.map(s => s.numero_sesion)) + 1 
+    const siguienteNumero = sesiones.length > 0
+      ? Math.max(...sesiones.map(s => s.numero_sesion)) + 1
       : 1;
-    
+
     setFormData({
-      id_evento: '',
       numero_sesion: siguienteNumero,
       titulo: '',
       descripcion: '',
+      fecha: '',
+      hora_inicio: '',
+      hora_fin: '',
+      ubicacion: programa?.ubicacion || '',
       es_obligatoria: true
     });
     setIsModalOpen(true);
@@ -110,7 +100,7 @@ export default function ProgramaSesiones() {
       toast.success('Sesión agregada correctamente');
       setIsModalOpen(false);
       fetchSesiones();
-      fetchEventosDisponibles();
+      fetchPrograma();
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -130,7 +120,7 @@ export default function ProgramaSesiones() {
 
       toast.success('Sesión eliminada');
       fetchSesiones();
-      fetchEventosDisponibles();
+      fetchPrograma();
     } catch (error) {
       toast.error(error.message);
     }
@@ -188,36 +178,33 @@ export default function ProgramaSesiones() {
               label: '#',
               cellClassName: 'font-bold text-green-400'
             },
-            { 
-              key: 'titulo', 
+            {
+              key: 'titulo',
               label: 'Título',
-              render: (row) => row.titulo || row.evento_nombre
+              render: (row) => row.titulo || `Sesión ${row.numero_sesion}`
             },
-            { 
-              key: 'fecha_inicio', 
+            {
+              key: 'fecha',
               label: 'Fecha y Hora',
               render: (row) => (
                 <div>
-                  <div>{new Date(row.fecha_inicio).toLocaleDateString()}</div>
-                  <div className="text-xs text-gray-400">{row.hora_inicio} - {row.hora_fin}</div>
+                  <div>{row.fecha ? new Date(`${row.fecha}T00:00:00`).toLocaleDateString() : '—'}</div>
+                  <div className="text-xs text-gray-400">
+                    {row.hora_inicio || ''}{row.hora_fin ? ` - ${row.hora_fin}` : ''}
+                  </div>
                 </div>
               )
             },
             { key: 'ubicacion', label: 'Ubicación' },
-            { 
-              key: 'total_asistentes', 
-              label: 'Asistentes',
-              cellClassName: 'text-center'
-            },
             {
               key: 'asistencia',
-              label: 'Asistieron',
+              label: 'Asistencia',
               render: (row) => (
                 <span className="text-green-400 font-bold">
-                  {row.total_asistentes > 0 
-                    ? `${Math.round((row.asistentes_presentes / row.total_asistentes) * 100)}%`
-                    : '0%'
-                  }
+                  {row.asistentes_presentes}/{row.total_inscritos}
+                  {row.total_inscritos > 0
+                    ? ` (${Math.round((row.asistentes_presentes / row.total_inscritos) * 100)}%)`
+                    : ''}
                 </span>
               ),
               cellClassName: 'text-center'
@@ -238,13 +225,13 @@ export default function ProgramaSesiones() {
               render: (row) => (
                 <div className="flex gap-2 justify-end">
                   <Button
-                    onClick={() => router.push(`/admin/eventos/${row.id_evento}`)}
+                    onClick={() => router.push(`/admin/programas/${id}/sesiones/${row.id_sesion}/asistencia`)}
                     variant="text"
                     size="sm"
                     className="text-blue-400 hover:text-blue-300"
-                    title="Ver evento"
+                    title="Registrar asistencia de esta sesión"
                   >
-                    Ver Evento
+                    Asistencia
                   </Button>
                   <Button
                     onClick={() => handleDeleteSesion(row.id_sesion)}
@@ -273,17 +260,6 @@ export default function ProgramaSesiones() {
         title="Agregar Sesión al Programa"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Select
-            label="Seleccionar Evento *"
-            value={formData.id_evento}
-            onChange={(e) => setFormData({ ...formData, id_evento: e.target.value })}
-            options={eventos.map(ev => ({ 
-              value: ev.id_evento, 
-              label: `${ev.nombre} - ${new Date(ev.fecha_inicio).toLocaleDateString()}`
-            }))}
-            required
-          />
-
           <Input
             label="Número de Sesión *"
             type="number"
@@ -297,7 +273,36 @@ export default function ProgramaSesiones() {
             label="Título de la Sesión"
             value={formData.titulo}
             onChange={(e) => setFormData({ ...formData, titulo: e.target.value })}
-            placeholder="Opcional - Se usa el nombre del evento si está vacío"
+            placeholder={`Opcional - "Sesión ${formData.numero_sesion}" si está vacío`}
+          />
+
+          <Input
+            label="Fecha *"
+            type="date"
+            value={formData.fecha}
+            onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
+            required
+          />
+
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Hora inicio"
+              type="time"
+              value={formData.hora_inicio}
+              onChange={(e) => setFormData({ ...formData, hora_inicio: e.target.value })}
+            />
+            <Input
+              label="Hora fin"
+              type="time"
+              value={formData.hora_fin}
+              onChange={(e) => setFormData({ ...formData, hora_fin: e.target.value })}
+            />
+          </div>
+
+          <Input
+            label="Ubicación"
+            value={formData.ubicacion}
+            onChange={(e) => setFormData({ ...formData, ubicacion: e.target.value })}
           />
 
           <Textarea

@@ -15,7 +15,7 @@ export async function GET(request, { params }) {
 
     // Verificar que el usuario es staff del evento
     const staffCheck = await client.query(
-      `SELECT r.nombre as rol, r.id_rol, r.permisos
+      `SELECT r.nombre as rol, r.id_rol, r.puede_administrar, r.puede_editar, r.puede_ver
        FROM staff_evento se
        JOIN catalogo_rol_staff r ON se.id_rol = r.id_rol
        WHERE se.id_evento = $1 AND se.id_miembro = $2`,
@@ -41,7 +41,7 @@ export async function GET(request, { params }) {
       FROM evento e
       LEFT JOIN catalogo_tipo_evento te ON e.id_tipo_evento = te.id_tipo_evento
       LEFT JOIN catalogo_alcance_evento ae ON e.id_alcance = ae.id_alcance
-      LEFT JOIN inscripcion_evento ie ON e.id_evento = ie.id_evento
+      LEFT JOIN inscripcion_evento ie ON e.id_evento = ie.id_evento AND ie.estado <> 'cancelada'
       WHERE e.id_evento = $1
       GROUP BY e.id_evento, te.nombre, ae.nombre`,
       [id]

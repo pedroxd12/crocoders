@@ -20,10 +20,10 @@ export async function GET(request) {
     // Sum of completed payments based on inscriptions marked as paid * event cost
     // This covers both manual checks and automated payments (assuming algo updates pago_completado)
     const financeRes = await client.query(`
-        SELECT SUM(e.costo) as total 
+        SELECT SUM(e.costo) as total
         FROM inscripcion_evento ie
         JOIN evento e ON ie.id_evento = e.id_evento
-        WHERE ie.pago_completado = true
+        WHERE ie.pago_completado = true AND ie.estado <> 'cancelada'
     `);
     const totalRevenue = parseFloat(financeRes.rows[0].total || 0);
 
@@ -52,7 +52,7 @@ export async function GET(request) {
             COUNT(ie.id_inscripcion) as registrados,
             COUNT(CASE WHEN ie.asistio THEN 1 END) as asistentes
         FROM evento e
-        LEFT JOIN inscripcion_evento ie ON e.id_evento = ie.id_evento
+        LEFT JOIN inscripcion_evento ie ON e.id_evento = ie.id_evento AND ie.estado <> 'cancelada'
         WHERE e.deleted_at IS NULL
         GROUP BY e.id_evento
         ORDER BY e.fecha_inicio DESC

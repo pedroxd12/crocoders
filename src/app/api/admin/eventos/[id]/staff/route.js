@@ -48,8 +48,11 @@ export async function POST(request, { params }) {
     const { id } = await params; // id_evento
     const { id_miembro, id_rol } = await request.json();
 
-    if (!id_miembro || !id_rol) {
-        return NextResponse.json({ error: 'Faltan datos' }, { status: 400 });
+    if (!id || isNaN(Number(id))) {
+        return NextResponse.json({ error: 'ID de evento inválido' }, { status: 400 });
+    }
+    if (!Number.isInteger(Number(id_miembro)) || !Number.isInteger(Number(id_rol))) {
+        return NextResponse.json({ error: 'id_miembro e id_rol deben ser numéricos' }, { status: 400 });
     }
 
     const client = await pool.connect();
@@ -64,7 +67,10 @@ export async function POST(request, { params }) {
     } catch (error) {
         console.error('Error adding staff:', error);
         if (error.code === '23505') { // Unique violation
-            return NextResponse.json({ error: 'El miembro ya es parte del staff' }, { status: 400 });
+            return NextResponse.json({ error: 'El miembro ya es parte del staff' }, { status: 409 });
+        }
+        if (error.code === '23503') { // FK violation
+            return NextResponse.json({ error: 'El evento, miembro o rol indicado no existe' }, { status: 404 });
         }
         return NextResponse.json({ error: 'Error al agregar staff' }, { status: 500 });
     } finally {
@@ -78,13 +84,16 @@ export async function DELETE(request, { params }) {
     const { searchParams } = new URL(request.url);
     const idStaff = searchParams.get('id_staff');
 
-    if (!idStaff) {
-         return NextResponse.json({ error: 'ID Staff requerido' }, { status: 400 });
+    if (!idStaff || isNaN(Number(idStaff))) {
+         return NextResponse.json({ error: 'id_staff inválido' }, { status: 400 });
     }
 
     const client = await pool.connect();
     try {
-        await client.query('DELETE FROM staff_evento WHERE id_staff = $1', [idStaff]);
+        const res = await client.query('DELETE FROM staff_evento WHERE id_staff = $1 RETURNING id_staff', [idStaff]);
+        if (res.rowCount === 0) {
+            return NextResponse.json({ error: 'Staff no encontrado' }, { status: 404 });
+        }
         return NextResponse.json({ message: 'Staff eliminado correctamente' });
     } catch (error) {
         console.error('Error deleting staff:', error);

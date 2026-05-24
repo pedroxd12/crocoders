@@ -35,6 +35,8 @@ export const eventoRegisterSchema = z.discriminatedUnion('tipo', [
   z.object({
     tipo: z.literal('invitado'),
     eventoId: z.coerce.number().int().positive(),
+    // id_invitado creado previamente vía POST /api/invitados.
+    userId: z.coerce.number().int().positive(),
   }),
   z.object({
     tipo: z.literal('equipo'),
@@ -44,6 +46,16 @@ export const eventoRegisterSchema = z.discriminatedUnion('tipo', [
     asesor: asesorSchema.optional().nullable(),
   }),
 ]);
+
+// Alta de invitado (registro de externos sin cuenta).
+export const invitadoSchema = z.object({
+  nombre_completo: nameSchema.max(255),
+  correo_electronico: emailSchema.max(255),
+  numero_telefono: z.union([phoneSchema, z.literal('')]).optional(),
+  escuela_institucion: optionalString(255),
+  carrera: optionalString(100),
+  semestre: z.coerce.number().int().min(1).max(14).optional().nullable(),
+});
 
 export const authRegisterSchema = z.object({
   nombre: nameSchema,

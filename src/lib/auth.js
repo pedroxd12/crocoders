@@ -52,8 +52,9 @@ export async function getSession(request) {
   }
 }
 
-const STAFF_ROLES = new Set(['administrador', 'staff', 'organizador', 'admin']);
-const ADMIN_ROLES = new Set(['administrador', 'admin']);
+// Roles coherentes con el CHECK de miembro.rol en el schema: administrador|usuario|staff.
+const STAFF_ROLES = new Set(['administrador', 'staff']);
+const ADMIN_ROLES = new Set(['administrador']);
 
 /**
  * Helpers de autorización. Devuelven { ok: true, session } si está autorizado,

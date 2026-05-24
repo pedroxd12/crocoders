@@ -65,7 +65,17 @@ export async function PUT(request, { params }) {
       porcentaje_asistencia_minimo,
       ubicacion,
       imagen_url,
+      activo,
     } = await request.json();
+
+    // Validación de campos obligatorios (NOT NULL en el schema).
+    if (!nombre || !fecha_inicio || !fecha_fin || !id_tipo_evento || !id_alcance) {
+      return NextResponse.json({ error: 'Faltan campos obligatorios' }, { status: 400 });
+    }
+
+    // Respetar un 0 explícito en el porcentaje (no caer a 80).
+    const pctMin = (porcentaje_asistencia_minimo === undefined || porcentaje_asistencia_minimo === null || porcentaje_asistencia_minimo === '')
+      ? 80.0 : Number(porcentaje_asistencia_minimo);
 
     const result = await client.query(
       `UPDATE programa_recurrente SET
@@ -79,20 +89,22 @@ export async function PUT(request, { params }) {
         porcentaje_asistencia_minimo = $8,
         ubicacion = $9,
         imagen_url = $10,
+        activo = COALESCE($11, activo),
         updated_at = NOW()
-      WHERE id_programa = $11
+      WHERE id_programa = $12
       RETURNING *`,
       [
         nombre,
-        descripcion,
+        descripcion ?? null,
         fecha_inicio,
         fecha_fin,
         id_tipo_evento,
         id_alcance,
-        sesiones_requeridas_certificado,
-        porcentaje_asistencia_minimo,
-        ubicacion,
-        imagen_url,
+        Number.isFinite(Number(sesiones_requeridas_certificado)) ? Number(sesiones_requeridas_certificado) : 0,
+        pctMin,
+        ubicacion ?? null,
+        imagen_url ?? null,
+        typeof activo === 'boolean' ? activo : null,
         id,
       ],
     );
@@ -107,6 +119,9 @@ export async function PUT(request, { params }) {
     return NextResponse.json(result.rows[0]);
   } catch (error) {
     console.error('Error updating programa:', error);
+    if (error.code === '23503') {
+      return NextResponse.json({ error: 'Tipo de evento o alcance inválido' }, { status: 400 });
+    }
     return NextResponse.json(
       { error: 'Error al actualizar programa' },
       { status: 500 }

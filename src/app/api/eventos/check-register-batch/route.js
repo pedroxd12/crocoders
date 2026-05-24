@@ -29,6 +29,7 @@ export async function POST(request) {
       FROM inscripcion_evento ie
       WHERE ie.id_miembro = ${userId}
         AND ie.id_evento = ANY(${eventIds}::int[])
+        AND ie.estado <> 'cancelada'
 
       UNION
 
@@ -38,6 +39,7 @@ export async function POST(request) {
       INNER JOIN integrante_equipo int_eq ON eq.id_equipo = int_eq.id_equipo
       WHERE int_eq.id_miembro = ${userId}
         AND ie.id_evento = ANY(${eventIds}::int[])
+        AND ie.estado <> 'cancelada'
     `;
 
     const registeredMap = {};

@@ -24,6 +24,7 @@ export async function GET(request) {
       FROM inscripcion_evento ie
       WHERE ie.id_evento = ${eventoId}
         AND ie.id_miembro = ${userId}
+        AND ie.estado <> 'cancelada'
 
       UNION
 
@@ -33,6 +34,7 @@ export async function GET(request) {
       INNER JOIN integrante_equipo int_eq ON eq.id_equipo = int_eq.id_equipo
       WHERE ie.id_evento = ${eventoId}
         AND int_eq.id_miembro = ${userId}
+        AND ie.estado <> 'cancelada'
 
       LIMIT 1
     `;
@@ -44,7 +46,15 @@ export async function GET(request) {
          const crypto = await import('crypto');
          const secret = process.env.PAYLOAD_SECRET;
          if (secret) {
-             const ts = new Date(registro.fecha_inscripcion).getTime();
+             // El `ts` alimenta la ventana anti-replay de verify-qr (24h). Debe ser
+             // el instante de EMISIÓN del token, no `fecha_inscripcion`:
+             //  - fecha_inscripcion es `timestamp without time zone`; convertirla con
+             //    new Date() la interpreta en hora local y la desfasa ~horas hacia el
+             //    "futuro", lo que hacía a verify-qr rechazar el QR ("fecha futura").
+             //  - además el QR debe seguir siendo válido cuando el usuario abre su
+             //    ticket días después de inscribirse, no expirar 24h tras la inscripción.
+             // Se genera fresco en cada lectura, igual que en /api/eventos/register.
+             const ts = Date.now();
              const qrPayload = JSON.stringify({
                  id: registro.id_inscripcion,
                  eid: registro.id_evento,

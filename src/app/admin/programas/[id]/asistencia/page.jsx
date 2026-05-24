@@ -96,7 +96,31 @@ export default function ProgramaAsistencia() {
     }
   };
 
+  const emitirCertificado = async (row) => {
+    try {
+      const res = await fetch(`/api/admin/programas/${id}/asistencia`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id_miembro: row.tipo === 'miembro' ? row.id_miembro : null,
+          id_invitado: row.tipo === 'invitado' ? row.id_invitado : null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Error al emitir certificado');
+      toast.success('Certificado emitido correctamente');
+      fetchAsistencia();
+    } catch (error) {
+      toast.error(error.message);
+    }
+  };
+
   const exportarCSV = () => {
+    // Escapar valores con comillas para no romper el CSV ante comas/comillas.
+    const esc = (v) => {
+      const s = v === null || v === undefined ? '' : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
     const headers = ['Nombre', 'Email', 'Teléfono', 'Tipo', 'Sesiones Asistidas', '% Asistencia', 'Elegible Certificado', 'Certificado Emitido'];
     const rows = asistencia.map(a => [
       a.nombre_completo,
@@ -109,11 +133,12 @@ export default function ProgramaAsistencia() {
       a.certificado_emitido ? 'Sí' : 'No'
     ]);
 
-    const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
+    const csv = [headers, ...rows].map(row => row.map(esc).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `asistencia_${programa?.nombre.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`;
+    const nombreSafe = (programa?.nombre || 'programa').replace(/\s+/g, '_');
+    link.download = `asistencia_${nombreSafe}_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
   };
 
@@ -229,7 +254,7 @@ export default function ProgramaAsistencia() {
                   variant="text"
                   size="sm"
                   className="text-blue-400 hover:text-blue-300"
-                  onClick={() => toast.info('Función de emisión de certificados pendiente')}
+                  onClick={() => emitirCertificado(row)}
                 >
                   Emitir
                 </Button>

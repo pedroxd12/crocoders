@@ -30,8 +30,8 @@ export async function GET(request) {
         a.id_alcance,
         a.nombre as alcance_nombre,
         (
-          SELECT COUNT(*) FROM inscripcion_evento 
-          WHERE id_evento = e.id_evento
+          SELECT COUNT(*) FROM inscripcion_evento
+          WHERE id_evento = e.id_evento AND estado <> 'cancelada'
         ) as total_inscritos,
         -- Datos de concurso si aplica
         c.id_concurso,
@@ -95,12 +95,21 @@ export async function POST(request) {
       url_concurso
     } = body;
 
-    // Validaciones básicas
+    // Validaciones básicas. La DB exige fecha_fin/hora_fin NOT NULL y cupos > 0.
     if (!nombre || !id_tipo_evento || !id_alcance || !fecha_inicio || !hora_inicio || !hora_fin) {
       return NextResponse.json(
         { error: 'Faltan campos obligatorios' },
         { status: 400 }
       );
+    }
+    if (es_concurso && modalidad && !['individual', 'equipos'].includes(modalidad)) {
+      return NextResponse.json(
+        { error: "modalidad debe ser 'individual' o 'equipos'" },
+        { status: 400 }
+      );
+    }
+    if (!Number.isInteger(parseInt(cupos)) || parseInt(cupos) <= 0) {
+      return NextResponse.json({ error: 'Los cupos deben ser mayores a 0' }, { status: 400 });
     }
 
     await client.query('BEGIN');
@@ -139,8 +148,8 @@ export async function POST(request) {
       fecha_limite_registro || null,
       hora_inicio,
       hora_fin,
-      ubicacion,
-      parseInt(cupos) || 0,
+      ubicacion ?? null,
+      parseInt(cupos),
       tieneCostoValue,
       costoValue,
       imagen_flyer_url,
@@ -184,6 +193,19 @@ export async function POST(request) {
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error en POST /api/admin/eventos:', error);
+    // Mapear violaciones de CHECK/FK a 400 con mensaje claro.
+    if (error.code === '23514') {
+      const c = error.constraint || '';
+      let msg = 'Datos del evento inválidos.';
+      if (c.includes('costo')) msg = 'Si el evento tiene costo, el costo debe ser mayor a 0 (y 0 si no tiene costo).';
+      else if (c.includes('cupos')) msg = 'Los cupos deben ser mayores a 0.';
+      else if (c.includes('fecha')) msg = 'La fecha de fin debe ser igual o posterior a la de inicio.';
+      else if (c.includes('hora')) msg = 'En eventos de un mismo día, la hora de fin debe ser posterior a la de inicio.';
+      return NextResponse.json({ error: msg }, { status: 400 });
+    }
+    if (error.code === '23503') {
+      return NextResponse.json({ error: 'Tipo de evento, alcance o plataforma inválidos.' }, { status: 400 });
+    }
     return NextResponse.json(
       { error: 'Error al crear evento: ' + error.message },
       { status: 500 }

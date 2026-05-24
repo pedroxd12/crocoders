@@ -19,11 +19,11 @@ import { Calendar, Filter, Loader, UserPlus, LogIn } from 'lucide-react';
 import { motion } from 'framer-motion';
 import styles from './page.module.css';
 
-async function sendEventRegistrationEmail(email, name, eventDetails) {
+async function sendEventRegistrationEmail(email, name, eventDetails, qrToken) {
   const response = await fetch('/api/confirmation', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, name, eventDetails }),
+    body: JSON.stringify({ email, name, eventDetails, qrToken }),
   });
   if (!response.ok) {
     const result = await response.json().catch(() => ({}));
@@ -196,7 +196,7 @@ function EventosContent() {
       mutateEventos(); // refresca cupos desde el servidor
       mutateBatch();   // revalida estado de registro real
       toast.success('¡Registro exitoso!', { theme: "dark" });
-      sendEventRegistrationEmail(user.correo_electronico, user.nombre_completo, result.event)
+      sendEventRegistrationEmail(user.correo_electronico, user.nombre_completo, result.event, result.qrToken)
         .catch(() => toast.warning('Te inscribiste, pero no pudimos enviar el correo de confirmación.', { theme: 'dark' }));
       setShowRegistrationTypeModal(false);
     } catch (error) {
@@ -233,7 +233,7 @@ function EventosContent() {
       setRegistrationOverrides(prev => ({ ...prev, [selectedEventForRegistration.id_evento]: true }));
       mutateEventos(); // refresca cupos desde el servidor
       toast.success('¡Registro como invitado exitoso!', { theme: "dark" });
-      sendEventRegistrationEmail(guestData.correo_electronico, guestData.nombre_completo, attendanceResult.event)
+      sendEventRegistrationEmail(guestData.correo_electronico, guestData.nombre_completo, attendanceResult.event, attendanceResult.qrToken)
         .catch(() => toast.warning('Te inscribiste, pero no pudimos enviar el correo de confirmación.', { theme: 'dark' }));
       
       setShowGuestFormModal(false);

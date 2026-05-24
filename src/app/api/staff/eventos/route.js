@@ -34,8 +34,8 @@ export async function GET(request) {
       JOIN catalogo_rol_staff r ON se.id_rol = r.id_rol
       LEFT JOIN catalogo_tipo_evento te ON e.id_tipo_evento = te.id_tipo_evento
       LEFT JOIN catalogo_alcance_evento ae ON e.id_alcance = ae.id_alcance
-      LEFT JOIN inscripcion_evento ie ON e.id_evento = ie.id_evento
-      WHERE se.id_miembro = $1
+      LEFT JOIN inscripcion_evento ie ON e.id_evento = ie.id_evento AND ie.estado <> 'cancelada'
+      WHERE se.id_miembro = $1 AND e.deleted_at IS NULL
       GROUP BY e.id_evento, te.nombre, ae.nombre, r.nombre, r.id_rol
       ORDER BY e.fecha_inicio DESC`,
       [id_miembro]

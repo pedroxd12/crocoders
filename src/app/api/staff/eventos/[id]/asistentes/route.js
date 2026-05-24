@@ -46,7 +46,7 @@ export async function GET(request, { params }) {
       LEFT JOIN miembro m ON ie.id_miembro = m.id_miembro
       LEFT JOIN invitado i ON ie.id_invitado = i.id_invitado
       LEFT JOIN equipo_concurso eq ON ie.id_equipo = eq.id_equipo
-      WHERE ie.id_evento = $1
+      WHERE ie.id_evento = $1 AND ie.estado <> 'cancelada'
       ORDER BY ie.fecha_inscripcion DESC`,
       [id]
     );

@@ -92,8 +92,8 @@ export default function ProgramasRecurrentes() {
       setFormData({
         nombre: programa.nombre,
         descripcion: programa.descripcion || '',
-        fecha_inicio: programa.fecha_inicio.split('T')[0],
-        fecha_fin: programa.fecha_fin.split('T')[0],
+        fecha_inicio: (programa.fecha_inicio || '').split('T')[0],
+        fecha_fin: (programa.fecha_fin || '').split('T')[0],
         id_tipo_evento: programa.id_tipo_evento,
         id_alcance: programa.id_alcance,
         sesiones_requeridas_certificado: programa.sesiones_requeridas_certificado || 0,

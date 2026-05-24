@@ -410,7 +410,7 @@ export default function EventosAdmin() {
                         </div>
                         
                          <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-600">
-                            <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Plataforma (Juez)</label>
+                            <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Plataforma / Online Judge</label>
                             <select 
                                 name="id_plataforma" 
                                 value={formData.id_plataforma} 

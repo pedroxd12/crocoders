@@ -25,15 +25,15 @@ export async function GET(request, context) {
         c.requiere_asesor,
         c.url_concurso,
         (
-          SELECT COUNT(*) 
-          FROM inscripcion_evento 
-          WHERE id_evento = e.id_evento
+          SELECT COUNT(*)
+          FROM inscripcion_evento
+          WHERE id_evento = e.id_evento AND estado <> 'cancelada'
         ) as asistentes_count
       FROM evento e
       LEFT JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
       LEFT JOIN catalogo_alcance_evento a ON e.id_alcance = a.id_alcance
       LEFT JOIN concurso c ON e.id_evento = c.id_evento
-      WHERE e.id_evento = ${id}
+      WHERE e.id_evento = ${id} AND e.deleted_at IS NULL AND e.listable = TRUE
     `;
     
     const evento = eventos && eventos.length > 0 ? eventos[0] : null;

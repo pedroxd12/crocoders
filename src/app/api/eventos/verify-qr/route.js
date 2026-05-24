@@ -104,6 +104,23 @@ export async function POST(request) {
 
     await client.query('BEGIN');
 
+    // Autorización por evento: un administrador puede marcar cualquier evento;
+    // el staff solo los eventos donde está asignado.
+    const role = (guard.session.role || '').toLowerCase();
+    if (role !== 'administrador') {
+      const staffRes = await client.query(
+        'SELECT 1 FROM staff_evento WHERE id_evento = $1 AND id_miembro = $2',
+        [eventoId, Number(guard.session.id)],
+      );
+      if (staffRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return NextResponse.json(
+          { success: false, error: 'No tienes permiso para registrar asistencia en este evento.' },
+          { status: 403 },
+        );
+      }
+    }
+
     // Verify inscription exists and get details
     const inscripcionRes = await client.query(`
       SELECT
@@ -116,7 +133,8 @@ export async function POST(request) {
         e.hora_inicio,
         e.hora_fin,
         COALESCE(m.nombre || ' ' || m.apellido_paterno, i.nombre_completo) as nombre_completo,
-        COALESCE(m.correo_electronico, i.correo_electronico) as correo
+        COALESCE(m.correo_electronico, i.correo_electronico) as correo,
+        ie.estado
       FROM inscripcion_evento ie
       JOIN evento e ON ie.id_evento = e.id_evento
       LEFT JOIN miembro m ON ie.id_miembro = m.id_miembro
@@ -130,6 +148,14 @@ export async function POST(request) {
         success: false,
         error: 'Inscripción no encontrada'
       }, { status: 404 });
+    }
+
+    if (inscripcionRes.rows[0].estado === 'cancelada') {
+      await client.query('ROLLBACK');
+      return NextResponse.json({
+        success: false,
+        error: 'La inscripción fue cancelada; no se puede registrar asistencia.'
+      }, { status: 400 });
     }
 
     const inscripcion = inscripcionRes.rows[0];

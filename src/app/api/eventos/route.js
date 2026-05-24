@@ -29,7 +29,8 @@ export async function GET() {
       JOIN catalogo_alcance_evento a ON e.id_alcance = a.id_alcance
       WHERE e.estado IN ('publicado', 'en_curso')
         AND e.deleted_at IS NULL
-      ORDER BY 
+        AND e.listable = TRUE
+      ORDER BY
         e.fecha_inicio ASC,
         e.hora_inicio ASC
     `;

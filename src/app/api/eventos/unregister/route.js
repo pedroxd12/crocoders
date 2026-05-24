@@ -32,59 +32,72 @@ export async function POST(request) {
     
     try {
         await client.query('BEGIN');
-        
-        // 1. Verificar si hay inscripción directa (individual) del miembro autenticado
+
+        // 1. Inscripción directa (individual) del miembro autenticado.
+        //    Cancelación lógica (estado='cancelada'), no borrado físico, para
+        //    preservar historial. Solo cancela si NO estaba ya cancelada.
         let res = await client.query(
-          'DELETE FROM inscripcion_evento WHERE id_evento = $1 AND id_miembro = $2 RETURNING id_inscripcion, id_equipo',
+          `UPDATE inscripcion_evento
+              SET estado = 'cancelada', updated_at = NOW()
+            WHERE id_evento = $1 AND id_miembro = $2 AND estado <> 'cancelada'
+            RETURNING id_inscripcion, id_equipo`,
           [eventoId, userId],
         );
-        let idEquipoToDelete = null;
+        // El trigger `actualizar_cupos_evento` ya restaura +1 al pasar a 'cancelada'.
+        // Aquí solo devolvemos los cupos ADICIONALES (equipos = N-1). Individual = 0.
+        let ajusteExtra = 0;
 
-        // 2. Si no se borró nada, verificar si pertenece a un equipo (Inscripción indirecta)
+        // 2. Si no había inscripción directa, ver si pertenece a un equipo inscrito.
         if (res.rowCount === 0) {
-             // Buscar el equipo al que pertenece el usuario en este evento
              const teamRes = await client.query(`
-                SELECT ie.id_inscripcion, ie.id_equipo 
+                SELECT ie.id_inscripcion, ie.id_equipo, int_eq.es_capitan,
+                       (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = ie.id_equipo)::int AS n_integrantes
                 FROM inscripcion_evento ie
                 JOIN equipo_concurso eq ON ie.id_equipo = eq.id_equipo
                 JOIN integrante_equipo int_eq ON eq.id_equipo = int_eq.id_equipo
-                WHERE ie.id_evento = $1 AND int_eq.id_miembro = $2
+                WHERE ie.id_evento = $1 AND int_eq.id_miembro = $2 AND ie.estado <> 'cancelada'
                 LIMIT 1
              `, [eventoId, userId]);
 
              if (teamRes.rows.length > 0) {
-                 // Encontrado! Es parte de un equipo.
-                 // IMPORTANTE: Al "desinscribirse", ¿borramos todo el equipo o solo al miembro?
-                 // Generalmente el usuario espera salir del evento. Si es capitan o último miembro, se borra el equipo.
-                 // Por simplicidad en este flujo, borraremos la inscripción del equipo completo (cancelación de equipo).
-                 // Ojo: Esto afecta a otros miembros. Deberíamos advertir en frontend, pero asumiremos cancelación total por ahora.
-                 
                  const row = teamRes.rows[0];
-                 await client.query('DELETE FROM inscripcion_evento WHERE id_inscripcion = $1', [row.id_inscripcion]);
-                 idEquipoToDelete = row.id_equipo;
-                 res = { rowCount: 1 }; // Marcar como borrado
+                 // Solo el capitán puede cancelar la inscripción del equipo completo
+                 // (afecta a todos los integrantes).
+                 if (!row.es_capitan) {
+                     await client.query('ROLLBACK');
+                     return NextResponse.json({
+                         success: false,
+                         error: 'Solo el capitán del equipo puede cancelar la inscripción del equipo.',
+                     }, { status: 403 });
+                 }
+                 await client.query(
+                   `UPDATE inscripcion_evento SET estado = 'cancelada', updated_at = NOW() WHERE id_inscripcion = $1`,
+                   [row.id_inscripcion],
+                 );
+                 // El trigger devuelve +1; los integrantes restantes (N-1) se devuelven aquí.
+                 ajusteExtra = Math.max(0, row.n_integrantes - 1);
+                 res = { rowCount: 1 };
              }
         }
 
         if (res.rowCount > 0) {
-            await client.query(
-              `UPDATE evento
-                  SET cupos_disponibles = LEAST(cupos, cupos_disponibles + 1)
-                WHERE id_evento = $1`,
-              [eventoId],
-            );
-
-            if (idEquipoToDelete) {
-              await client.query('DELETE FROM equipo_concurso WHERE id_equipo = $1', [idEquipoToDelete]);
+            // Devolver SOLO los cupos adicionales (el trigger ya devolvió 1).
+            if (ajusteExtra > 0) {
+              await client.query(
+                `UPDATE evento
+                    SET cupos_disponibles = LEAST(cupos, cupos_disponibles + $2)
+                  WHERE id_evento = $1`,
+                [eventoId, ajusteExtra],
+              );
             }
 
             await client.query('COMMIT');
             
             // Obtener datos actualizados para el cliente
             const updatedEventRes = await client.query(`
-                SELECT 
+                SELECT
                 id_evento, nombre as nombre_evento, fecha_inicio as fecha, hora_inicio, cupos_disponibles,
-                (SELECT COUNT(*) FROM inscripcion_evento WHERE id_evento = $1) as asistentes_count
+                (SELECT COUNT(*) FROM inscripcion_evento WHERE id_evento = $1 AND estado <> 'cancelada') as asistentes_count
                 FROM evento WHERE id_evento = $1
             `, [eventoId]);
             const updatedEvent = updatedEventRes.rows[0];

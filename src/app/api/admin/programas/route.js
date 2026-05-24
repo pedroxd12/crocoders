@@ -66,12 +66,17 @@ export async function POST(request) {
 
     await client.query('BEGIN');
 
+    // porcentaje: respetar un 0 explícito (no caer a 80 con ||).
+    const pctMin = (porcentaje_asistencia_minimo === undefined || porcentaje_asistencia_minimo === null || porcentaje_asistencia_minimo === '')
+      ? 80.0 : Number(porcentaje_asistencia_minimo);
+
     const result = await client.query(
       `INSERT INTO programa_recurrente (
         nombre, descripcion, fecha_inicio, fecha_fin,
         id_tipo_evento, id_alcance, sesiones_requeridas_certificado,
-        porcentaje_asistencia_minimo, ubicacion, imagen_url
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        porcentaje_asistencia_minimo, ubicacion, imagen_url,
+        dias_semana, hora_inicio, hora_fin
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       RETURNING *`,
       [
         nombre,
@@ -80,19 +85,23 @@ export async function POST(request) {
         fecha_fin,
         id_tipo_evento,
         id_alcance,
-        sesiones_requeridas_certificado || 0,
-        porcentaje_asistencia_minimo || 80.0,
+        Number.isFinite(Number(sesiones_requeridas_certificado)) ? Number(sesiones_requeridas_certificado) : 0,
+        pctMin,
         ubicacion,
         imagen_url,
+        (Array.isArray(dias_semana) && dias_semana.length > 0) ? dias_semana : null,
+        hora_inicio || null,
+        hora_fin || null,
       ],
     );
 
     const programaId = result.rows[0].id_programa;
 
     if (dias_semana && dias_semana.length > 0 && hora_inicio && hora_fin) {
-      // Las fechas vienen como YYYY-MM-DD (DATE en Postgres, sin TZ). Las
-      // tratamos como UTC para que getUTCDay() devuelva el día correcto en
-      // cualquier servidor sin importar su zona horaria.
+      // Materializar sesiones SIN crear eventos espejo en el catálogo público.
+      // Cada sesión lleva su propia fecha/hora/ubicación.
+      // Las fechas vienen como YYYY-MM-DD; las tratamos como UTC para que
+      // getUTCDay() devuelva el día correcto en cualquier servidor.
       const start = new Date(`${fecha_inicio}T00:00:00Z`);
       const end = new Date(`${fecha_fin}T00:00:00Z`);
 
@@ -102,35 +111,21 @@ export async function POST(request) {
 
         const fechaStr = d.toISOString().split('T')[0];
 
-        const eventoRes = await client.query(
-          `INSERT INTO evento (
-             nombre, descripcion_html, id_tipo_evento, id_alcance,
-             fecha_inicio, hora_inicio, fecha_fin, hora_fin,
-             ubicacion, estado, cupos, cupos_disponibles,
-             imagen_flyer_url, tiene_costo
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'publicado', 100, 100, $10, false)
-           RETURNING id_evento`,
-          [
-            `${nombre} - Sesión ${sessionCount}`,
-            sanitizeHtml(descripcion || ''),
-            id_tipo_evento,
-            id_alcance,
-            fechaStr,
-            hora_inicio,
-            fechaStr,
-            hora_fin,
-            ubicacion,
-            imagen_url,
-          ],
-        );
-
-        const eventoId = eventoRes.rows[0].id_evento;
-
         await client.query(
           `INSERT INTO sesion_programa (
-            id_programa, id_evento, numero_sesion, titulo, descripcion
-          ) VALUES ($1, $2, $3, $4, $5)`,
-          [programaId, eventoId, sessionCount, `Sesión ${sessionCount}: ${nombre}`, descripcion],
+            id_programa, numero_sesion, titulo, descripcion,
+            fecha, hora_inicio, hora_fin, ubicacion
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            programaId,
+            sessionCount,
+            `Sesión ${sessionCount}`,
+            sanitizeHtml(descripcion || ''),
+            fechaStr,
+            hora_inicio,
+            hora_fin,
+            ubicacion || null,
+          ],
         );
 
         sessionCount++;
