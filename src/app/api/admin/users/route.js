@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 export async function GET(request) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   
   try {
     // Obtener miembros - concatenar nombre completo desde columnas separadas

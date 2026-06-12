@@ -2,63 +2,87 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-// import { useRouter } from 'next/navigation'; // Not strictly used here, but good to keep if navigation might be added
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import Modal from '@/components/ui/Modal';
-import Image from 'next/image'; // Ensure this import is present
+import Image from 'next/image';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import { UploadButton } from "@/utils/uploadthing";
 
 export default function EvidenciasAdmin() {
+  // Destino: 'evento' | 'programa'. El admin sube evidencias a uno u otro.
+  const [targetType, setTargetType] = useState('evento');
   const [eventos, setEventos] = useState([]);
+  const [programas, setProgramas] = useState([]);
   const [evidencias, setEvidencias] = useState([]);
-  const [loading, setLoading] = useState({
-    eventos: true,
-    evidencias: false,
-    upload: false, // For the process of saving after UploadThing finishes
-    delete: false
-  });
-  const [selectedEvent, setSelectedEvent] = useState(null);
+  const [loading, setLoading] = useState({ targets: true, evidencias: false, upload: false, delete: false });
+  // selected = { tipo, id, nombre } o null
+  const [selected, setSelected] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [nombreEvidencia, setNombreEvidencia] = useState('');
-  const [uploadedFileDetails, setUploadedFileDetails] = useState(null); // Stores {url, key, name} from UploadThing
+  const [uploadedFileDetails, setUploadedFileDetails] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
-    fetchEventos();
+    fetchTargets();
   }, []);
 
+  // Al cambiar de tipo de destino, limpiar la selección actual.
   useEffect(() => {
-    if (selectedEvent) {
-      fetchEvidencias(selectedEvent);
-    } else {
-      setEvidencias([]);
-    }
-  }, [selectedEvent]);
+    setSelected(null);
+    setEvidencias([]);
+  }, [targetType]);
 
-  const fetchEventos = async () => {
-    setLoading(prev => ({ ...prev, eventos: true }));
-    try {
-      const res = await fetch('/api/admin/eventos'); 
-      if (!res.ok) throw new Error('Error al cargar eventos');
-      const data = await res.json();
-      setEventos(data);
-    } catch (error) {
-      toast.error(error.message);
-    } finally {
-      setLoading(prev => ({ ...prev, eventos: false }));
+  useEffect(() => {
+    if (selected) fetchEvidencias(selected);
+    else setEvidencias([]);
+  }, [selected]);
+
+  const fetchTargets = async () => {
+    setLoading(prev => ({ ...prev, targets: true }));
+    // Cargar eventos y programas de forma INDEPENDIENTE: que uno lento o que
+    // falle no bloquee al otro (antes un Promise.all hacía que cualquier fallo
+    // dejara ambos selectores vacíos).
+    const [evResult, prResult] = await Promise.allSettled([
+      fetch('/api/admin/eventos').then(r => { if (!r.ok) throw new Error('eventos'); return r.json(); }),
+      fetch('/api/admin/programas').then(r => { if (!r.ok) throw new Error('programas'); return r.json(); }),
+    ]);
+
+    if (evResult.status === 'fulfilled') {
+      const evData = evResult.value;
+      setEventos((Array.isArray(evData) ? evData : []).map(ev => ({
+        id: ev.id_evento,
+        nombre: ev.nombre_evento ?? ev.nombre,
+        fecha: ev.fecha ?? ev.fecha_inicio,
+      })));
+    } else {
+      toast.error('No se pudieron cargar los eventos.');
     }
+
+    if (prResult.status === 'fulfilled') {
+      const prData = prResult.value;
+      setProgramas((Array.isArray(prData) ? prData : []).map(pr => ({
+        id: pr.id_programa,
+        nombre: pr.nombre,
+        fecha: pr.fecha_inicio,
+      })));
+    } else {
+      toast.error('No se pudieron cargar los programas.');
+    }
+
+    setLoading(prev => ({ ...prev, targets: false }));
   };
 
-  const fetchEvidencias = async (evento) => {
+  const fetchEvidencias = async (target) => {
     setLoading(prev => ({ ...prev, evidencias: true }));
     try {
-      const res = await fetch(`/api/evidencias?evento=${evento.id_evento}`);
+      const qs = target.tipo === 'evento' ? `evento=${target.id}` : `programa=${target.id}`;
+      const res = await fetch(`/api/evidencias?${qs}`);
       if (!res.ok) throw new Error('Error al cargar evidencias');
-      const data = await res.json();
-      setEvidencias(data);
+      setEvidencias(await res.json());
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -66,32 +90,40 @@ export default function EvidenciasAdmin() {
     }
   };
 
+  const opciones = targetType === 'evento' ? eventos : programas;
+
+  const handleSelectChange = (e) => {
+    const id = e.target.value;
+    if (!id) { setSelected(null); return; }
+    const item = opciones.find(o => o.id.toString() === id);
+    if (item) setSelected({ tipo: targetType, id: item.id, nombre: item.nombre });
+  };
+
   const handleSaveEvidenceWithUploadThing = async () => {
-    if (!selectedEvent || !uploadedFileDetails) {
-        toast.error("Por favor, selecciona un evento y sube una imagen.");
-        return;
+    if (!selected || !uploadedFileDetails) {
+      toast.error('Selecciona un destino y sube una imagen.');
+      return;
     }
     setLoading(prev => ({ ...prev, upload: true }));
     try {
       const payload = {
-        id_evento: selectedEvent.id_evento,
-        nombre: nombreEvidencia || uploadedFileDetails.name || 'Evidencia', // Use UT file name if local name is empty
+        // Enviar id_evento o id_programa según el destino (el backend exige XOR).
+        ...(selected.tipo === 'evento' ? { id_evento: selected.id } : { id_programa: selected.id }),
+        nombre: nombreEvidencia || uploadedFileDetails.name || 'Evidencia',
         imagen_url: uploadedFileDetails.url,
-        imagen_key: uploadedFileDetails.key
+        imagen_key: uploadedFileDetails.key,
       };
-
-      const res = await fetch('/api/evidencias/upload', { // Backend endpoint to save metadata
+      const res = await fetch('/api/evidencias/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-
       if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Error al guardar la metadata de la evidencia');
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Error al guardar la evidencia');
       }
-      const nuevaEvidencia = await res.json();
-      setEvidencias(prev => [...prev, nuevaEvidencia]);
+      const nueva = await res.json();
+      setEvidencias(prev => [...prev, nueva]);
       toast.success('Evidencia guardada correctamente');
       resetUploadModal();
     } catch (error) {
@@ -102,13 +134,13 @@ export default function EvidenciasAdmin() {
   };
 
   const handleDelete = async (id_evidencia) => {
-    if (!confirm('¿Estás seguro de eliminar esta evidencia? Esta acción no se puede deshacer.')) return;
+    if (!confirm('¿Eliminar esta evidencia? Esta acción no se puede deshacer.')) return;
     setLoading(prev => ({ ...prev, delete: true }));
     try {
       const res = await fetch(`/api/evidencias/${id_evidencia}`, { method: 'DELETE' });
       if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Error al eliminar evidencia');
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Error al eliminar evidencia');
       }
       setEvidencias(prev => prev.filter(e => e.id_evidencia !== id_evidencia));
       toast.success('Evidencia eliminada correctamente');
@@ -119,47 +151,116 @@ export default function EvidenciasAdmin() {
     }
   };
 
+  const openEdit = (evidencia) => {
+    setEditing({
+      id_evidencia: evidencia.id_evidencia,
+      titulo: evidencia.nombre || '',
+      descripcion: evidencia.descripcion || '',
+      orden: evidencia.orden ?? 0,
+      publica: evidencia.publica ?? true,
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editing) return;
+    if (!editing.titulo.trim()) { toast.error('El título no puede estar vacío.'); return; }
+    setSavingEdit(true);
+    try {
+      const res = await fetch(`/api/evidencias/${editing.id_evidencia}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          titulo: editing.titulo.trim(),
+          descripcion: editing.descripcion,
+          orden: Number(editing.orden) || 0,
+          publica: editing.publica,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Error al actualizar evidencia');
+      }
+      const actualizada = await res.json();
+      setEvidencias(prev =>
+        prev.map(e => (e.id_evidencia === actualizada.id_evidencia ? actualizada : e))
+          .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
+      );
+      toast.success('Evidencia actualizada');
+      setEditing(null);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const resetUploadModal = () => {
     setShowUploadModal(false);
     setNombreEvidencia('');
-    setUploadedFileDetails(null); // Clear details of the uploaded file
+    setUploadedFileDetails(null);
   };
 
   return (
     <div className="p-4 md:p-6">
       <h2 className="text-2xl font-bold mb-6 text-green-400">Gestión de Evidencias</h2>
-      
+
+      {/* Selector de tipo de destino: Evento o Programa */}
+      <div className="mb-4 flex gap-2">
+        {[
+          { key: 'evento', label: 'Eventos' },
+          { key: 'programa', label: 'Programas / Talleres' },
+        ].map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTargetType(t.key)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              targetType === t.key
+                ? 'bg-green-600 text-white'
+                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
       <div className="mb-6">
-        <label className="block text-gray-300 mb-2">Seleccionar Evento:</label>
+        <label className="block text-gray-300 mb-2">
+          {targetType === 'evento' ? 'Seleccionar Evento:' : 'Seleccionar Programa:'}
+        </label>
         <select
           className="w-full bg-gray-700 border border-gray-600 rounded p-2.5 text-white focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
-          value={selectedEvent?.id_evento || ''}
-          onChange={(e) => {
-            const eventoId = e.target.value;
-            setSelectedEvent(eventos.find(ev => ev.id_evento.toString() === eventoId) || null);
-          }}
-          disabled={loading.eventos}
+          value={selected?.id || ''}
+          onChange={handleSelectChange}
+          disabled={loading.targets}
         >
-          <option value="">-- Selecciona un evento --</option>
-          {loading.eventos ? (
-            <option disabled>Cargando eventos...</option>
+          <option value="">
+            {targetType === 'evento' ? '-- Selecciona un evento --' : '-- Selecciona un programa --'}
+          </option>
+          {loading.targets ? (
+            <option disabled>Cargando...</option>
           ) : (
-            eventos.map(evento => (
-              <option key={evento.id_evento} value={evento.id_evento}>
-                {evento.nombre_evento} - {new Date(evento.fecha).toLocaleDateString('es-ES')}
+            opciones.map(o => (
+              <option key={o.id} value={o.id}>
+                {o.nombre}{o.fecha ? ` - ${new Date(o.fecha).toLocaleDateString('es-ES')}` : ''}
               </option>
             ))
           )}
         </select>
+        {!loading.targets && opciones.length === 0 && (
+          <p className="text-sm text-gray-500 mt-2">
+            No hay {targetType === 'evento' ? 'eventos' : 'programas'} disponibles.
+          </p>
+        )}
       </div>
 
-      {selectedEvent && (
+      {selected && (
         <div className="bg-gray-800 rounded-lg p-4 md:p-6 shadow-lg">
           <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
             <h3 className="text-xl font-semibold">
-              Evidencias para: <span className="text-green-400">{selectedEvent.nombre_evento}</span>
+              Evidencias para: <span className="text-green-400">{selected.nombre}</span>
             </h3>
-            <Button onClick={() => setShowUploadModal(true)} variant="primary" disabled={loading.evidencias || loading.eventos}>
+            <Button onClick={() => setShowUploadModal(true)} variant="primary" disabled={loading.evidencias || loading.targets}>
               + Añadir Evidencia
             </Button>
           </div>
@@ -181,9 +282,16 @@ export default function EvidenciasAdmin() {
                     />
                   </div>
                   <div className="p-4">
-                    <h4 className="font-medium mb-2 truncate" title={evidencia.nombre}>{evidencia.nombre || 'Evidencia sin nombre'}</h4>
+                    <h4 className="font-medium mb-1 truncate" title={evidencia.nombre}>{evidencia.nombre || 'Evidencia sin nombre'}</h4>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs text-gray-500">Orden: {evidencia.orden ?? 0}</span>
+                      {evidencia.publica === false && (
+                        <span className="text-xs bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">Oculta</span>
+                      )}
+                    </div>
                     <p className="text-gray-400 text-sm mb-3">Subido: {new Date(evidencia.fecha).toLocaleString('es-ES')}</p>
-                    <div className="flex justify-end">
+                    <div className="flex justify-end gap-2">
+                      <Button onClick={() => openEdit(evidencia)} variant="text" size="sm">Editar</Button>
                       <Button onClick={() => handleDelete(evidencia.id_evidencia)} variant="text" color="red" size="sm" disabled={loading.delete}>
                         {loading.delete ? <LoadingSpinner size="sm" /> : 'Eliminar'}
                       </Button>
@@ -194,14 +302,14 @@ export default function EvidenciasAdmin() {
             </div>
           ) : (
             <div className="bg-gray-700/50 rounded-lg p-8 text-center border border-gray-600">
-              <p className="text-gray-400 mb-4">No hay evidencias para este evento.</p>
+              <p className="text-gray-400 mb-4">No hay evidencias para {selected.tipo === 'evento' ? 'este evento' : 'este programa'}.</p>
               <Button onClick={() => setShowUploadModal(true)} variant="primary">Subir primera evidencia</Button>
             </div>
           )}
         </div>
       )}
 
-      <Modal isOpen={showUploadModal} onClose={resetUploadModal} title={`Subir Evidencia para ${selectedEvent?.nombre_evento || ''}`}>
+      <Modal isOpen={showUploadModal} onClose={resetUploadModal} title={`Subir Evidencia para ${selected?.nombre || ''}`}>
         <div className="space-y-4">
           <Input
             label="Nombre o descripción (opcional):"
@@ -212,45 +320,85 @@ export default function EvidenciasAdmin() {
             maxLength={100}
             className="bg-gray-700 border-gray-600 focus:border-green-500"
           />
-          
+
           <div>
             <label className="block text-gray-300 mb-2">Archivo de Imagen:</label>
             <UploadButton
-                endpoint="evidenciaUploader" // Ensure this matches your core.js
-                onClientUploadComplete={(res) => {
-                    if (res && res.length > 0) {
-                        toast.success("Imagen subida. Ahora puedes guardarla.");
-                        setUploadedFileDetails({ 
-                            url: res[0].url, 
-                            key: res[0].key,
-                            name: res[0].name // Original file name from UploadThing
-                        });
-                    }
-                }}
-                onUploadError={(error) => {
-                    toast.error(`Error al subir: ${error.message}`);
-                }}
-                className="mt-1 ut-button:bg-green-600 ut-button:ut-hover:bg-green-700 ut-button:text-slate-50 ut-allowed-content:text-gray-400"
+              endpoint="evidenciaUploader"
+              onClientUploadComplete={(res) => {
+                if (res && res.length > 0) {
+                  toast.success('Imagen subida. Ahora puedes guardarla.');
+                  setUploadedFileDetails({ url: res[0].url, key: res[0].key, name: res[0].name });
+                }
+              }}
+              onUploadError={(error) => toast.error(`Error al subir: ${error.message}`)}
+              className="mt-1 ut-button:bg-green-600 ut-button:ut-hover:bg-green-700 ut-button:text-slate-50 ut-allowed-content:text-gray-400"
             />
             {uploadedFileDetails && (
-                <div className="mt-3">
-                    <p className="text-sm text-green-400">Imagen lista: {uploadedFileDetails.name}</p>
-                    <Image src={uploadedFileDetails.url} alt="Previsualización" width={100} height={100} className="rounded mt-1 border border-gray-600"/>
-                </div>
+              <div className="mt-3">
+                <p className="text-sm text-green-400">Imagen lista: {uploadedFileDetails.name}</p>
+                <Image src={uploadedFileDetails.url} alt="Previsualización" width={100} height={100} className="rounded mt-1 border border-gray-600" />
+              </div>
             )}
           </div>
-          
+
           <div className="flex justify-end gap-3 pt-3">
             <Button type="button" onClick={resetUploadModal} variant="secondary" disabled={loading.upload}>Cancelar</Button>
-            <Button 
-                onClick={handleSaveEvidenceWithUploadThing} 
-                variant="primary" 
-                disabled={loading.upload || !uploadedFileDetails} // Disable if no file uploaded or currently saving
-            >
+            <Button onClick={handleSaveEvidenceWithUploadThing} variant="primary" disabled={loading.upload || !uploadedFileDetails}>
               {loading.upload ? <LoadingSpinner size="sm" /> : 'Guardar Evidencia'}
             </Button>
           </div>
         </div>
+      </Modal>
+
+      <Modal isOpen={!!editing} onClose={() => setEditing(null)} title="Editar Evidencia">
+        {editing && (
+          <div className="space-y-4">
+            <Input
+              label="Título"
+              type="text"
+              value={editing.titulo}
+              onChange={(e) => setEditing({ ...editing, titulo: e.target.value })}
+              maxLength={255}
+              className="bg-gray-700 border-gray-600 focus:border-green-500"
+            />
+            <div>
+              <label className="block text-gray-300 mb-2 text-sm">Descripción (opcional):</label>
+              <textarea
+                value={editing.descripcion}
+                onChange={(e) => setEditing({ ...editing, descripcion: e.target.value })}
+                maxLength={2000}
+                rows={3}
+                className="w-full bg-gray-700 border border-gray-600 rounded p-2.5 text-white focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
+              />
+            </div>
+            <div className="flex gap-4">
+              <Input
+                label="Orden"
+                type="number"
+                min={0}
+                value={editing.orden}
+                onChange={(e) => setEditing({ ...editing, orden: e.target.value })}
+                className="bg-gray-700 border-gray-600 focus:border-green-500 w-28"
+              />
+              <label className="flex items-center gap-2 text-gray-300 text-sm mt-7">
+                <input
+                  type="checkbox"
+                  checked={editing.publica}
+                  onChange={(e) => setEditing({ ...editing, publica: e.target.checked })}
+                  className="h-4 w-4 accent-green-500"
+                />
+                Visible al público
+              </label>
+            </div>
+            <div className="flex justify-end gap-3 pt-3">
+              <Button type="button" onClick={() => setEditing(null)} variant="secondary" disabled={savingEdit}>Cancelar</Button>
+              <Button onClick={handleSaveEdit} variant="primary" disabled={savingEdit}>
+                {savingEdit ? <LoadingSpinner size="sm" /> : 'Guardar Cambios'}
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );

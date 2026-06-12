@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 import { UTApi } from "uploadthing/server";
 import { sanitizeHtml } from '@/lib/sanitize';
@@ -21,7 +21,7 @@ export async function GET(request, context) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
   const { id } = await context.params;
-  const client = await pool.connect();
+  const client = await connectWithRetry();
 
   if (!id || isNaN(Number(id))) {
       return NextResponse.json({ error: 'ID de evento inválido' }, { status: 400 });
@@ -90,7 +90,7 @@ export async function PUT(request, context) {
 
   let client;
   try {
-    client = await pool.connect();
+    client = await connectWithRetry();
     const body = await request.json();
     const {
         nombre, descripcion_html, id_tipo_evento, id_alcance,
@@ -105,6 +105,17 @@ export async function PUT(request, context) {
     // Validación de campos obligatorios (la DB exige fecha_fin/hora_fin NOT NULL).
     if (!nombre || !id_tipo_evento || !id_alcance || !fecha_inicio || !hora_inicio || !hora_fin) {
         return NextResponse.json({ error: 'Faltan campos obligatorios' }, { status: 400 });
+    }
+    // Coherencia de integrantes en concursos por equipos: min >= 2 y min <= max.
+    if (es_concurso && modalidad === 'equipos') {
+      const minInt = parseInt(min_integrantes_equipo) || 2;
+      const maxInt = parseInt(max_integrantes_equipo) || 3;
+      if (minInt < 2) {
+        return NextResponse.json({ error: 'El mínimo de integrantes por equipo debe ser al menos 2.' }, { status: 400 });
+      }
+      if (minInt > maxInt) {
+        return NextResponse.json({ error: 'El mínimo de integrantes no puede ser mayor que el máximo.' }, { status: 400 });
+      }
     }
 
     await client.query('BEGIN');
@@ -284,6 +295,7 @@ export async function PUT(request, context) {
       else if (c.includes('cupos')) msg = 'Los cupos deben ser mayores a 0.';
       else if (c.includes('fecha')) msg = 'La fecha de fin debe ser igual o posterior a la de inicio.';
       else if (c.includes('hora')) msg = 'En eventos de un mismo día, la hora de fin debe ser posterior a la de inicio.';
+      else if (c.includes('modalidad') || c.includes('integrantes')) msg = 'Configuración de concurso inválida: en modalidad por equipos el máximo de integrantes debe ser ≥ 2.';
       return NextResponse.json({ error: msg }, { status: 400 });
     }
     if (error.code === '23503') {
@@ -306,23 +318,36 @@ export async function DELETE(request, context) {
 
   let client;
   try {
-    client = await pool.connect();
+    client = await connectWithRetry();
     // Get image key to delete from storage
     const imgRes = await client.query('SELECT imagen_flyer_key FROM evento WHERE id_evento = $1', [id]);
-    
+
     if (imgRes.rows.length === 0) {
         return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
     }
 
     const { imagen_flyer_key } = imgRes.rows[0];
 
+    // Recolectar los storage_key de las evidencias ANTES de borrar el evento:
+    // el FK evidencia.id_evento es ON DELETE CASCADE, así que al borrar el
+    // evento se pierden esas filas y, sin esto, sus archivos quedarían
+    // huérfanos en UploadThing (fuga de almacenamiento/costo).
+    const evidRes = await client.query(
+      'SELECT storage_key FROM evidencia WHERE id_evento = $1 AND storage_key IS NOT NULL',
+      [id],
+    );
+    const evidenciaKeys = evidRes.rows.map((r) => r.storage_key);
+
     // Borrar primero de BD (cascade) y solo si tiene éxito eliminar del CDN.
     // Si invertimos el orden, un fallo de BD dejaría el archivo eliminado del
     // CDN pero el evento intacto.
     await client.query('DELETE FROM evento WHERE id_evento = $1', [id]);
 
-    if (imagen_flyer_key) {
-      deleteFromUploadThing(imagen_flyer_key);
+    // Best-effort en el CDN tras el borrado en BD. utapi.deleteFiles acepta un
+    // arreglo, así que limpiamos flyer + evidencias en una sola llamada.
+    const keysToDelete = [imagen_flyer_key, ...evidenciaKeys].filter(Boolean);
+    if (keysToDelete.length > 0) {
+      deleteFromUploadThing(keysToDelete);
     }
 
     return NextResponse.json({ success: true, message: 'Evento eliminado correctamente' });

@@ -379,11 +379,12 @@ function EventoDetalleContent() {
       {/* Hero Header */}
       <div className="relative h-[55vh] min-h-[500px] w-full overflow-hidden">
           <div className="absolute inset-0">
-            <Image 
-                src={evento.imagen_url || '/placeholder-event.jpg'} 
-                alt={evento.nombre_evento} 
-                fill 
-                className="object-cover opacity-60 blur-sm scale-105" 
+            <Image
+                src={evento.imagen_url || '/placeholder-event.jpg'}
+                alt={evento.nombre_evento}
+                fill
+                sizes="100vw"
+                className="object-cover opacity-60 blur-sm scale-105"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-[#0f1014] via-[#0f1014]/60 to-transparent" />
           </div>
@@ -398,7 +399,7 @@ function EventoDetalleContent() {
 
           <div className="absolute bottom-0 left-0 w-full p-6 md:p-12 max-w-7xl mx-auto flex flex-col md:flex-row items-end gap-8 z-10 w-full left-1/2 -translate-x-1/2">
               <div className="relative w-48 h-64 md:w-64 md:h-80 shadow-2xl rounded-xl overflow-hidden border-4 border-[#0f1014] hidden md:block flex-shrink-0 cursor-pointer group" onClick={() => setSelectedImageUrl(evento.imagen_url) || setShowImageModal(true)}>
-                  <Image src={evento.imagen_url || '/placeholder-event.jpg'} alt="Flyer" fill className="object-cover group-hover:scale-105 transition-transform duration-500"/>
+                  <Image src={evento.imagen_url || '/placeholder-event.jpg'} alt="Flyer" fill sizes="256px" className="object-cover group-hover:scale-105 transition-transform duration-500"/>
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                      <EyeIcon className="text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" size={32} />
                   </div>
@@ -431,7 +432,7 @@ function EventoDetalleContent() {
           <div className="lg:col-span-2 space-y-8">
               {/* Image Mobile */}
               <div className="block md:hidden rounded-xl overflow-hidden shadow-2xl relative h-64 border border-gray-800" onClick={() => setSelectedImageUrl(evento.imagen_url) || setShowImageModal(true)}>
-                  <Image src={evento.imagen_url || '/placeholder-event.jpg'} alt="Flyer" fill className="object-cover"/>
+                  <Image src={evento.imagen_url || '/placeholder-event.jpg'} alt="Flyer" fill sizes="100vw" className="object-cover"/>
               </div>
 
               <div className="bg-[#181a20] p-6 md:p-8 rounded-2xl border border-gray-800 shadow-xl">
@@ -709,7 +710,7 @@ function EventoDetalleContent() {
        
        <Modal isOpen={showImageModal} onClose={() => setShowImageModal(false)} title="Vista Previa">
           <div className="relative h-[80vh] w-full">
-            <Image src={selectedImageUrl} alt="Preview" fill className="object-contain" />
+            <Image src={selectedImageUrl} alt="Preview" fill sizes="100vw" className="object-contain" />
           </div>
        </Modal>
 

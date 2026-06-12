@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import bcrypt from 'bcryptjs';
 import { createToken } from '@/lib/auth';
 
@@ -25,7 +25,7 @@ export async function POST(request) {
     }
 
     try {
-      client = await pool.connect();
+      client = await connectWithRetry();
     } catch (connectionError) {
       console.error('💥 Error de conexión en /api/auth/login:', connectionError);
       return NextResponse.json(

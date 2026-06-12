@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server'; 
+import pool, { connectWithRetry } from '@/lib/db-server'; 
 import jwt from 'jsonwebtoken';
 
 export async function GET(request) {
@@ -14,7 +14,7 @@ export async function GET(request) {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
-    const client = await pool.connect();
+    const client = await connectWithRetry();
     
     try {
         // Obtener datos básicos del usuario y sus plataformas
@@ -85,7 +85,7 @@ export async function PUT(request) {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     const data = await request.json();
-    const client = await pool.connect();
+    const client = await connectWithRetry();
 
     try {
         // Iniciar transacción
@@ -94,23 +94,28 @@ export async function PUT(request) {
         // Actualizar datos básicos
         if (data.nombre_completo || data.numero_telefono) {
             let nombre = undefined;
-            let apellido = undefined;
+            // apellido = null => conservar el apellido_paterno actual (vía COALESCE).
+            // Antes, un nombre de una sola palabra ponía apellido_paterno = '' y
+            // borraba el apellido existente del miembro.
+            let apellido = null;
             if (data.nombre_completo) {
-                const parts = data.nombre_completo.split(' ');
-                apellido = parts.length > 1 ? parts.pop() : '';
-                nombre = parts.join(' ');
+                const parts = String(data.nombre_completo).trim().split(/\s+/);
+                if (parts.length > 1) {
+                    apellido = parts.pop();
+                    nombre = parts.join(' ');
+                } else if (parts[0]) {
+                    nombre = parts[0]; // una sola palabra: actualizar nombre, conservar apellido
+                }
             }
-            
-            // Construir query dinámicamente o usar COALESCE
-            // Preferimos update explícito
+
             if (nombre !== undefined) {
                  await client.query(
-                    'UPDATE miembro SET nombre = $1, apellido_paterno = $2, numero_telefono = COALESCE($3, numero_telefono) WHERE id_miembro = $4',
-                    [nombre, apellido, data.numero_telefono, decoded.id]
+                    'UPDATE miembro SET nombre = $1, apellido_paterno = COALESCE($2, apellido_paterno), numero_telefono = COALESCE($3, numero_telefono), updated_at = NOW() WHERE id_miembro = $4',
+                    [nombre, apellido, data.numero_telefono ?? null, decoded.id]
                  );
             } else if (data.numero_telefono) {
                  await client.query(
-                    'UPDATE miembro SET numero_telefono = $1 WHERE id_miembro = $2',
+                    'UPDATE miembro SET numero_telefono = $1, updated_at = NOW() WHERE id_miembro = $2',
                     [data.numero_telefono, decoded.id]
                  );
             }

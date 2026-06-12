@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 const PROCEDENCIAS = new Set([
@@ -15,7 +15,7 @@ export async function GET(request, { params }) {
   if (!id || isNaN(Number(id))) {
     return NextResponse.json({ error: 'ID de evento inválido' }, { status: 400 });
   }
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   try {
     const result = await client.query(
       `SELECT id_juez, id_evento, id_miembro, nombre_completo, correo_electronico,
@@ -66,7 +66,7 @@ export async function POST(request, { params }) {
     );
   }
 
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   try {
     const result = await client.query(
       `INSERT INTO juez_evento (
@@ -112,7 +112,7 @@ export async function DELETE(request, { params }) {
     return NextResponse.json({ error: 'id_juez inválido' }, { status: 400 });
   }
 
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   try {
     const res = await client.query(
       'DELETE FROM juez_evento WHERE id_juez = $1 AND id_evento = $2 RETURNING id_juez',

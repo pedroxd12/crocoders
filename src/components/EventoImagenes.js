@@ -44,6 +44,7 @@ export default function EventoImagenes({ eventoId }) {
               src={imagen.ruta || '/placeholder-event.jpg'}
               alt={`Imagen del evento ${eventoId}`}
               fill
+              sizes="(max-width: 768px) 50vw, 33vw"
               className="object-cover rounded-lg"
               onError={(e) => {
                 e.target.src = '/placeholder-event.jpg';

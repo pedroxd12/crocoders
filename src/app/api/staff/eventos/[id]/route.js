@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
-import { requireStaff } from '@/lib/auth';
+import pool, { connectWithRetry } from '@/lib/db-server';
+import { requireAuth } from '@/lib/auth';
 
-// GET - Obtener detalles de un evento como staff
+// GET - Obtener detalles de un evento como staff.
+// Gate: autenticado; abajo se exige pertenencia a staff_evento de ESTE evento (403).
 export async function GET(request, { params }) {
-  const guard = await requireStaff(request);
+  const guard = await requireAuth(request);
   if (!guard.ok) return guard.response;
 
   const { id } = await params;
-  const client = await pool.connect();
+  const client = await connectWithRetry();
 
   try {
     const id_miembro = guard.session.id;

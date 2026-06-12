@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import bcrypt from 'bcryptjs';
 import { authRegisterSchema, parseOrError } from '@/lib/validation';
 
@@ -33,7 +33,7 @@ export async function POST(request) {
   } = data;
 
   try {
-    const client = await pool.connect();
+    const client = await connectWithRetry();
 
     try {
       await client.query('BEGIN');

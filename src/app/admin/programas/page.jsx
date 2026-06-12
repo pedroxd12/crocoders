@@ -296,7 +296,7 @@ export default function ProgramasRecurrentes() {
             rows={3}
           />
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Fecha Inicio *"
               type="date"
@@ -314,7 +314,7 @@ export default function ProgramasRecurrentes() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Hora Inicio"
               type="time"
@@ -353,7 +353,7 @@ export default function ProgramasRecurrentes() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Select
               label="Tipo de Evento *"
               value={formData.id_tipo_evento}
@@ -377,7 +377,7 @@ export default function ProgramasRecurrentes() {
             onChange={(e) => setFormData({ ...formData, ubicacion: e.target.value })}
           />
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Input
               label="Sesiones Requeridas (Certificado)"
               type="number"
@@ -403,10 +403,11 @@ export default function ProgramasRecurrentes() {
             </label>
             {formData.imagen_url && (
               <div className="mb-2 relative w-full h-48 bg-gray-700 rounded-lg overflow-hidden">
-                <Image 
-                  src={formData.imagen_url} 
-                  alt="Vista previa" 
-                  fill 
+                <Image
+                  src={formData.imagen_url}
+                  alt="Vista previa"
+                  fill
+                  sizes="(max-width: 768px) 100vw, 500px"
                   className="object-cover"
                 />
                 <button

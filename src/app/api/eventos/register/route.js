@@ -1,9 +1,21 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { eventoRegisterSchema, parseOrError } from '@/lib/validation';
 import { getSession } from '@/lib/auth';
+import { rateLimit } from '@/lib/rate-limit';
 
 export async function POST(request) {
+  // Registro mayormente público (invitados/equipos sin cuenta): limitar por IP
+  // para evitar spam de inscripciones. Las constraints de BD evitan duplicados,
+  // pero el rate-limit corta el abuso antes de tocar la DB.
+  const rl = rateLimit(request, { scope: 'evento-register', limit: 30, windowMs: 60 * 60 * 1000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: 'Demasiados intentos de registro. Intenta de nuevo más tarde.' },
+      { status: 429 },
+    );
+  }
+
   // Autenticación OPCIONAL: los miembros llegan con sesión (JWT), pero los
   // invitados se registran sin cuenta. La identidad se resuelve por `tipo`.
   const session = await getSession(request);
@@ -52,7 +64,7 @@ export async function POST(request) {
 
   let client;
   try {
-    client = await pool.connect();
+    client = await connectWithRetry();
   } catch (connectionError) {
     console.error('Error de conexión en /api/eventos/register:', connectionError);
     return NextResponse.json(

@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 import { sanitizeHtml } from '@/lib/sanitize';
 
 export async function GET(request) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   try {
     const query = `
       SELECT 
@@ -66,7 +66,7 @@ export async function GET(request) {
 export async function POST(request) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   try {
     const body = await request.json();
     const {
@@ -110,6 +110,17 @@ export async function POST(request) {
     }
     if (!Number.isInteger(parseInt(cupos)) || parseInt(cupos) <= 0) {
       return NextResponse.json({ error: 'Los cupos deben ser mayores a 0' }, { status: 400 });
+    }
+    // Coherencia de integrantes en concursos por equipos: min >= 2 y min <= max.
+    if (es_concurso && modalidad === 'equipos') {
+      const minInt = parseInt(min_integrantes_equipo) || 2;
+      const maxInt = parseInt(max_integrantes_equipo) || 3;
+      if (minInt < 2) {
+        return NextResponse.json({ error: 'El mínimo de integrantes por equipo debe ser al menos 2.' }, { status: 400 });
+      }
+      if (minInt > maxInt) {
+        return NextResponse.json({ error: 'El mínimo de integrantes no puede ser mayor que el máximo.' }, { status: 400 });
+      }
     }
 
     await client.query('BEGIN');
@@ -201,13 +212,14 @@ export async function POST(request) {
       else if (c.includes('cupos')) msg = 'Los cupos deben ser mayores a 0.';
       else if (c.includes('fecha')) msg = 'La fecha de fin debe ser igual o posterior a la de inicio.';
       else if (c.includes('hora')) msg = 'En eventos de un mismo día, la hora de fin debe ser posterior a la de inicio.';
+      else if (c.includes('modalidad') || c.includes('integrantes')) msg = 'Configuración de concurso inválida: en modalidad por equipos el máximo de integrantes debe ser ≥ 2.';
       return NextResponse.json({ error: msg }, { status: 400 });
     }
     if (error.code === '23503') {
       return NextResponse.json({ error: 'Tipo de evento, alcance o plataforma inválidos.' }, { status: 400 });
     }
     return NextResponse.json(
-      { error: 'Error al crear evento: ' + error.message },
+      { error: 'Error al crear evento' },
       { status: 500 }
     );
   } finally {

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 import fs from 'fs';
 import path from 'path';
@@ -32,7 +32,7 @@ export async function POST(request, { params }) {
     );
   }
 
-  const client = await pool.connect();
+  const client = await connectWithRetry();
 
   try {
     const eventoCheck = await client.query(
@@ -138,7 +138,7 @@ export async function GET(request, { params }) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
   const { id } = await params;
-  const client = await pool.connect();
+  const client = await connectWithRetry();
 
   try {
     if (!id) {
@@ -173,19 +173,20 @@ export async function DELETE(request, { params }) {
   const { id } = await params;
   const { searchParams } = new URL(request.url);
   const imageId = searchParams.get('imageId');
-  const client = await pool.connect();
-  
-  try {
-    if (!id || !imageId) {
-      return NextResponse.json(
-        { message: 'ID de evento e ID de imagen son requeridos' },
-        { status: 400 }
-      );
-    }
 
+  if (!isValidId(id) || !isValidId(imageId)) {
+    return NextResponse.json(
+      { message: 'ID de evento e ID de imagen deben ser numéricos' },
+      { status: 400 }
+    );
+  }
+
+  const client = await connectWithRetry();
+
+  try {
     // Obtener información de la imagen
     const imagenResult = await client.query(
-      `SELECT * FROM evento_imagenes 
+      `SELECT * FROM evento_imagenes
        WHERE id_imagen = $1 AND id_evento = $2`,
       [imageId, id]
     );
@@ -199,21 +200,23 @@ export async function DELETE(request, { params }) {
 
     const imagen = imagenResult.rows[0];
 
-    // Eliminar archivo físico
-    const filePath = path.join(
-      process.cwd(), 
-      'public', 
-      imagen.ruta, 
-      imagen.nombre_archivo
-    );
-    
-    try {
-      await fs.promises.unlink(filePath);
-    } catch (err) {
-      console.error(`Error al eliminar archivo ${filePath}:`, err);
-      if (err.code !== 'ENOENT') { // Ignorar si el archivo no existe
-        throw err;
+    // Eliminar archivo físico. Contención anti-traversal: la ruta resuelta DEBE
+    // quedar dentro de public/uploads/eventos; `imagen.ruta` viene de la BD y no
+    // debe poder apuntar fuera del directorio de subidas.
+    const uploadsRoot = path.resolve(process.cwd(), 'public/uploads/eventos');
+    const filePath = path.resolve(process.cwd(), 'public', `.${imagen.ruta}`, imagen.nombre_archivo);
+
+    if (filePath.startsWith(uploadsRoot + path.sep)) {
+      try {
+        await fs.promises.unlink(filePath);
+      } catch (err) {
+        console.error(`Error al eliminar archivo ${filePath}:`, err);
+        if (err.code !== 'ENOENT') { // Ignorar si el archivo no existe
+          throw err;
+        }
       }
+    } else {
+      console.warn(`Ruta de imagen fuera de uploads, no se borra del disco: ${filePath}`);
     }
 
     // Eliminar registro de la base de datos
@@ -226,7 +229,7 @@ export async function DELETE(request, { params }) {
   } catch (error) {
     console.error('Error deleting image:', error);
     return NextResponse.json(
-      { message: 'Error al eliminar imagen: ' + error.message },
+      { message: 'Error al eliminar imagen' },
       { status: 500 }
     );
   } finally {

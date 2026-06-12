@@ -1,13 +1,25 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
+import { UTApi } from "uploadthing/server";
+
+const utapi = new UTApi();
+
+async function deleteFromUploadThing(keys) {
+  if (!keys || keys.length === 0) return;
+  try {
+    await utapi.deleteFiles(keys);
+  } catch (e) {
+    console.error('Error eliminando archivos de UploadThing:', e);
+  }
+}
 
 // GET - Obtener detalles de un programa
 export async function GET(request, { params }) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
   const { id } = await params;
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   
   try {
     const result = await client.query(
@@ -51,7 +63,7 @@ export async function PUT(request, { params }) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
   const { id } = await params;
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   
   try {
     const {
@@ -136,10 +148,18 @@ export async function DELETE(request, { params }) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
   const { id } = await params;
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   
   try {
-    // Por la cascada, esto eliminará automáticamente sesiones e inscripciones
+    // Recolectar los storage_key de las evidencias del programa ANTES del cascade,
+    // para no dejar archivos huérfanos en UploadThing al borrarse las filas.
+    const evidRes = await client.query(
+      'SELECT storage_key FROM evidencia WHERE id_programa = $1 AND storage_key IS NOT NULL',
+      [id],
+    );
+    const evidenciaKeys = evidRes.rows.map((r) => r.storage_key);
+
+    // Por la cascada, esto eliminará automáticamente sesiones, inscripciones y evidencias.
     const result = await client.query(
       'DELETE FROM programa_recurrente WHERE id_programa = $1 RETURNING *',
       [id]
@@ -150,6 +170,11 @@ export async function DELETE(request, { params }) {
         { error: 'Programa no encontrado' },
         { status: 404 }
       );
+    }
+
+    // Best-effort: limpiar los archivos del CDN tras el borrado en BD.
+    if (evidenciaKeys.length > 0) {
+      deleteFromUploadThing(evidenciaKeys);
     }
 
     return NextResponse.json({ message: 'Programa eliminado correctamente' });

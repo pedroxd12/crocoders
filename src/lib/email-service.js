@@ -19,6 +19,9 @@ export async function sendRecoveryEmail(email, name, userId) {
     // Token criptográficamente fuerte y código de 6 dígitos generado con crypto.randomInt
     const token = crypto.randomBytes(32).toString('hex');
     const verificationCode = crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
+    // Se almacena el HASH del código, nunca el código en claro (este solo viaja en
+    // el correo). Requiere la migración 004 (columna varchar(64)).
+    const codigoHash = crypto.createHash('sha256').update(verificationCode).digest('hex');
 
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 1);
@@ -33,7 +36,7 @@ export async function sendRecoveryEmail(email, name, userId) {
       INSERT INTO password_reset_token
         (id_miembro, token, codigo_verificacion, expires_at)
       VALUES
-        (${userId}, ${token}, ${verificationCode}, ${expiresAt})
+        (${userId}, ${token}, ${codigoHash}, ${expiresAt})
     `;
 
     const resetLink = `${process.env.NEXT_PUBLIC_SITE_URL}/iniciar?recovery=true`;

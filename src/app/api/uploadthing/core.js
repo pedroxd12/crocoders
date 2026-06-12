@@ -39,22 +39,33 @@ const getUserFromRequest = async (req) => {
   return null;
 };
 
+// Autoriza una subida exigiendo que el usuario sea ADMINISTRADOR.
+// Todas las subidas (flyers de evento, evidencias, imágenes) son acciones de
+// administración: sin este guard cualquier miembro autenticado podía subir
+// archivos a UploadThing y consumir la cuota de la cuenta.
+const requireAdminUpload = async (req, tag) => {
+  const user = await getUserFromRequest(req);
+  if (!user) {
+    console.warn(`[${tag}] Middleware: sin sesión.`);
+    throw new UploadThingError("No autenticado: inicia sesión para subir archivos.");
+  }
+  const userId = user.id_miembro || user.id;
+  if (!userId) {
+    console.error(`[${tag}] Middleware: token sin identificador de usuario.`);
+    throw new UploadThingError("No autorizado: identificador de usuario ausente.");
+  }
+  const role = (user.role || '').toLowerCase();
+  if (role !== 'administrador') {
+    console.warn(`[${tag}] Middleware: rol '${role}' no autorizado (se requiere administrador).`);
+    throw new UploadThingError("No autorizado: se requieren permisos de administrador.");
+  }
+  return { userId, userEmail: user.email };
+};
+
 export const ourFileRouter = {
   imageUploader: f({ image: { maxFileSize: "4MB", maxFileCount: 1 } })
     .middleware(async ({ req }) => {
-      console.log("[imageUploader] Middleware: Attempting authorization...");
-      const user = await getUserFromRequest(req);
-      if (!user) {
-        console.warn("[imageUploader] Middleware: Authorization failed - No user.");
-        throw new UploadThingError("Unauthorized: You must be logged in to upload images.");
-      }
-      const userId = user.id_miembro || user.id;
-      if (!userId) {
-        console.error("[imageUploader] Middleware: Authorization failed - User ID missing from token payload.");
-        throw new UploadThingError("Unauthorized: User identifier missing.");
-      }
-      console.log("[imageUploader] Middleware: Authorized successfully. User ID:", userId);
-      return { userId: userId, userEmail: user.email };
+      return await requireAdminUpload(req, 'imageUploader');
     })
     .onUploadComplete(async ({ metadata, file }) => {
       console.log("[imageUploader] onUploadComplete: Invoked.");
@@ -72,19 +83,7 @@ export const ourFileRouter = {
 
   eventoImageUploader: f({ image: { maxFileSize: "4MB", maxFileCount: 5 } })
     .middleware(async ({ req }) => {
-      console.log("[eventoImageUploader] Middleware: Attempting authorization...");
-      const user = await getUserFromRequest(req);
-      if (!user) {
-        console.warn("[eventoImageUploader] Middleware: Authorization failed - No user.");
-        throw new UploadThingError("Unauthorized: You must be logged in to upload event images.");
-      }
-      const userId = user.id_miembro || user.id;
-      if (!userId) {
-        console.error("[eventoImageUploader] Middleware: Authorization failed - User ID missing from token payload.");
-        throw new UploadThingError("Unauthorized: User identifier missing.");
-      }
-      console.log("[eventoImageUploader] Middleware: Authorized successfully. User ID:", userId, "User Email:", user.email);
-      return { userId: userId, userEmail: user.email };
+      return await requireAdminUpload(req, 'eventoImageUploader');
     })
     .onUploadComplete(async ({ metadata, file }) => {
       console.log("[eventoImageUploader] onUploadComplete: Invoked.");
@@ -106,19 +105,7 @@ export const ourFileRouter = {
 
   evidenciaUploader: f({ image: { maxFileSize: "8MB", maxFileCount: 1 } })
     .middleware(async ({ req }) => {
-      console.log("[evidenciaUploader] Middleware: Attempting authorization...");
-      const user = await getUserFromRequest(req);
-      if (!user) {
-        console.warn("[evidenciaUploader] Middleware: Authorization failed - No user.");
-        throw new UploadThingError("Unauthorized: You must be logged in to upload evidence.");
-      }
-      const userId = user.id_miembro || user.id;
-      if (!userId) {
-        console.error("[evidenciaUploader] Middleware: Authorization failed - User ID missing from token payload.");
-        throw new UploadThingError("Unauthorized: User identifier missing.");
-      }
-      console.log("[evidenciaUploader] Middleware: Authorized successfully. User ID:", userId);
-      return { userId: userId };
+      return await requireAdminUpload(req, 'evidenciaUploader');
     })
     .onUploadComplete(async ({ metadata, file }) => {
       console.log("[evidenciaUploader] onUploadComplete: Invoked.");

@@ -67,7 +67,7 @@ export async function GET() {
     }
     
     return NextResponse.json(
-      { error: 'Error al obtener eventos: ' + error.message },
+      { error: 'Error al obtener eventos' },
       { status: 500 }
     );
   }

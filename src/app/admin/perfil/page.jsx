@@ -334,45 +334,78 @@ export default function ProfilePage() {
                       <LoadingSpinner />
                     </div>
                   ) : events.length > 0 ? (
-                    <div className="overflow-x-auto rounded-xl border border-gray-700">
-                      <table className="w-full text-left">
-                        <thead className="bg-gray-700">
-                          <tr>
-                            <th className="p-3 font-medium">Evento</th>
-                            <th className="p-3 font-medium">Fecha</th>
-                            <th className="p-3 font-medium">Participación</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {events.map((event) => (
-                            <tr 
-                              key={`event-${event.id_evento}`}
-                              className="border-b border-gray-700 hover:bg-gray-700/50 transition-colors duration-200"
-                            >
-                              <td className="p-3 font-medium">{event.nombre}</td>
-                              <td className="p-3">
+                    <>
+                      {/* Escritorio (md+): tabla nativa — sin cambios respecto al diseño original */}
+                      <div className="hidden md:block overflow-x-auto rounded-xl border border-gray-700">
+                        <table className="w-full text-left">
+                          <thead className="bg-gray-700">
+                            <tr>
+                              <th className="p-3 font-medium">Evento</th>
+                              <th className="p-3 font-medium">Fecha</th>
+                              <th className="p-3 font-medium">Participación</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {events.map((event) => (
+                              <tr
+                                key={`event-${event.id_evento}`}
+                                className="border-b border-gray-700 hover:bg-gray-700/50 transition-colors duration-200"
+                              >
+                                <td className="p-3 font-medium">{event.nombre}</td>
+                                <td className="p-3">
+                                  {new Date(event.fecha).toLocaleDateString('es-MX', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric'
+                                  })}
+                                </td>
+                                <td className="p-3">
+                                  {event.participacion ? (
+                                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-900/50 text-green-300 border border-green-600">
+                                      Participó
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-900/50 text-red-300 border border-red-600">
+                                      No participó
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Móvil (< md): cada participación como tarjeta apilada */}
+                      <div className="md:hidden space-y-3">
+                        {events.map((event) => (
+                          <div
+                            key={`event-card-${event.id_evento}`}
+                            className="rounded-xl border border-gray-700 bg-gray-700/30 p-4"
+                          >
+                            <p className="font-medium text-gray-100">{event.nombre}</p>
+                            <div className="mt-2 flex items-center justify-between gap-3">
+                              <span className="text-sm text-gray-400">
                                 {new Date(event.fecha).toLocaleDateString('es-MX', {
                                   year: 'numeric',
                                   month: 'long',
                                   day: 'numeric'
                                 })}
-                              </td>
-                              <td className="p-3">
-                                {event.participacion ? (
-                                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-900/50 text-green-300 border border-green-600">
-                                    Participó
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-900/50 text-red-300 border border-red-600">
-                                    No participó
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                              </span>
+                              {event.participacion ? (
+                                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-900/50 text-green-300 border border-green-600 shrink-0">
+                                  Participó
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-900/50 text-red-300 border border-red-600 shrink-0">
+                                  No participó
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
                   ) : (
                     <div className="text-center py-8 text-gray-400">
                       No hay registros de participación en eventos aún.

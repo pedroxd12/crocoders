@@ -1,15 +1,17 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
-import { requireStaff } from '@/lib/auth';
+import pool, { connectWithRetry } from '@/lib/db-server';
+import { requireAuth } from '@/lib/auth';
 
-// GET - Obtener eventos donde el usuario es staff
+// GET - Obtener eventos donde el usuario es staff.
+// Gate: autenticado; la consulta filtra por pertenencia a staff_evento, así que
+// un usuario sin asignaciones recibe una lista vacía (no requiere rol global).
 export async function GET(request) {
-  const guard = await requireStaff(request);
+  const guard = await requireAuth(request);
   if (!guard.ok) return guard.response;
 
   let client;
   try {
-    client = await pool.connect();
+    client = await connectWithRetry();
     const id_miembro = guard.session.id;
 
     const result = await client.query(

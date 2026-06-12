@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 // POST - Inscribir usuario a un programa
@@ -7,7 +7,7 @@ export async function POST(request, { params }) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
   const { id } = await params;
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   
   try {
     const { id_miembro, id_invitado } = await request.json();

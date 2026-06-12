@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 export async function GET(request) {
@@ -8,7 +8,7 @@ export async function GET(request) {
 
   let client;
   try {
-    client = await pool.connect();
+    client = await connectWithRetry();
     const query = `
       SELECT
         m.id_miembro,
@@ -60,13 +60,82 @@ export async function GET(request) {
 const ROLES_VALIDOS = new Set(['administrador', 'usuario', 'staff']);
 const ESTADOS_VALIDOS = new Set(['activo', 'inactivo', 'baja']);
 
+// POST: promueve a administrador a un miembro existente, identificado por correo.
+// Lo usa el modal "Añadir Nuevo Administrador" de /admin/admins.
+export async function POST(request) {
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
+
+  let client;
+  try {
+    const { correo_electronico } = await request.json().catch(() => ({}));
+
+    const correo = typeof correo_electronico === 'string' ? correo_electronico.trim() : '';
+    if (!correo) {
+      return NextResponse.json({ error: 'El correo electrónico es requerido' }, { status: 400 });
+    }
+
+    client = await connectWithRetry();
+
+    const existing = await client.query(
+      `SELECT m.id_miembro, m.nombre, m.apellido_paterno, m.apellido_materno,
+              m.correo_electronico, m.rol, cc.nombre AS carrera
+         FROM miembro m
+         LEFT JOIN catalogo_carrera cc ON m.id_carrera = cc.id_carrera
+        WHERE LOWER(m.correo_electronico) = LOWER($1)
+        LIMIT 1`,
+      [correo],
+    );
+
+    if (existing.rowCount === 0) {
+      return NextResponse.json(
+        { error: 'No existe un miembro registrado con ese correo electrónico' },
+        { status: 404 },
+      );
+    }
+
+    const miembro = existing.rows[0];
+
+    if (miembro.rol === 'administrador') {
+      return NextResponse.json(
+        { error: 'Este miembro ya es administrador' },
+        { status: 409 },
+      );
+    }
+
+    const updateRes = await client.query(
+      `UPDATE miembro
+          SET rol = 'administrador', updated_at = NOW()
+        WHERE id_miembro = $1
+       RETURNING id_miembro, nombre, apellido_paterno, apellido_materno, correo_electronico, rol`,
+      [miembro.id_miembro],
+    );
+
+    const updated = updateRes.rows[0];
+    const nombre_completo = `${updated.nombre} ${updated.apellido_paterno} ${updated.apellido_materno || ''}`.trim();
+
+    return NextResponse.json({
+      id_miembro: updated.id_miembro,
+      nombre_completo,
+      correo_electronico: updated.correo_electronico,
+      carrera: miembro.carrera,
+      rol: updated.rol,
+    });
+  } catch (error) {
+    console.error('Error en POST /api/admin/miembros:', error);
+    return NextResponse.json({ error: 'Error al agregar administrador' }, { status: 500 });
+  } finally {
+    if (client) client.release();
+  }
+}
+
 export async function PUT(request) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
 
   let client;
   try {
-    client = await pool.connect();
+    client = await connectWithRetry();
     const { id_miembro, rol, estado } = await request.json();
 
     const idNum = Number(id_miembro);
@@ -135,41 +204,67 @@ export async function DELETE(request) {
   const { searchParams } = new URL(request.url);
   const id = searchParams.get('id');
 
-  if (!id) {
-    return NextResponse.json({ error: 'ID es requerido' }, { status: 400 });
+  const idNum = Number(id);
+  if (!Number.isInteger(idNum) || idNum <= 0) {
+    return NextResponse.json({ error: 'ID de miembro inválido' }, { status: 400 });
   }
 
   let client;
   try {
-    client = await pool.connect();
-    const userCheck = await client.query('SELECT rol FROM miembro WHERE id_miembro = $1', [id]);
-    
+    client = await connectWithRetry();
+    // Baja LÓGICA en transacción. Un hard delete (a) destruiría por CASCADE todo el
+    // historial de inscripciones/asistencias/pagos del miembro y (b) fallaría con
+    // 23503 → 500 si el miembro creó evidencias (esa FK no es CASCADE). El soft
+    // delete es coherente con el resto del sistema (estado='baja' + deleted_at) y
+    // con el toggle de estado del PUT.
+    await client.query('BEGIN');
+
+    // Bloquear la fila para evitar TOCTOU con el conteo de administradores.
+    const userCheck = await client.query(
+      'SELECT rol, estado FROM miembro WHERE id_miembro = $1 FOR UPDATE',
+      [idNum],
+    );
+
     if (userCheck.rows.length === 0) {
-       return NextResponse.json({ error: 'Usuario no encontrado' }, { status: 404 });
+      await client.query('ROLLBACK');
+      return NextResponse.json({ error: 'Usuario no encontrado' }, { status: 404 });
     }
 
     const userToDelete = userCheck.rows[0];
 
-    if (userToDelete.rol === 'administrador') {
-       const adminCountRes = await client.query("SELECT COUNT(*) FROM miembro WHERE rol = 'administrador' AND estado = 'activo'");
-       const adminCount = parseInt(adminCountRes.rows[0].count);
-       
-       if (adminCount <= 1) {
-         return NextResponse.json({ error: 'No se puede eliminar al último administrador del sistema.' }, { status: 400 });
-       }
+    if (userToDelete.estado === 'baja') {
+      await client.query('ROLLBACK');
+      return NextResponse.json({ error: 'El miembro ya está dado de baja' }, { status: 409 });
     }
 
-    // Hard delete
-    const query = `
-      DELETE FROM miembro 
-      WHERE id_miembro = $1
-      RETURNING id_miembro
-    `;
-    
-    await client.query(query, [id]);
+    // No permitir dar de baja al último administrador activo.
+    if (userToDelete.rol === 'administrador') {
+      const adminCountRes = await client.query(
+        "SELECT COUNT(*)::int AS count FROM miembro WHERE rol = 'administrador' AND estado = 'activo'",
+      );
+      if (adminCountRes.rows[0].count <= 1) {
+        await client.query('ROLLBACK');
+        return NextResponse.json(
+          { error: 'No se puede eliminar al último administrador del sistema.' },
+          { status: 400 },
+        );
+      }
+    }
 
-    return NextResponse.json({ success: true, message: 'Miembro y sus datos asociados eliminados correctamente' });
+    await client.query(
+      `UPDATE miembro
+          SET estado = 'baja', deleted_at = NOW(), updated_at = NOW()
+        WHERE id_miembro = $1`,
+      [idNum],
+    );
+
+    await client.query('COMMIT');
+
+    return NextResponse.json({ success: true, message: 'Miembro dado de baja correctamente' });
   } catch (error) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+    }
     console.error('Error en DELETE /api/admin/miembros:', error);
     return NextResponse.json({ error: 'Error al eliminar miembro' }, { status: 500 });
   } finally {

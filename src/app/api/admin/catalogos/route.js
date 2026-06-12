@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 export async function GET(request) {
@@ -8,7 +8,7 @@ export async function GET(request) {
 
   let client;
   try {
-    client = await pool.connect();
+    client = await connectWithRetry();
 
     // Un solo client no admite queries concurrentes reales; se ejecutan en serie.
     const tiposRes = await client.query('SELECT id_tipo_evento, nombre, permite_equipos FROM catalogo_tipo_evento ORDER BY nombre');

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 // POST: un administrador inscribe a un miembro o invitado existente en un evento.
@@ -28,7 +28,7 @@ export async function POST(request) {
     return NextResponse.json({ error: "tipo_usuario debe ser 'miembro' o 'invitado'" }, { status: 400 });
   }
 
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   try {
     await client.query('BEGIN');
 

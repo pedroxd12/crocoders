@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool, { sql } from '@/lib/db-server';
+import pool, { sql, connectWithRetry } from '@/lib/db-server';
 import jwt from 'jsonwebtoken';
 
 function verifyAuth(request) {
@@ -64,7 +64,7 @@ export async function GET(request) {
     return NextResponse.json({ success: false, error: 'No autorizado' }, { status: 401 });
   }
 
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   try {
     const user = await readProfile(client, decoded.id);
     if (!user) {
@@ -129,7 +129,7 @@ export async function PUT(request) {
     return NextResponse.json({ success: false, error: 'Body inválido' }, { status: 400 });
   }
 
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   try {
     await client.query('BEGIN');
 

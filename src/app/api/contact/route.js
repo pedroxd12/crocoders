@@ -1,14 +1,44 @@
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
+import { rateLimit } from '@/lib/rate-limit';
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request) {
-  const { name, email, subject, message } = await request.json();
+  // Rate limit: este endpoint público envía correo; sin límite es un relay de spam.
+  const rl = rateLimit(request, { scope: 'contact', limit: 5, windowMs: 60 * 60 * 1000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: 'Demasiados mensajes enviados. Intenta de nuevo más tarde.' },
+      { status: 429 },
+    );
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ success: false, error: 'Cuerpo no es JSON válido' }, { status: 400 });
+  }
+  const name = String(body?.name ?? '').trim();
+  const email = String(body?.email ?? '').trim();
+  const subject = String(body?.subject ?? '').trim();
+  const message = String(body?.message ?? '').trim();
 
   // Validación básica
   if (!name || !email || !subject || !message) {
     return NextResponse.json(
       { success: false, error: 'Todos los campos son requeridos' },
       { status: 400 }
+    );
+  }
+  if (!EMAIL_RE.test(email) || email.length > 200) {
+    return NextResponse.json({ success: false, error: 'Correo electrónico no válido' }, { status: 400 });
+  }
+  if (name.length > 120 || subject.length > 200 || message.length > 5000) {
+    return NextResponse.json(
+      { success: false, error: 'Alguno de los campos excede la longitud permitida.' },
+      { status: 400 },
     );
   }
 

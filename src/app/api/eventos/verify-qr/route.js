@@ -1,7 +1,7 @@
 // API para verificar y marcar asistencia mediante QR
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
-import { requireStaff } from '@/lib/auth';
+import pool, { connectWithRetry } from '@/lib/db-server';
+import { requireAuth } from '@/lib/auth';
 
 // Ventana máxima de validez del QR: 24 horas. Permite cierto margen sin abrir indefinidamente.
 const QR_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -9,7 +9,9 @@ const QR_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const QR_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 export async function POST(request) {
-  const guard = await requireStaff(request);
+  // Gate: cualquier usuario autenticado; la autorización fina por evento se hace
+  // más abajo (administrador, o pertenencia a staff_evento de ESTE evento).
+  const guard = await requireAuth(request);
   if (!guard.ok) return guard.response;
 
   let client;
@@ -93,7 +95,7 @@ export async function POST(request) {
     }
 
     try {
-      client = await pool.connect();
+      client = await connectWithRetry();
     } catch (connectionError) {
       console.error('💥 Error de conexión en /api/eventos/verify-qr:', connectionError);
       return NextResponse.json(

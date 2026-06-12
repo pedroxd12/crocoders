@@ -5,6 +5,11 @@ const nextConfig = {
   serverExternalPackages: ['pg', 'pg-native', 'sharp', 'bcryptjs', 'cheerio'],
   images: {
     formats: ['image/avif', 'image/webp'],
+    // Permitir SVG remoto (algunos archivos de UploadThing / avatares lo son).
+    // Se sirven con CSP sandbox y como adjunto para mitigar XSS de SVG malicioso.
+    dangerouslyAllowSVG: true,
+    contentDispositionType: 'attachment',
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
     remotePatterns: [
       {
         protocol: 'https',

@@ -26,18 +26,26 @@ export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
+    const idNum = Number(id);
 
-    if (!id) {
+    if (!Number.isInteger(idNum) || idNum <= 0) {
       return NextResponse.json(
-        { error: 'ID de invitado no proporcionado' },
+        { error: 'ID de invitado inválido' },
         { status: 400 }
       );
     }
 
-    await sql`
+    // OJO: por las FKs ON DELETE CASCADE, esto elimina también las inscripciones
+    // y asistencias del invitado. RETURNING permite distinguir "no existía" (404).
+    const deleted = await sql`
       DELETE FROM invitado
-      WHERE id_invitado = ${id}
+      WHERE id_invitado = ${idNum}
+      RETURNING id_invitado
     `;
+
+    if (deleted.length === 0) {
+      return NextResponse.json({ error: 'Invitado no encontrado' }, { status: 404 });
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

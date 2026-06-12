@@ -1,12 +1,12 @@
 
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 export async function GET(request) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   try {
     // 1. Members count
     const membersRes = await client.query("SELECT COUNT(*) FROM miembro WHERE estado = 'activo'");

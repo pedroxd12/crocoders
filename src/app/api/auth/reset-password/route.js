@@ -17,9 +17,11 @@ export async function POST(request) {
 
     const sessionToken = authHeader.split(' ')[1];
     let decoded;
-    
+
+    // Mismo secreto dedicado que usó /verify-token al firmar (con fallback).
+    const resetSecret = process.env.PASSWORD_RESET_SECRET || process.env.JWT_SECRET;
     try {
-      decoded = jwt.verify(sessionToken, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+      decoded = jwt.verify(sessionToken, resetSecret, { algorithms: ['HS256'] });
     } catch (err) {
       return NextResponse.json(
         { error: 'Sesión inválida o expirada' },
@@ -27,8 +29,8 @@ export async function POST(request) {
       );
     }
 
-    // Verificar que el token sea temporal y coincida con el email
-    if (!decoded.temp || decoded.email !== email) {
+    // Verificar que el token sea temporal, con propósito de recuperación y email correcto.
+    if (!decoded.temp || decoded.purpose !== 'password_reset' || decoded.email !== email) {
       return NextResponse.json(
         { error: 'Token de sesión inválido para esta operación' },
         { status: 401 }

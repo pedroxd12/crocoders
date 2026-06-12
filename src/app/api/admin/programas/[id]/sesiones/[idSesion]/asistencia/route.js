@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 // GET - Lista de inscritos al programa con su asistencia a ESTA sesión.
@@ -10,7 +10,7 @@ export async function GET(request, { params }) {
   if (isNaN(Number(id)) || isNaN(Number(idSesion))) {
     return NextResponse.json({ error: 'IDs inválidos' }, { status: 400 });
   }
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   try {
     // Validar que la sesión pertenezca al programa.
     const sesion = await client.query(
@@ -81,7 +81,7 @@ export async function PUT(request, { params }) {
     return NextResponse.json({ error: 'asistio debe ser booleano' }, { status: 400 });
   }
 
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   try {
     // La sesión debe pertenecer al programa.
     const sesion = await client.query(
@@ -90,6 +90,22 @@ export async function PUT(request, { params }) {
     );
     if (sesion.rows.length === 0) {
       return NextResponse.json({ error: 'Sesión no encontrada en este programa' }, { status: 404 });
+    }
+
+    // El usuario debe estar inscrito en el programa: registrar asistencia de alguien
+    // no inscrito generaría filas huérfanas (el trigger de estadísticas las ignora).
+    const inscrito = await client.query(
+      `SELECT 1 FROM inscripcion_programa
+        WHERE id_programa = $1
+          AND ${esMiembro ? 'id_miembro' : 'id_invitado'} = $2
+          AND estado <> 'cancelada'`,
+      [id, esMiembro ? Number(id_miembro) : Number(id_invitado)],
+    );
+    if (inscrito.rows.length === 0) {
+      return NextResponse.json(
+        { error: 'El usuario no está inscrito (activo) en este programa' },
+        { status: 409 },
+      );
     }
 
     if (esMiembro) {

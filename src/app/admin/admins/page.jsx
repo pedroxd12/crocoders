@@ -50,36 +50,39 @@ export default function GestionAdministradores() {
 
   const handleRoleChange = async (id, makeAdmin) => {
     // Verificar si es el último administrador
-    const adminCount = miembros.filter(m => m.tipo === 'administrador').length;
+    const adminCount = miembros.filter(m => m.rol === 'administrador').length;
     const isLastAdmin = adminCount <= 1 && !makeAdmin;
-    
+
     if (isLastAdmin) {
       toast.error('Debe haber al menos un administrador en el sistema');
       return;
     }
 
     if (!confirm(`¿Está seguro que desea ${makeAdmin ? 'hacer' : 'quitar'} administrador a este usuario?`)) return;
-    
+
+    const nuevoRol = makeAdmin ? 'administrador' : 'usuario';
+
     try {
       const res = await fetch(`/api/admin/miembros/${id}/rol`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tipo: makeAdmin ? 'administrador' : 'usuario' })
+        body: JSON.stringify({ rol: nuevoRol })
       });
-      
+
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.error || `Error al ${makeAdmin ? 'promover' : 'degradar'} usuario`);
       }
-      
+
       const updatedUser = await res.json();
-      
+      const updatedRol = updatedUser.rol ?? nuevoRol;
+
       // Actualizar el estado local
-      setMiembros(miembros.map(m => 
-        m.id_miembro === updatedUser.id_miembro ? { ...m, tipo: updatedUser.tipo } : m
+      setMiembros(miembros.map(m =>
+        m.id_miembro === updatedUser.id_miembro ? { ...m, rol: updatedRol } : m
       ));
-      
-      toast.success(`Rol actualizado correctamente a ${updatedUser.tipo}`);
+
+      toast.success(`Rol actualizado correctamente a ${updatedRol}`);
     } catch (error) {
       toast.error(error.message);
     }
@@ -101,10 +104,17 @@ export default function GestionAdministradores() {
       }
       
       const newAdmin = await res.json();
-      
-      // Actualizar el estado local
-      setMiembros([...miembros, newAdmin]);
-      
+
+      // El miembro promovido ya figura en la lista (como usuario): actualizamos
+      // su registro en vez de duplicarlo. Si por algún motivo no estuviera, lo
+      // añadimos.
+      setMiembros((prev) => {
+        const existe = prev.some((m) => m.id_miembro === newAdmin.id_miembro);
+        return existe
+          ? prev.map((m) => (m.id_miembro === newAdmin.id_miembro ? { ...m, rol: newAdmin.rol } : m))
+          : [...prev, newAdmin];
+      });
+
       toast.success('Administrador agregado correctamente');
       setIsModalOpen(false);
       setFormData({ correo_electronico: '' });
@@ -119,14 +129,22 @@ export default function GestionAdministradores() {
 
   return (
     <div className="p-4">
-      <div className="mb-4">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Input
           type="text"
           placeholder="Buscar por nombre o correo..."
           value={searchQuery}
           onChange={handleSearchChange}
-          className="w-full md:w-1/2"
+          className="w-full sm:w-1/2"
         />
+        <Button
+          type="button"
+          onClick={() => setIsModalOpen(true)}
+          variant="primary"
+          className="bg-purple-600 hover:bg-purple-700 w-full sm:w-auto whitespace-nowrap"
+        >
+          + Añadir Administrador
+        </Button>
       </div>
 
       <div className="bg-gray-800 rounded-lg shadow overflow-hidden">
@@ -146,11 +164,11 @@ export default function GestionAdministradores() {
               header: 'Rol',
               render: (miembro) => (
                 <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                  miembro.tipo === 'administrador' 
-                    ? 'bg-purple-600 text-purple-100' 
+                  miembro.rol === 'administrador'
+                    ? 'bg-purple-600 text-purple-100'
                     : 'bg-blue-600 text-blue-100'
                 }`}>
-                  {miembro.tipo}
+                  {miembro.rol || 'usuario'}
                 </span>
               )
             },
@@ -158,7 +176,7 @@ export default function GestionAdministradores() {
               header: 'Acciones',
               render: (miembro) => (
                 <div className="flex space-x-2">
-                  {miembro.tipo === 'administrador' ? (
+                  {miembro.rol === 'administrador' ? (
                     <Button 
                       onClick={() => handleRoleChange(miembro.id_miembro, false)}
                       variant="outline"

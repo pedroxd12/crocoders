@@ -1,4 +1,4 @@
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 

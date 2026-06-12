@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 import { sanitizeHtml } from '@/lib/sanitize';
 
@@ -10,7 +10,7 @@ export async function GET(request) {
 
   let client;
   try {
-    client = await pool.connect();
+    client = await connectWithRetry();
     const result = await client.query(`
       SELECT 
         pr.*,
@@ -43,7 +43,7 @@ export async function POST(request) {
 
   let client;
   try {
-    client = await pool.connect();
+    client = await connectWithRetry();
     const {
       nombre,
       descripcion,
@@ -62,6 +62,21 @@ export async function POST(request) {
 
     if (!nombre || !fecha_inicio || !fecha_fin || !id_tipo_evento || !id_alcance) {
       return NextResponse.json({ error: 'Faltan campos requeridos' }, { status: 400 });
+    }
+    // El programa no tiene CHECK de fechas en la DB (a diferencia de evento), así que
+    // lo validamos aquí: si fecha_fin < fecha_inicio el bucle generaría 0 sesiones.
+    if (new Date(`${fecha_fin}T00:00:00Z`) < new Date(`${fecha_inicio}T00:00:00Z`)) {
+      return NextResponse.json({ error: 'La fecha de fin debe ser igual o posterior a la de inicio.' }, { status: 400 });
+    }
+    // dias_semana: enteros 0..6 (0=Domingo … 6=Sábado, según getUTCDay()).
+    if (dias_semana != null) {
+      if (!Array.isArray(dias_semana) ||
+          !dias_semana.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)) {
+        return NextResponse.json(
+          { error: 'dias_semana debe ser una lista de enteros entre 0 (Domingo) y 6 (Sábado).' },
+          { status: 400 },
+        );
+      }
     }
 
     await client.query('BEGIN');

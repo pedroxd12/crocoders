@@ -9,13 +9,18 @@ import { AuthProvider } from '@/context/AuthContext';
 
 export default function AppShell({ children }) {
   const pathname = usePathname();
+  // El panel admin (/admin/*) es una app autónoma: tiene su propio shell
+  // (sidebar + header móvil) en admin/layout.jsx y ocupa toda la pantalla.
+  // No debe llevar el Header ni el Footer globales del sitio público.
+  const isAdmin = pathname === '/admin' || pathname.startsWith('/admin/');
   // La home tiene su propio scroll container y renderiza su Footer internamente.
-  const showFooter = pathname !== '/';
+  const showChrome = !isAdmin;
+  const showFooter = showChrome && pathname !== '/';
 
   return (
     <AuthProvider>
-      <Header />
-      <main className="flex-grow">{children}</main>
+      {showChrome && <Header />}
+      <main className={isAdmin ? '' : 'flex-grow'}>{children}</main>
       {showFooter && <Footer />}
       <ToastContainer
         position="top-right"

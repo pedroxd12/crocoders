@@ -1,6 +1,6 @@
 // app/api/eventos/unregister/route.js
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAuth } from '@/lib/auth';
 
 export async function POST(request) {
@@ -21,7 +21,7 @@ export async function POST(request) {
     }
 
     try {
-      client = await pool.connect();
+      client = await connectWithRetry();
     } catch (connectionError) {
       console.error('💥 Error de conexión en /api/eventos/unregister:', connectionError);
       return NextResponse.json(
@@ -135,14 +135,14 @@ export async function POST(request) {
           );
         }
         
-        return NextResponse.json({ success: false, error: 'Error al cancelar la inscripción: ' + error.message }, { status: 500 });
+        return NextResponse.json({ success: false, error: 'Error al cancelar la inscripción' }, { status: 500 });
     } finally {
         if (client) client.release();
     }
   } catch (error) {
     console.error('💥 Error en request:', error);
     return NextResponse.json(
-      { success: false, error: 'Error al procesar la solicitud: ' + error.message },
+      { success: false, error: 'Error al procesar la solicitud' },
       { status: 500 }
     );
   }

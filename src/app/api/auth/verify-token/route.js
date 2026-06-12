@@ -1,10 +1,28 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { rateLimit } from '@/lib/rate-limit';
 
 const MAX_ATTEMPTS = 5;
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+
+// Comparación en tiempo constante de dos strings (evita timing attacks).
+function safeEqual(a, b) {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+// El código se guarda hasheado (SHA-256, 64 chars). Se tolera un valor legacy en
+// texto plano (6 chars) por si quedaran filas previas a la migración 004.
+function codigoCoincide(almacenado, ingresado) {
+  if (!almacenado) return false;
+  const hashIngresado = crypto.createHash('sha256').update(ingresado).digest('hex');
+  if (almacenado.length === 64) return safeEqual(almacenado, hashIngresado);
+  return safeEqual(almacenado, ingresado); // legacy en claro
+}
 
 export async function POST(request) {
   try {
@@ -52,7 +70,7 @@ export async function POST(request) {
       );
     }
 
-    if (tokenData.codigo_verificacion !== verificationCode) {
+    if (!codigoCoincide(tokenData.codigo_verificacion, verificationCode)) {
       return NextResponse.json(
         { error: 'Código inválido o expirado' },
         { status: 400 }
@@ -66,15 +84,20 @@ export async function POST(request) {
       );
     }
 
+    // Secreto DEDICADO para tokens de recuperación (con fallback a JWT_SECRET para
+    // no romper si la env no está configurada). El claim `purpose` impide reutilizar
+    // un JWT de sesión normal en /reset-password aunque compartan secreto.
+    const resetSecret = process.env.PASSWORD_RESET_SECRET || process.env.JWT_SECRET;
     const sessionToken = jwt.sign(
       {
         id: tokenData.user_id,
         name: tokenData.name,
         email: email,
         temp: true,
+        purpose: 'password_reset',
         tokenId: tokenData.id_token
       },
-      process.env.JWT_SECRET,
+      resetSecret,
       { expiresIn: '15m', algorithm: 'HS256' }
     );
 

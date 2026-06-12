@@ -5,8 +5,18 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server';
 import { invitadoSchema, parseOrError } from '@/lib/validation';
+import { rateLimit } from '@/lib/rate-limit';
 
 export async function POST(request) {
+  // Endpoint público sin auth: limitar para evitar alta masiva de invitados.
+  const rl = rateLimit(request, { scope: 'invitados', limit: 20, windowMs: 60 * 60 * 1000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Demasiadas solicitudes. Intenta de nuevo más tarde.' },
+      { status: 429 },
+    );
+  }
+
   let body;
   try {
     body = await request.json();

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 // GET - Listar sesiones de un programa (con su asistencia agregada)
@@ -10,7 +10,7 @@ export async function GET(request, { params }) {
   if (!id || isNaN(Number(id))) {
     return NextResponse.json({ error: 'ID de programa inválido' }, { status: 400 });
   }
-  const client = await pool.connect();
+  const client = await connectWithRetry();
 
   try {
     // total_inscritos = inscritos al PROGRAMA (denominador de asistencia).
@@ -47,7 +47,7 @@ export async function POST(request, { params }) {
   if (!id || isNaN(Number(id))) {
     return NextResponse.json({ error: 'ID de programa inválido' }, { status: 400 });
   }
-  const client = await pool.connect();
+  const client = await connectWithRetry();
 
   try {
     const {

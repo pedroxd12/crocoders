@@ -17,26 +17,16 @@ export default function EvidenciasPage() {
   const [loadingImages, setLoadingImages] = useState(false);
   const [expandedImage, setExpandedImage] = useState(null);
 
-  // Initial Data Fetch
+  // Initial Data Fetch. El backend ya filtra eventos con evidencias públicas,
+  // los agrupa por evento (sin duplicados) y los ordena por fecha desc, así que
+  // aquí no hace falta volver a filtrar/deduplicar/ordenar.
   useEffect(() => {
     const fetchEvents = async () => {
       try {
         const response = await fetch('/api/evidencias');
         if (!response.ok) throw new Error('Error al cargar eventos');
-        let data = await response.json();
-        
-        // Filter, sort, and ensure unique events by ID to prevent key duplicates
-        const uniqueEvents = new Map();
-        data.forEach(event => {
-            if (event.num_evidencias > 0 && !uniqueEvents.has(event.id_evento)) {
-                uniqueEvents.set(event.id_evento, event);
-            }
-        });
-
-        const sortedEvents = Array.from(uniqueEvents.values())
-          .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
-          
-        setEventsWithEvidencias(sortedEvents);
+        const data = await response.json();
+        setEventsWithEvidencias(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error('Error:', error);
         setError('No se pudieron cargar los eventos. Intenta de nuevo más tarde.');
@@ -55,7 +45,12 @@ export default function EvidenciasPage() {
     setEventImages([]);
     
     try {
-      const response = await fetch(`/api/evidencias?evento=${event.id_evento}`);
+      // La línea de tiempo mezcla eventos y programas; cada item trae
+      // `tipo_origen` ('evento'|'programa') y `origen_id` para pedir su galería.
+      const qs = event.tipo_origen === 'programa'
+        ? `programa=${event.origen_id}`
+        : `evento=${event.origen_id}`;
+      const response = await fetch(`/api/evidencias?${qs}`);
       if (!response.ok) throw new Error('Error al cargar imágenes');
       const images = await response.json();
       setEventImages(images);
@@ -121,8 +116,8 @@ export default function EvidenciasPage() {
           <div className={styles.timelineLine}></div>
           
           {eventsWithEvidencias.map((event, index) => (
-            <motion.div 
-                key={event.id_evento}
+            <motion.div
+                key={`${event.tipo_origen || 'evento'}-${event.origen_id ?? event.id_evento}`}
                 className={styles.timelineItem}
                 initial={{ opacity: 0, y: 50 }}
                 whileInView={{ opacity: 1, y: 0 }}
@@ -134,13 +129,18 @@ export default function EvidenciasPage() {
                   {formatDate(event.fecha)}
                 </span>
               </div>
-              
+
               <div className={styles.timelineDot}></div>
-              
+
               <div className={styles.timelineContent} onClick={() => handleEventClick(event)}>
                 <h3 className={styles.eventTitle}>{event.nombre_evento}</h3>
-                
+
                 <div className={styles.eventMeta}>
+                    {event.tipo_origen === 'programa' && (
+                        <div className={styles.metaItem}>
+                            <span className="px-2 py-0.5 rounded-full text-xs bg-purple-500/20 text-purple-300 border border-purple-500/30">Programa</span>
+                        </div>
+                    )}
                     {event.tipo && (
                         <div className={styles.metaItem}>
                             <span className="capitalize">{event.tipo}</span>
@@ -156,10 +156,20 @@ export default function EvidenciasPage() {
 
                 <div className={styles.eventPreview}>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent z-10" />
-                    <div className="w-full h-full bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center text-gray-700">
-                        <ImageIcon size={48} opacity={0.2} />
-                    </div>
-                    
+                    {event.portada_url ? (
+                        <Image
+                            src={event.portada_url}
+                            alt={event.nombre_evento}
+                            fill
+                            sizes="(max-width: 768px) 100vw, 33vw"
+                            className="object-cover"
+                        />
+                    ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center text-gray-700">
+                            <ImageIcon size={48} opacity={0.2} />
+                        </div>
+                    )}
+
                     <div className={styles.evidenceCount}>
                         <ImageIcon size={14} className="mr-1"/>
                         {event.num_evidencias} fotos

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 export async function GET(request, { params }) {
@@ -12,7 +12,7 @@ export async function GET(request, { params }) {
 
   let client;
   try {
-    client = await pool.connect();
+    client = await connectWithRetry();
     // Incluye los tres tipos de inscripción: miembro, invitado y equipo.
     // Para equipos se muestra el nombre del equipo y el nº de integrantes.
     const query = `

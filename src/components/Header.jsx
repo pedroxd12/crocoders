@@ -201,6 +201,11 @@ export default function Header() {
                                 <span>III</span> Eventos
                              </Link>
                         </div>
+                        <div className={styles.menuItem}>
+                             <Link href="/programas" onClick={handleLinkClick}>
+                                <span>IV</span> Programas
+                             </Link>
+                        </div>
                     </div>
                 </div>
             </div>

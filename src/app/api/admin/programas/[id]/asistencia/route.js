@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 // GET - Reporte de asistencia del programa
@@ -10,7 +10,7 @@ export async function GET(request, { params }) {
 
   let client;
   try {
-    client = await pool.connect();
+    client = await connectWithRetry();
 
     // La elegibilidad se mide contra las sesiones OBLIGATORIAS del programa y
     // los requisitos configurados (nº mínimo de sesiones y % mínimo de asistencia).
@@ -120,7 +120,7 @@ export async function POST(request, { params }) {
     );
   }
 
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   try {
     // Recalcular elegibilidad en el servidor (no confiar en el cliente).
     const elegibleRes = await client.query(
@@ -167,7 +167,11 @@ export async function POST(request, { params }) {
     const { asistencias, porcentaje } = elegibleRes.rows[0];
 
     // Materializar en inscripcion_programa (esquema real). Solo si no estaba emitido.
+    // IMPORTANTE: el id del inscrito debe corresponder a la columna (${col}); antes
+    // se ataba $2 a id_miembro siempre, dejando `id_invitado = NULL` para invitados,
+    // por lo que el UPDATE nunca casaba y el certificado de invitado fallaba con 404.
     const col = esMiembro ? 'id_miembro' : 'id_invitado';
+    const targetId = esMiembro ? Number(id_miembro) : Number(id_invitado);
     const upd = await client.query(
       `UPDATE inscripcion_programa
           SET sesiones_asistidas = $3,
@@ -178,14 +182,14 @@ export async function POST(request, { params }) {
               updated_at = NOW()
         WHERE id_programa = $1 AND ${col} = $2 AND certificado_emitido = FALSE
         RETURNING id_inscripcion_programa, fecha_certificado`,
-      [id, esMiembro ? Number(id_miembro) : null, asistencias, porcentaje],
+      [id, targetId, asistencias, porcentaje],
     );
 
     if (upd.rowCount === 0) {
       // O no está inscrito, o ya tenía certificado emitido.
       const existe = await client.query(
         `SELECT certificado_emitido FROM inscripcion_programa WHERE id_programa = $1 AND ${col} = $2`,
-        [id, esMiembro ? Number(id_miembro) : null],
+        [id, targetId],
       );
       if (existe.rows.length === 0) {
         return NextResponse.json({ error: 'El usuario no está inscrito en el programa' }, { status: 404 });

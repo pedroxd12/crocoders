@@ -57,6 +57,37 @@ export const invitadoSchema = z.object({
   semestre: z.coerce.number().int().min(1).max(14).optional().nullable(),
 });
 
+// Tipos de evidencia válidos (coincide con el CHECK de la tabla `evidencia`).
+const tipoEvidenciaSchema = z.enum(['imagen', 'video', 'documento', 'enlace']);
+
+// Alta de evidencia (metadata; el archivo ya se subió a UploadThing).
+// Una evidencia pertenece a un EVENTO o a un PROGRAMA (XOR), nunca a ambos.
+export const evidenciaCreateSchema = z.object({
+  id_evento: z.coerce.number().int().positive().optional(),
+  id_programa: z.coerce.number().int().positive().optional(),
+  // El cliente puede mandar `nombre` (alias histórico) o `titulo`.
+  titulo: z.string().trim().min(1).max(255).optional(),
+  nombre: z.string().trim().min(1).max(255).optional(),
+  imagen_url: z.string().trim().url().max(500),
+  imagen_key: z.string().trim().min(1).max(255),
+  tipo: tipoEvidenciaSchema.optional().default('imagen'),
+  descripcion: z.string().trim().max(2000).optional().or(z.literal('')),
+  publica: z.boolean().optional().default(true),
+  orden: z.coerce.number().int().min(0).optional().default(0),
+}).refine(
+  (d) => (d.id_evento != null) !== (d.id_programa != null),
+  { message: 'Debe indicarse exactamente uno de id_evento o id_programa', path: ['id_evento'] },
+);
+
+// Edición de evidencia: todos los campos opcionales, al menos uno presente.
+export const evidenciaUpdateSchema = z.object({
+  titulo: z.string().trim().min(1).max(255).optional(),
+  descripcion: z.string().trim().max(2000).optional().or(z.literal('')),
+  tipo: tipoEvidenciaSchema.optional(),
+  publica: z.boolean().optional(),
+  orden: z.coerce.number().int().min(0).optional(),
+}).refine((d) => Object.keys(d).length > 0, { message: 'No hay campos para actualizar' });
+
 export const authRegisterSchema = z.object({
   nombre: nameSchema,
   apellido_paterno: nameSchema,
@@ -87,6 +118,20 @@ export const authRegisterSchema = z.object({
 export const checkRegisterBatchSchema = z.object({
   eventIds: z.array(z.coerce.number().int().positive()).min(1).max(200),
 });
+
+// Inscripción a un programa recurrente. Igual que eventos: miembro (con sesión)
+// o invitado (id_invitado creado previamente vía /api/invitados).
+export const programaRegisterSchema = z.discriminatedUnion('tipo', [
+  z.object({
+    tipo: z.literal('miembro'),
+    programaId: z.coerce.number().int().positive(),
+  }),
+  z.object({
+    tipo: z.literal('invitado'),
+    programaId: z.coerce.number().int().positive(),
+    userId: z.coerce.number().int().positive(),
+  }),
+]);
 
 /**
  * Helper: parsea con un schema y devuelve [data, errorResponse].

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool from '@/lib/db-server';
+import pool, { connectWithRetry } from '@/lib/db-server';
 import jwt from 'jsonwebtoken';
 
 export async function GET(request) {
@@ -15,7 +15,7 @@ export async function GET(request) {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
     
-    const client = await pool.connect();
+    const client = await connectWithRetry();
     
     try {
         const query = `
