@@ -593,7 +593,13 @@ CREATE TABLE public.cuenta_plataforma (
     rating integer,
     ultima_actualizacion timestamp without time zone,
     activo boolean DEFAULT true,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    avatar_url character varying(500),
+    rating_usuario integer,
+    rank_usuario character varying(50),
+    estado_sync character varying(20) DEFAULT 'pendiente'::character varying,
+    ultimo_intento timestamp without time zone,
+    CONSTRAINT cuenta_plataforma_estado_sync_check CHECK (((estado_sync)::text = ANY (ARRAY[('pendiente'::character varying)::text, ('ok'::character varying)::text, ('no_encontrado'::character varying)::text, ('error'::character varying)::text])))
 );
 
 
@@ -2230,6 +2236,20 @@ CREATE INDEX idx_cuenta_miembro ON public.cuenta_plataforma USING btree (id_miem
 --
 
 CREATE INDEX idx_cuenta_plataforma ON public.cuenta_plataforma USING btree (id_plataforma);
+
+
+--
+-- Name: idx_cuenta_plataforma_sync; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_cuenta_plataforma_sync ON public.cuenta_plataforma USING btree (ultima_actualizacion NULLS FIRST) WHERE (activo = true);
+
+
+--
+-- Name: idx_cuenta_plataforma_miembro_activo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_cuenta_plataforma_miembro_activo ON public.cuenta_plataforma USING btree (id_miembro) WHERE (activo = true);
 
 
 --

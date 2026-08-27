@@ -2,8 +2,20 @@ import { NextResponse } from 'next/server';
 import pool, { connectWithRetry } from '@/lib/db-server';
 import bcrypt from 'bcryptjs';
 import { authRegisterSchema, parseOrError } from '@/lib/validation';
+import { limpiarUsuario } from '@/lib/plataformas';
+import { rateLimit } from '@/lib/rate-limit';
 
 export async function POST(request) {
+  // Alta pública: sin límite, un script puede llenar la tabla `miembro` de
+  // cuentas basura (y de paso crear carreras nuevas en el catálogo).
+  const rl = rateLimit(request, { scope: 'register', limit: 5, windowMs: 60 * 60 * 1000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: 'Demasiados registros desde esta conexión. Intenta más tarde.' },
+      { status: 429, headers: { 'Retry-After': String(Math.ceil((rl.resetAt - Date.now()) / 1000)) } },
+    );
+  }
+
   let body;
   try {
     body = await request.json();
@@ -160,11 +172,15 @@ export async function POST(request) {
       ];
 
       for (const cuenta of cuentasAInsertar) {
-        if (cuenta.usuario && plataformasMap[cuenta.nombre]) {
+        // Los handles son opcionales: uno con formato imposible se ignora en
+        // vez de bloquear el registro, pero no se guarda para que la tabla de
+        // posiciones no lo consulte en cada sincronización.
+        const usuarioLimpio = limpiarUsuario(cuenta.nombre, cuenta.usuario);
+        if (usuarioLimpio && plataformasMap[cuenta.nombre]) {
           await client.query(
-            `INSERT INTO cuenta_plataforma (id_miembro, id_plataforma, usuario, activo)
-             VALUES ($1, $2, $3, true)`,
-            [nuevoIdMiembro, plataformasMap[cuenta.nombre], cuenta.usuario]
+            `INSERT INTO cuenta_plataforma (id_miembro, id_plataforma, usuario, activo, estado_sync)
+             VALUES ($1, $2, $3, true, 'pendiente')`,
+            [nuevoIdMiembro, plataformasMap[cuenta.nombre], usuarioLimpio]
           );
         }
       }
@@ -179,8 +195,10 @@ export async function POST(request) {
     } catch (error) {
       await client.query('ROLLBACK');
       console.error('Error interno en registro:', error);
+      // El mensaje interno (nombre de tabla/columna, constraint violada, texto
+      // del driver de Postgres) queda solo en los logs del servidor.
       return NextResponse.json(
-        { success: false, error: 'Error al registrar usuario: ' + error.message },
+        { success: false, error: 'No se pudo completar el registro. Intenta de nuevo.' },
         { status: 500 }
       );
     } finally {

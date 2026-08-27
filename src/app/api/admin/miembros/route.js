@@ -167,11 +167,11 @@ export async function PUT(request) {
       updates.push(`estado = $${queryIdx++}`);
       values.push(estado);
 
-      if (estado === 'baja') {
-        updates.push(`deleted_at = NOW()`);
-      } else if (estado === 'activo') {
-        updates.push(`deleted_at = NULL`);
-      }
+      // `deleted_at` es funcion directa de `estado`: solo 'baja' lo marca. Antes
+      // se limpiaba unicamente al volver a 'activo', asi que pasar de 'baja' a
+      // 'inactivo' o 'egresado' dejaba la fila con deleted_at puesto sin estar
+      // dada de baja — invisible para todo query que filtre por deleted_at.
+      updates.push(estado === 'baja' ? `deleted_at = NOW()` : `deleted_at = NULL`);
     }
 
     updates.push(`updated_at = NOW()`);

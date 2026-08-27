@@ -2,15 +2,33 @@ import { NextResponse } from 'next/server';
 import pool, { connectWithRetry } from '@/lib/db-server';
 import bcrypt from 'bcryptjs';
 import { createToken } from '@/lib/auth';
+import { rateLimit } from '@/lib/rate-limit';
 
 // Hash dummy precomputado (cost 12, valor irrelevante) para igualar el costo de
 // `bcrypt.compare` cuando el correo no existe. Evita timing attacks de
 // enumeración de cuentas.
 const DUMMY_HASH = '$2a$12$CwTycUXWue0Thq9StjUM0uJ8U.HRZ8kIfMz9p3FvGz4PIK1H1RXja';
 
+// Sin límite, este endpoint permite probar contraseñas indefinidamente. Se
+// aplican dos frenos: uno por IP (bloquea el barrido de muchas cuentas desde un
+// mismo origen) y otro por cuenta (bloquea el ataque distribuido contra un solo
+// correo, donde rotar de IP evadiría el primero).
+const LIMITE_POR_IP = { limit: 20, windowMs: 15 * 60 * 1000 };
+const LIMITE_POR_CUENTA = { limit: 10, windowMs: 15 * 60 * 1000 };
+
+function demasiadosIntentos(resetAt) {
+  return NextResponse.json(
+    { success: false, error: 'Demasiados intentos de inicio de sesión. Espera unos minutos.' },
+    { status: 429, headers: { 'Retry-After': String(Math.ceil((resetAt - Date.now()) / 1000)) } },
+  );
+}
+
 export async function POST(request) {
   let client;
-  
+
+  const rlIp = rateLimit(request, { scope: 'login', ...LIMITE_POR_IP });
+  if (!rlIp.allowed) return demasiadosIntentos(rlIp.resetAt);
+
   try {
     const { correo_electronico, contrasena } = await request.json();
 
@@ -23,6 +41,12 @@ export async function POST(request) {
         { status: 200 }
       );
     }
+
+    const rlCuenta = rateLimit(request, {
+      key: `login:cuenta:${correo_electronico.trim().toLowerCase()}`,
+      ...LIMITE_POR_CUENTA,
+    });
+    if (!rlCuenta.allowed) return demasiadosIntentos(rlCuenta.resetAt);
 
     try {
       client = await connectWithRetry();

@@ -176,12 +176,13 @@ export default function ContactPage() {
           </motion.div>
 
           {/* Spline Animation Column - Right */}
-          <motion.div 
-            className={styles.infoCol}
+          {/* Sin alto fijo: el visor 3D trae su propia caja (misma que /capitulo)
+              para que el gato se vea idéntico en todas las secciones. */}
+          <motion.div
             initial={{ opacity: 0, x: 30 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.6, delay: 0.2 }}
-            style={{ width: '100%', height: '600px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} 
+            style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
              <BongoCatKeyboard />
           </motion.div>

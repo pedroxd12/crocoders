@@ -1,7 +1,13 @@
 .pageWrapper {
     margin: 0;
     padding: 0;
+    /* svh = alto del viewport con la barra de URL visible. Con body en
+       overflow:hidden el móvil nunca la colapsa, así que 100vh dejaba la
+       franja inferior del scroller fuera de pantalla y su centro (donde se
+       alinean la etiqueta y la palabra resaltada) caía por debajo del centro
+       visible. */
     height: 100vh;
+    height: 100svh;
     overflow-y: auto;
     overflow-x: hidden;
     color: #e0e0e0;
@@ -55,9 +61,9 @@
 
 .hero {
     height: 100vh;
+    height: 100svh;
     display: flex;
     align-items: center;
-    /* scroll-snap-align: center; Removed */
 }
 
 .heroText {
@@ -66,74 +72,101 @@
     line-height: 1.1;
 }
 
+.heroLogo {
+    width: 160px;
+    height: 160px;
+    flex-shrink: 0;
+    object-fit: contain;
+}
+
+@media (min-width: 768px) {
+    .heroLogo {
+        /* Ancho fluido en lugar de los 400px fijos de `md:w-100`. Entre 768 y
+           959px el logo mas "Crocoders" (que a 10vw no puede encogerse por
+           debajo de su ancho de palabra) sumaban mas que el viewport y la fila
+           se salia hasta 37px por cada lado, recortada por el overflow-x del
+           scroller. Desde ~1176px vuelve a medir 400px, el tamano de siempre.
+           height/aspect-ratio en vez de `md:h-100` para no deformar la caja
+           cuando el ancho encoge. */
+        width: min(34vw, 400px);
+        height: auto;
+        aspect-ratio: 1;
+    }
+}
+
 .heroDescription {
     font-size: clamp(1.25rem, 4vw, 2rem);
     font-weight: 400;
     margin-top: 16px;
 }
 
+/* ------------------------------------------------------------------ */
+/* Sección "Tú puedes ..."                                             */
+/*                                                                     */
+/* Para que la etiqueta de la izquierda quede alineada con la palabra  */
+/* resaltada de la derecha hacen falta tres cosas:                     */
+/*   1. Misma métrica de línea en ambas columnas (font-size y          */
+/*      line-height compartidos vía custom properties).                */
+/*   2. La etiqueta sticky centrada en el CENTRO DEL SCROLLPORT.       */
+/*   3. Que el pico de la animación de brillo caiga en ese mismo       */
+/*      punto (animation-range con el 50% de `cover`, que es justo     */
+/*      cuando el centro del <li> coincide con el centro del           */
+/*      scrollport).                                                   */
+/* ------------------------------------------------------------------ */
 .listContainer {
+    /* Tokens compartidos por la etiqueta y la lista: si divergen, las cajas
+       de línea tienen alturas distintas y jamás coinciden al centrarse. */
+    --list-font-size: clamp(2rem, 4.5vw, 4.5rem);
+    /* 1.5 y no 1.25: cada palabra es un punto de snap, y el navegador se salta
+       uno cuando un solo gesto recorre mas de 1.5 veces la separacion entre
+       ellos. Con 1.25 esa separacion era de ~90px, por debajo de lo que avanza
+       un tic de rueda en muchos ratones. A 1.5 son ~108px (y ~130px si el
+       navegador tiene el tamano de fuente en "Grande"), asi que un tic normal
+       avanza exactamente una palabra. */
+    --list-line-height: 1.5;
+
     display: grid;
-    grid-template-columns: auto 1fr;
-    column-gap: 48px;
-    padding-block: 10vh; /* Reduced from 30vh for less separation */
-}
-
-@media (max-width: 768px) {
-    .container {
-        padding: 0 12px; /* Reduce padding on mobile */
-    }
-
-    .listContainer {
-        grid-template-columns: minmax(80px, auto) 1fr; /* Keep two columns */
-        column-gap: 16px; /* Reduce gap */
-        padding-block: 15vh;
-        height: auto;
-    }
-    
-    .listText {
-        position: sticky;
-        top: calc(50% - 0.5lh);
-        font-size: 1.5rem; /* Smaller on mobile */
-        margin: 0;
-        min-width: auto;
-        writing-mode: horizontal-tb; /* Keep horizontal */
-    }
-
-    .hero {
-        height: auto;
-        min-height: 100vh;
-        padding-top: 80px;
-        padding-bottom: 40px;
-    }
-    
-    .list {
-        font-size: 1.5rem; /* Smaller to fit better */
-    }
-    
-    .list li {
-        scroll-snap-align: none;
-    }
-    
-    .heroText {
-        font-size: clamp(2.5rem, 10vw, 4rem); /* Smaller on mobile */
-    }
+    /* minmax(0, auto) permite que las columnas encojan en vez de desbordar el
+       contenedor de 1024px; justify-content centra el conjunto. */
+    grid-template-columns: minmax(0, auto) minmax(0, auto);
+    justify-content: center;
+    align-items: start;
+    column-gap: clamp(12px, 3vw, 48px);
+    padding-block: 10svh;
 }
 
 .listText {
-    font-size: clamp(2rem, 6vw, 6rem);
+    font-size: var(--list-font-size);
+    line-height: var(--list-line-height);
     font-weight: 600;
-    position: sticky;
-    top: calc(50% - 0.5lh);
-    align-self: flex-start;
-    min-width: max-content;
     margin: 0;
-    line-height: 1.25; /* Match list items for better alignment */
+    text-align: right;
+    /* Una sola línea: garantiza que su caja mida exactamente 1 línea, igual
+       que cada <li>. */
+    white-space: nowrap;
+
+    /* `top` en un sticky se mide desde el borde superior del scrollport, y
+       .pageWrapper mide 100svh, asi que 50svh es su centro exacto. Le restamos
+       media caja de linea (0.5 * line-height * 1em, la altura de un <li>) para
+       que el centro de la etiqueta caiga justo en el centro del scrollport.
+
+       Todo el desplazamiento va en `top`, no en un transform: el sticky no
+       puede salirse de su bloque contenedor (el area de grid, que termina con
+       el ultimo <li>), y si se compensara con transform el navegador recortaria
+       la posicion de layout al llegar al final de la lista y la etiqueta
+       quedaria media linea por encima de la palabra resaltada.
+
+       Antes se usaba `50%`, pero los porcentajes de un sticky se resuelven
+       contra el bloque contenedor -el area de grid, de mas de 1000px- no contra
+       el scrollport: de ahi el desfase original. */
+    position: sticky;
+    top: calc(50vh - 0.5 * var(--list-line-height) * 1em);
+    top: calc(50svh - 0.5 * var(--list-line-height) * 1em);
 }
 
 .list {
-    font-size: clamp(2rem, 6vw, 6rem);
-
+    font-size: var(--list-font-size);
+    line-height: var(--list-line-height);
     font-weight: 600;
     list-style-type: none;
     padding: 0;
@@ -141,8 +174,14 @@
 }
 
 .list li {
-    line-height: 1.25;
+    line-height: inherit;
+    /* El snapport es el scrollport completo, así que `center` deja el <li>
+       exactamente donde está la etiqueta. `always` pide al navegador que no
+       rebase mas de un punto de snap por gesto; Chromium lo ignora mientras el
+       snap sea `proximity`, pero es la declaracion correcta y otros motores si
+       la respetan. Lo que evita los saltos aqui es --list-line-height. */
     scroll-snap-align: center;
+    scroll-snap-stop: always;
     transition: color 0.3s ease;
 }
 
@@ -155,32 +194,78 @@
 }
 
 @supports (animation-timeline: scroll()) and (animation-range: 0% 100%) {
-    .list li:first-of-type {
-        --start-opacity: 1;
-    }
-
-    .list li:last-of-type {
-        --end-opacity: 1;
-    }
-
     .list li {
         opacity: 0.2;
         animation-name: brighten;
         animation-fill-mode: both;
         animation-timing-function: linear;
         animation-timeline: view();
-        animation-range: cover calc(50% - 1lh) calc(50% + 1lh);
+        /* El 50% de `cover` es el instante en que el centro del <li> coincide
+           con el centro del scrollport, o sea con la etiqueta sticky.
+           La ventana es de +-0.6 lineas: el item entra en rango justo cuando
+           pasa a ser el mas cercano a "Tu puedes" y sale cuando el siguiente
+           toma el relevo. Se expresa en em (0.6 * line-height) y no en `lh`
+           porque el soporte de `lh` dentro de calc() es mas irregular: si el
+           valor se invalida, animation-range cae a `normal` y el resaltado
+           deja de estar anclado al centro. */
+        animation-range: cover
+            calc(50% - 0.6 * var(--list-line-height) * 1em)
+            calc(50% + 0.6 * var(--list-line-height) * 1em);
     }
 
+    /* Todos los items se comportan igual. Antes el primero y el ultimo
+       llevaban --start-opacity/--end-opacity: 1, asi que se quedaban
+       encendidos durante media travesía y solo ellos parecian "engancharse"
+       a la etiqueta; el resto brillaba al 100% en un instante puntual y
+       cualquier posicion de reposo los pillaba a medio camino. */
     @keyframes brighten {
-        0% { opacity: var(--start-opacity, 0.2); }
-        50% { opacity: 1; }
-        100% { opacity: var(--end-opacity, 0.2); }
+        0% { opacity: 0.2; }
+        /* Meseta: 12%-88% del rango equivale a +-0.456 lineas, casi la
+           mitad de la separacion entre palabras. La palabra se mantiene al
+           100% durante todo el tramo en que es la que esta a la altura de
+           "Tu puedes", en lugar de cruzar el centro en un parpadeo, y el
+           relevo con la siguiente es un cruce corto. */
+        12%, 88% { opacity: 1; }
+        100% { opacity: 0.2; }
     }
 }
 
-@media (max-width: 600px) {
+/* El snap deja la palabra clavada en la linea de la etiqueta al soltar el
+   scroll, en cualquier dispositivo. `proximity` solo corrige el ultimo tramo:
+   las secciones hero no tienen puntos de snap y siguen scrolleando libres, y
+   un gesto rapido puede saltarse varios items sin resistencia. */
+.pageWrapper {
+    scroll-snap-type: y proximity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .pageWrapper {
+        scroll-snap-type: none;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .container {
+        padding: 0 12px; /* Reduce padding on mobile */
+    }
+
     .listContainer {
-        column-gap: 12px;
+        /* Escala con el ancho para que las dos columnas quepan siempre en una
+           sola línea, desde 320px hasta tablet. */
+        --list-font-size: clamp(1.5rem, 7vw, 2.75rem);
+        padding-block: 15svh;
+        height: auto;
+    }
+
+    .hero {
+        height: auto;
+        min-height: 100vh;
+        min-height: 100svh;
+        padding-top: 80px;
+        padding-bottom: 40px;
+    }
+
+    .heroText {
+        font-size: clamp(2.5rem, 10vw, 4rem); /* Smaller on mobile */
     }
 }

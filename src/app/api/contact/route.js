@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
-import nodemailer from 'nodemailer';
 import { rateLimit } from '@/lib/rate-limit';
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+import {
+  sendMail,
+  escapeHtml,
+  escapeHtmlMultiline,
+  sanitizeHeader,
+  institutionalFrom,
+  isSingleEmailAddress,
+  mailIsConfigured,
+} from '@/lib/mailer';
 
 export async function POST(request) {
   // Rate limit: este endpoint público envía correo; sin límite es un relay de spam.
@@ -32,7 +38,10 @@ export async function POST(request) {
       { status: 400 }
     );
   }
-  if (!EMAIL_RE.test(email) || email.length > 200) {
+  // Una sola dirección y nada más: sin comas, ni "<>", ni saltos de línea. Ese
+  // valor va al Reply-To, así que aceptar una lista permitiría inyectar
+  // destinatarios extra en la cabecera.
+  if (!isSingleEmailAddress(email)) {
     return NextResponse.json({ success: false, error: 'Correo electrónico no válido' }, { status: 400 });
   }
   if (name.length > 120 || subject.length > 200 || message.length > 5000) {
@@ -42,46 +51,52 @@ export async function POST(request) {
     );
   }
 
-  try {
-    // Configurar el transporter de nodemailer
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD,
-      },
-    });
+  if (!mailIsConfigured()) {
+    console.error('[contact] EMAIL_USER / EMAIL_PASSWORD no configurados');
+    return NextResponse.json(
+      { success: false, error: 'Error al enviar el mensaje. Por favor, inténtalo de nuevo más tarde.' },
+      { status: 500 },
+    );
+  }
 
-    // Configurar el email
-    const mailOptions = {
-      from: process.env.EMAIL_FROM,
+  try {
+    // Todo lo que escribe el visitante se escapa antes de entrar al HTML: si no,
+    // el correo que llega al buzón del club puede traer marcado o enlaces
+    // fabricados por quien rellenó el formulario.
+    const nombreSeguro = escapeHtml(name);
+    const emailSeguro = escapeHtml(email);
+    const asuntoSeguro = escapeHtml(subject);
+    const mensajeSeguro = escapeHtmlMultiline(message);
+
+    await sendMail({
+      // El remitente es SIEMPRE la cuenta del club (si no, Gmail rechaza el
+      // envío o lo marca como suplantación). La dirección del visitante va en
+      // Reply-To, que es lo que permite responderle.
+      from: institutionalFrom(),
       to: process.env.EMAIL_USER,
       replyTo: email,
-      subject: `Nuevo mensaje de contacto: ${subject}`,
+      subject: `Nuevo mensaje de contacto: ${sanitizeHeader(subject)}`,
       text: `Nombre: ${name}\nEmail: ${email}\n\nMensaje:\n${message}`,
       html: `
         <div style="font-family: 'Poppins', sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; border-radius: 8px;">
           <h1 style="color: #333; border-bottom: 2px solid #1ef184; padding-bottom: 10px;">Nuevo mensaje de contacto</h1>
-          <p><strong>Asunto:</strong> ${subject}</p>
-          <p><strong>Nombre:</strong> ${name}</p>
-          <p><strong>Email:</strong> ${email}</p>
+          <p><strong>Asunto:</strong> ${asuntoSeguro}</p>
+          <p><strong>Nombre:</strong> ${nombreSeguro}</p>
+          <p><strong>Email:</strong> ${emailSeguro}</p>
           <h3 style="color: #333; margin-top: 20px;">Mensaje:</h3>
           <div style="background-color: white; padding: 15px; border-radius: 5px; border-left: 4px solid #1ef184;">
-            ${message.replace(/\n/g, '<br>')}
+            ${mensajeSeguro}
           </div>
           <p style="margin-top: 20px; font-size: 12px; color: #777;">
             Este mensaje fue enviado desde el formulario de contacto de Crocoders.
           </p>
         </div>
       `,
-    };
-
-    // Enviar el email
-    await transporter.sendMail(mailOptions);
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Error sending email:', error);
+    console.error('[contact] Error al enviar el correo:', error.message);
     return NextResponse.json(
       { success: false, error: 'Error al enviar el mensaje. Por favor, inténtalo de nuevo más tarde.' },
       { status: 500 }

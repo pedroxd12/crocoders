@@ -316,6 +316,99 @@
 }
 
 
+/* Avatar: siempre ocupa el mismo espacio, con o sin foto, para que las tres
+   tarjetas del podio queden alineadas. Si la imagen remota falla (Codeforces
+   caído, gravatar inexistente) el componente pinta las iniciales. */
+.avatar {
+  position: relative;
+  width: 6rem;
+  height: 6rem;
+  margin: 0 auto 1rem;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  background: linear-gradient(135deg, #2a3f35 0%, #1f2a24 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.avatarImg {
+  object-fit: cover;
+}
+
+.avatarIniciales {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #1ef184;
+  user-select: none;
+}
+
+/* Enlace al perfil del usuario en la plataforma */
+.perfilLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  color: #9ca3af;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.perfilLink:hover {
+  color: #1ef184;
+}
+
+.perfilLink svg {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.perfilLink:hover svg {
+  opacity: 1;
+}
+
+/* Dificultad del problema más difícil resuelto (dato que ya se guardaba en la
+   BD pero que la tabla nunca mostraba). */
+.dificultad {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 50px;
+  background: rgba(30, 241, 132, 0.12);
+  color: #1ef184;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Línea de estado: cuándo se actualizó y si hay una sincronización en curso. */
+.metaLinea {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.sincronizando {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.7rem;
+  border-radius: 50px;
+  background: rgba(30, 241, 132, 0.08);
+  border: 1px solid rgba(30, 241, 132, 0.2);
+  color: #1ef184;
+  font-size: 0.78rem;
+}
+
+
 @media (max-width: 640px) {
   .container {
     padding-top: 6rem;
@@ -323,5 +416,16 @@
   
   .leaderboardGrid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .avatar {
+    width: 5rem;
+    height: 5rem;
+  }
+
+  .avatarIniciales {
+    font-size: 1.5rem;
   }
 }

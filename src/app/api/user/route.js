@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import pool, { connectWithRetry } from '@/lib/db-server'; 
 import jwt from 'jsonwebtoken';
+import { limpiarUsuario } from '@/lib/plataformas';
 
 export async function GET(request) {
   try {
@@ -123,20 +124,36 @@ export async function PUT(request) {
 
         // Helper para upsert plataforma
         const upsertPlataforma = async (nombrePlataforma, usuario) => {
-            if (!usuario) return;
-            
+            // Se normaliza (acepta la URL del perfil) y se descarta lo que no
+            // pueda ser un handle real: si no, la tabla de posiciones acaba
+            // consultando valores como "No tengo" en cada sincronización.
+            const limpio = limpiarUsuario(nombrePlataforma, usuario);
+            if (!limpio) return;
+
             // Buscar ID plataforma
             const platRes = await client.query('SELECT id_plataforma FROM catalogo_plataforma WHERE nombre = $1', [nombrePlataforma]);
             if (platRes.rows.length === 0) return;
             const idPlataforma = platRes.rows[0].id_plataforma;
-            
-            // Upsert
+
+            // Upsert. Si el handle cambió, las estadísticas del anterior dejan de
+            // aplicar: se reinician y la cuenta se vuelve a sincronizar.
             await client.query(`
-                INSERT INTO cuenta_plataforma (id_miembro, id_plataforma, usuario, activo)
-                VALUES ($1, $2, $3, true)
-                ON CONFLICT (id_miembro, id_plataforma) 
-                DO UPDATE SET usuario = $3, activo = true
-            `, [decoded.id, idPlataforma, usuario]);
+                INSERT INTO cuenta_plataforma (id_miembro, id_plataforma, usuario, activo, estado_sync)
+                VALUES ($1, $2, $3, true, 'pendiente')
+                ON CONFLICT (id_miembro, id_plataforma)
+                DO UPDATE SET
+                    usuario = EXCLUDED.usuario,
+                    activo = true,
+                    problemas_resueltos_total = CASE WHEN cuenta_plataforma.usuario IS DISTINCT FROM EXCLUDED.usuario THEN 0 ELSE cuenta_plataforma.problemas_resueltos_total END,
+                    problema_mas_dificil      = CASE WHEN cuenta_plataforma.usuario IS DISTINCT FROM EXCLUDED.usuario THEN NULL ELSE cuenta_plataforma.problema_mas_dificil END,
+                    rating                    = CASE WHEN cuenta_plataforma.usuario IS DISTINCT FROM EXCLUDED.usuario THEN NULL ELSE cuenta_plataforma.rating END,
+                    rating_usuario            = CASE WHEN cuenta_plataforma.usuario IS DISTINCT FROM EXCLUDED.usuario THEN NULL ELSE cuenta_plataforma.rating_usuario END,
+                    rank_usuario              = CASE WHEN cuenta_plataforma.usuario IS DISTINCT FROM EXCLUDED.usuario THEN NULL ELSE cuenta_plataforma.rank_usuario END,
+                    avatar_url                = CASE WHEN cuenta_plataforma.usuario IS DISTINCT FROM EXCLUDED.usuario THEN NULL ELSE cuenta_plataforma.avatar_url END,
+                    ultima_actualizacion      = CASE WHEN cuenta_plataforma.usuario IS DISTINCT FROM EXCLUDED.usuario THEN NULL ELSE cuenta_plataforma.ultima_actualizacion END,
+                    ultimo_intento            = CASE WHEN cuenta_plataforma.usuario IS DISTINCT FROM EXCLUDED.usuario THEN NULL ELSE cuenta_plataforma.ultimo_intento END,
+                    estado_sync               = CASE WHEN cuenta_plataforma.usuario IS DISTINCT FROM EXCLUDED.usuario THEN 'pendiente' ELSE cuenta_plataforma.estado_sync END
+            `, [decoded.id, idPlataforma, limpio]);
         };
 
         if (data.usuario_codeforces !== undefined) await upsertPlataforma('Codeforces', data.usuario_codeforces);

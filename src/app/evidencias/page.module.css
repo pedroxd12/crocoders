@@ -360,6 +360,50 @@
 }
 
 /* Loader */
+.retryButton {
+  background: transparent;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 0.6rem 1.4rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.retryButton:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Estado vacío de la línea de tiempo (no hay evidencias públicas todavía) */
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  min-height: 40vh;
+  color: #9ca3af;
+  text-align: center;
+}
+
+/* Mensaje dentro del modal de galería (error o sin fotos) */
+.galleryMessage {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  min-height: 300px;
+  color: #9ca3af;
+  text-align: center;
+}
+
 .loaderContainer {
   display: flex;
   flex-direction: column;

@@ -254,9 +254,9 @@ export default function AnimationPage() {
               <div className="flex-1 text-center md:text-left w-full max-w-md px-4">
                 <h1 className={`${styles.noOffset} text-2xl md:text-6xl font-bold leading-tight break-words`}>Qué esperas,</h1>
                 <h1 className={`${styles.noOffset} text-2xl md:text-6xl font-bold leading-tight break-words`}>inicia ahora.</h1>
-                <p className={`${styles.heroDescription} text-sm md:text-xl mt-4 break-words`}>Unéte a nuestra comunidad y crece con nosotros.</p>
+                <p className={`${styles.heroDescription} text-sm md:text-xl mt-4 break-words`}>Únete a nuestra comunidad y crece con nosotros.</p>
               </div>
-              <div className="flex-1 w-full h-[400px] md:h-[500px] max-w-lg">
+              <div className="flex-1 w-full flex justify-center">
                 <BongoCatKeyboard />
               </div>
             </div>

@@ -59,7 +59,8 @@ const requireAdminUpload = async (req, tag) => {
     console.warn(`[${tag}] Middleware: rol '${role}' no autorizado (se requiere administrador).`);
     throw new UploadThingError("No autorizado: se requieren permisos de administrador.");
   }
-  return { userId, userEmail: user.email };
+  // No se propaga el correo: acaba en los logs de la plataforma sin aportar nada.
+  return { userId };
 };
 
 export const ourFileRouter = {
@@ -69,8 +70,6 @@ export const ourFileRouter = {
     })
     .onUploadComplete(async ({ metadata, file }) => {
       console.log("[imageUploader] onUploadComplete: Invoked.");
-      console.log("[imageUploader] Metadata received:", JSON.stringify(metadata, null, 2));
-      console.log("[imageUploader] File details received (using ufsUrl):", JSON.stringify({ ...file, url: file.ufsUrl }, null, 2)); // Log ufsUrl
 
       if (!metadata || !file || !file.ufsUrl || !file.key || !file.name) { // Usa ufsUrl
         console.error("[imageUploader] onUploadComplete: Critical data missing in callback. Metadata or File is incomplete.");
@@ -87,8 +86,6 @@ export const ourFileRouter = {
     })
     .onUploadComplete(async ({ metadata, file }) => {
       console.log("[eventoImageUploader] onUploadComplete: Invoked.");
-      console.log("[eventoImageUploader] Metadata received:", JSON.stringify(metadata, null, 2));
-      console.log("[eventoImageUploader] File details received (using ufsUrl):", JSON.stringify({ ...file, url: file.ufsUrl }, null, 2)); // Log ufsUrl
 
       if (!metadata || typeof metadata.userId === 'undefined') {
         console.error("[eventoImageUploader] onUploadComplete: Critical data missing - metadata.userId is undefined.");
@@ -99,7 +96,7 @@ export const ourFileRouter = {
         throw new Error("Server-side processing error: File details incomplete after upload.");
       }
       // USA file.ufsUrl EN LUGAR DE file.url
-      console.log(`[eventoImageUploader] Upload successful for User ID: ${metadata.userId}, Email: ${metadata.userEmail}. File URL (ufsUrl): ${file.ufsUrl}, Key: ${file.key}`);
+      console.log(`[eventoImageUploader] Upload successful for User ID: ${metadata.userId}, Key: ${file.key}`);
       return { uploadedBy: metadata.userId, fileUrl: file.ufsUrl, fileName: file.name, fileKey: file.key }; // Devuelve ufsUrl
     }),
 
@@ -109,8 +106,6 @@ export const ourFileRouter = {
     })
     .onUploadComplete(async ({ metadata, file }) => {
       console.log("[evidenciaUploader] onUploadComplete: Invoked.");
-      console.log("[evidenciaUploader] Metadata received:", JSON.stringify(metadata, null, 2));
-      console.log("[evidenciaUploader] File details received (using ufsUrl):", JSON.stringify({ ...file, url: file.ufsUrl }, null, 2)); // Log ufsUrl
 
       if (!metadata || !file || !file.ufsUrl || !file.key || !file.name) { // Usa ufsUrl
         console.error("[evidenciaUploader] onUploadComplete: Critical data missing in callback.");

@@ -1,20 +1,12 @@
-import nodemailer from 'nodemailer';
 import crypto from 'crypto';
 import { sql } from './db-server';
-
-const transporter = nodemailer.createTransport({
-  service: 'Gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD,
-  },
-  secure: true,
-  tls: {
-    rejectUnauthorized: true
-  }
-});
+import { sendMail, escapeHtml, institutionalFrom, mailIsConfigured } from './mailer';
 
 export async function sendRecoveryEmail(email, name, userId) {
+  if (!mailIsConfigured()) {
+    throw new Error('EMAIL_USER / EMAIL_PASSWORD no configurados');
+  }
+
   try {
     // Token criptográficamente fuerte y código de 6 dígitos generado con crypto.randomInt
     const token = crypto.randomBytes(32).toString('hex');
@@ -39,23 +31,31 @@ export async function sendRecoveryEmail(email, name, userId) {
         (${userId}, ${token}, ${codigoHash}, ${expiresAt})
     `;
 
-    const resetLink = `${process.env.NEXT_PUBLIC_SITE_URL}/iniciar?recovery=true`;
+    // El nombre viene de la BD, pero lo escribió el propio usuario al
+    // registrarse: se escapa antes de entrar al HTML del correo.
+    const nombreSeguro = escapeHtml(name);
 
-    const mailOptions = {
-      from: `"Club Crocoders" <${process.env.EMAIL_FROM || process.env.EMAIL_USER}>`,
+    await sendMail({
+      from: institutionalFrom(),
       to: email,
       subject: 'Restablece tu contraseña',
+      text:
+        `Hola ${name},\n\n` +
+        'Hemos recibido una solicitud para restablecer tu contraseña en Club Crocoders.\n' +
+        `Tu código de verificación es: ${verificationCode}\n\n` +
+        'El código expira en 1 hora. No lo compartas con nadie.\n' +
+        'Si no solicitaste este cambio, puedes ignorar este mensaje.',
       html: `
         <div style="font-family: 'Poppins', sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
           <div style="text-align: center; margin-bottom: 20px;">
             <img src="cid:logo" alt="Club Crocoders" style="max-width: 150px; height: auto;" />
           </div>
           <div style="background-color: #f9f9f9; padding: 25px; border-radius: 8px; border: 1px solid #e1e1e1;">
-            <h2 style="color: #10B981; margin-top: 0;">Hola ${name},</h2>
+            <h2 style="color: #10B981; margin-top: 0;">Hola ${nombreSeguro},</h2>
             <p>Hemos recibido una solicitud para restablecer tu contraseña en tu cuenta de Club Crocoders.</p>
             <p>Tu código de verificación es: <strong>${verificationCode}</strong></p>
 
-            <p style="font-size: 14px; color: #666;">Este enlace expirará en 1 hora, no lo compartas con nadie.</p>
+            <p style="font-size: 14px; color: #666;">Este código expirará en 1 hora, no lo compartas con nadie.</p>
             <p style="font-size: 14px; color: #666;">Si no solicitaste este cambio, puedes ignorar este mensaje.</p>
           </div>
         </div>
@@ -65,13 +65,13 @@ export async function sendRecoveryEmail(email, name, userId) {
         path: `${process.cwd()}/public/img/logo.png`,
         cid: 'logo'
       }]
-    };
+    });
 
-    await transporter.sendMail(mailOptions);
-    console.log('Correo de recuperación enviado a:', email);
+    // No se registra el correo del destinatario en los logs.
+    console.log('Correo de recuperación enviado (miembro %s)', userId);
     return { success: true };
   } catch (error) {
-    console.error('Error al enviar correo de recuperación:', error);
+    console.error('Error al enviar correo de recuperación:', error.message);
     throw error;
   }
 }

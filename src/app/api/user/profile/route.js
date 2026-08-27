@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import pool, { sql, connectWithRetry } from '@/lib/db-server';
 import jwt from 'jsonwebtoken';
+import { limpiarUsuario } from '@/lib/plataformas';
 
 function verifyAuth(request) {
   const token = request.cookies.get('token')?.value;
@@ -79,41 +80,83 @@ export async function GET(request) {
   }
 }
 
+/**
+ * Guarda el handle de una plataforma.
+ *
+ * Aquí se originaban buena parte de las inconsistencias de la tabla de
+ * posiciones: sólo se hacía `.trim()`, así que entraban valores como
+ * "No tengo " o "Zike 19" que después la sincronización intentaba consultar en
+ * cada refresco. Ahora se normaliza (acepta que peguen la URL del perfil) y se
+ * valida el formato; además, al cambiar de usuario se reinician las
+ * estadísticas para que no se queden colgadas las del handle anterior.
+ *
+ * Devuelve el nombre de la plataforma si el valor era inválido, o null si todo
+ * salió bien, para que el endpoint pueda avisar al usuario.
+ */
 async function updatePlatformInTx(client, idMiembro, pName, usuario) {
-  if (usuario === undefined) return;
+  if (usuario === undefined) return null;
 
   const pRes = await client.query(
     `SELECT id_plataforma FROM catalogo_plataforma WHERE nombre = $1`,
     [pName],
   );
-  if (pRes.rows.length === 0) return;
+  if (pRes.rows.length === 0) return null;
   const pid = pRes.rows[0].id_plataforma;
 
   const existing = await client.query(
-    `SELECT id_cuenta FROM cuenta_plataforma WHERE id_miembro = $1 AND id_plataforma = $2`,
+    `SELECT id_cuenta, usuario FROM cuenta_plataforma WHERE id_miembro = $1 AND id_plataforma = $2`,
     [idMiembro, pid],
   );
 
-  const trimmed = (usuario || '').trim();
+  const enBruto = String(usuario ?? '').trim();
+  const limpio = limpiarUsuario(pName, usuario);
+
+  // Escribió algo, pero no puede ser un usuario de esa plataforma.
+  if (enBruto && !limpio) return pName;
 
   if (existing.rows.length > 0) {
-    if (trimmed) {
+    const actual = existing.rows[0];
+    if (limpio) {
+      const cambió = actual.usuario !== limpio;
       await client.query(
-        `UPDATE cuenta_plataforma SET usuario = $1, activo = true WHERE id_cuenta = $2`,
-        [trimmed, existing.rows[0].id_cuenta],
+        `UPDATE cuenta_plataforma
+            SET usuario = $1,
+                activo = true,
+                -- Al cambiar de handle los números viejos ya no aplican: se
+                -- ponen a cero y se marca la cuenta para resincronizar.
+                problemas_resueltos_total = CASE WHEN $3 THEN 0 ELSE problemas_resueltos_total END,
+                problema_mas_dificil      = CASE WHEN $3 THEN NULL ELSE problema_mas_dificil END,
+                rating                    = CASE WHEN $3 THEN NULL ELSE rating END,
+                rating_usuario            = CASE WHEN $3 THEN NULL ELSE rating_usuario END,
+                rank_usuario              = CASE WHEN $3 THEN NULL ELSE rank_usuario END,
+                avatar_url                = CASE WHEN $3 THEN NULL ELSE avatar_url END,
+                estado_sync               = CASE WHEN $3 THEN 'pendiente' ELSE estado_sync END,
+                ultimo_intento            = CASE WHEN $3 THEN NULL ELSE ultimo_intento END,
+                ultima_actualizacion      = CASE WHEN $3 THEN NULL ELSE ultima_actualizacion END
+          WHERE id_cuenta = $2`,
+        [limpio, actual.id_cuenta, cambió],
       );
     } else {
+      // Sólo se desactiva. Ponerlo en '' rompía la restricción UNIQUE
+      // (id_plataforma, usuario) en cuanto un segundo miembro borraba su
+      // usuario de la misma plataforma. Las consultas ya filtran por `activo`,
+      // así que desactivar basta para que desaparezca del perfil y del ranking.
       await client.query(
-        `UPDATE cuenta_plataforma SET usuario = '', activo = false WHERE id_cuenta = $1`,
-        [existing.rows[0].id_cuenta],
+        `UPDATE cuenta_plataforma
+            SET activo = false, estado_sync = 'pendiente'
+          WHERE id_cuenta = $1`,
+        [actual.id_cuenta],
       );
     }
-  } else if (trimmed) {
+  } else if (limpio) {
     await client.query(
-      `INSERT INTO cuenta_plataforma (id_miembro, id_plataforma, usuario) VALUES ($1, $2, $3)`,
-      [idMiembro, pid, trimmed],
+      `INSERT INTO cuenta_plataforma (id_miembro, id_plataforma, usuario, estado_sync)
+       VALUES ($1, $2, $3, 'pendiente')`,
+      [idMiembro, pid, limpio],
     );
   }
+
+  return null;
 }
 
 export async function PUT(request) {
@@ -133,8 +176,12 @@ export async function PUT(request) {
   try {
     await client.query('BEGIN');
 
+    // Solo las columnas que se usan abajo: un `SELECT *` traería también el
+    // hash de la contraseña a memoria sin ninguna necesidad.
     const currentRes = await client.query(
-      `SELECT * FROM miembro WHERE id_miembro = $1 FOR UPDATE`,
+      `SELECT nombre, apellido_paterno, apellido_materno, numero_telefono,
+              semestre_actual, id_carrera
+         FROM miembro WHERE id_miembro = $1 FOR UPDATE`,
       [decoded.id],
     );
     if (currentRes.rows.length === 0) {
@@ -188,9 +235,24 @@ export async function PUT(request) {
       ],
     );
 
-    await updatePlatformInTx(client, decoded.id, 'Codeforces', data.usuario_codeforces);
-    await updatePlatformInTx(client, decoded.id, 'VJudge', data.usuario_vjudge);
-    await updatePlatformInTx(client, decoded.id, 'OmegaUp', data.usuario_omegaup);
+    const invalidas = [
+      await updatePlatformInTx(client, decoded.id, 'Codeforces', data.usuario_codeforces),
+      await updatePlatformInTx(client, decoded.id, 'VJudge', data.usuario_vjudge),
+      await updatePlatformInTx(client, decoded.id, 'OmegaUp', data.usuario_omegaup),
+    ].filter(Boolean);
+
+    // Si algún handle no tiene formato válido no se guarda nada: es preferible
+    // avisar a dejar en la BD un usuario que nunca va a resolver.
+    if (invalidas.length > 0) {
+      await client.query('ROLLBACK');
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Usuario inválido para ${invalidas.join(', ')}. Escribe tu nombre de usuario (o la URL de tu perfil), sin espacios.`,
+        },
+        { status: 400 },
+      );
+    }
 
     await client.query('COMMIT');
 

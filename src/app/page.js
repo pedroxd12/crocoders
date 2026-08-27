@@ -49,8 +49,8 @@ export default function Home() {
                 width={300}
                 height={300}
                 priority
-                sizes="(max-width: 768px) 160px, 300px"
-                className="w-40 h-40 md:w-100 md:h-100 object-contain flex-shrink-0"
+                sizes="(max-width: 767.98px) 160px, (max-width: 1176px) 34vw, 400px"
+                className={styles.heroLogo}
               />
             </div>
           </AnimatedSection>
@@ -58,7 +58,7 @@ export default function Home() {
 
         <section className={styles.listContainer}>
           <AnimatedSection className="contents">
-            <p className={styles.listText}>Tu puedes</p>
+            <p className={styles.listText}>Tú puedes</p>
 
             <ul className={styles.list}>
               {items.map((item, index) => (
@@ -78,7 +78,7 @@ export default function Home() {
                 <h2 className={`${styles.noOffset} text-3xl md:text-6xl font-bold`}>inicia ahora.</h2>
                 <p className={`${styles.heroDescription} text-base md:text-xl mt-4`}>Únete a nuestra comunidad y crece con nosotros.</p>
               </div>
-              <div className="flex-1 w-full h-[350px] md:h-[600px]">
+              <div className="flex-1 w-full flex justify-center">
                 <BongoCatKeyboard />
               </div>
             </div>

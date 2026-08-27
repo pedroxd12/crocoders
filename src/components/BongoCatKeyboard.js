@@ -33,6 +33,49 @@ const SKILLS = {
 
 const sceneUrl = "/teclado/skills-keyboard.splinecode";
 
+// GEOMETRÍA CANÓNICA DEL VISOR.
+// La escena de Spline tiene cámara fija: el canvas siempre muestra el mismo
+// campo de visión vertical, así que el tamaño y el encuadre del gato dependen
+// por completo de la caja que lo contiene. Antes cada página le daba una caja
+// distinta (400/500px con max-w-lg en /capitulo, 350/600px a todo lo ancho en
+// la home, 600px fijos en /contacto) y por eso el gato se veía más grande, más
+// chico o descentrado según la sección.
+// Ahora la caja vive DENTRO del componente y es la de /capitulo, que es la
+// referencia buena; las páginas sólo aportan el hueco donde va.
+const STAGE_CLASS = 'relative w-full max-w-lg mx-auto h-[400px] md:h-[500px]';
+
+// Milisegundos entre frames del gato bongo. 200ms (5fps) basta para el efecto
+// y cuesta mucha menos CPU que los 100ms originales.
+const BONGO_FRAME_MS = 200;
+
+// Precalienta los dos recursos caros del visor 3D:
+//   - el chunk JS del runtime de Spline (~2MB): es lo que dominaba la espera —
+//     antes empezaba a descargarse recién cuando la sección estaba a 150px,
+//     así que el gato aparecía 2-3s después de que el usuario ya estaba mirando.
+//   - el archivo .splinecode de la escena (~230KB).
+// Se llama en idle tras cargar la página y también desde el observer de
+// prefetch; el flag evita trabajo duplicado entre instancias/páginas.
+let splineWarmupStarted = false;
+function warmupSplineAssets() {
+  if (splineWarmupStarted || typeof window === 'undefined') return;
+  splineWarmupStarted = true;
+
+  import('@splinetool/react-spline').catch(() => {
+    // Si falla (p. ej. red caída), permitir reintentar en el próximo trigger.
+    splineWarmupStarted = false;
+  });
+
+  if (!document.querySelector('link[data-spline-preload]')) {
+    const link = document.createElement('link');
+    link.rel = 'prefetch';
+    link.as = 'fetch';
+    link.href = sceneUrl;
+    link.crossOrigin = 'anonymous';
+    link.setAttribute('data-spline-preload', '');
+    document.head.appendChild(link);
+  }
+}
+
 export default function BongoCatKeyboard() {
   const [shouldLoad, setShouldLoad] = useState(false);
   const containerRef = useRef(null);
@@ -40,7 +83,25 @@ export default function BongoCatKeyboard() {
   const isVisibleRef = useRef(true);
   const cleanupRef = useRef({ resizeHandler: null, bongoInterval: null, visibilityObserver: null });
 
+  // Suelta lo que crea onLoad. Se llama al desmontar y también al principio de
+  // onLoad: Spline puede reemitir `load` (StrictMode en dev, remount al navegar
+  // entre páginas) y sin esto quedaban intervalos y listeners de resize
+  // duplicados corriendo — el gato terminaba animándose al doble de velocidad
+  // en unas páginas y no en otras.
+  const disposeSceneBindings = () => {
+    const cleanup = cleanupRef.current;
+    if (cleanup.bongoInterval) {
+      clearInterval(cleanup.bongoInterval);
+      cleanup.bongoInterval = null;
+    }
+    if (cleanup.resizeHandler) {
+      window.removeEventListener('resize', cleanup.resizeHandler);
+      cleanup.resizeHandler = null;
+    }
+  };
+
   const onLoad = (spline) => {
+    disposeSceneBindings();
     splineRef.current = spline;
 
     const updateLayout = () => {
@@ -167,11 +228,12 @@ export default function BongoCatKeyboard() {
     framesParent.visible = true;
 
     let i = 0;
-    // Reducimos la frecuencia de 100ms (10fps) a 200ms (5fps) — la animación
-    // de gato bongo es lo suficientemente sutil a 5fps y consume mucho menos CPU.
-    // Además, pausamos la animación cuando el componente no está visible.
+    // Pausamos cuando el canvas está fuera de pantalla o la pestaña está en
+    // segundo plano, para que el ritmo del gato sea el mismo en todas las
+    // páginas (antes seguía avanzando oculto y al volver aparecía en un frame
+    // arbitrario, a veces con las dos patas quietas).
     const interval = setInterval(() => {
-        if (!isVisibleRef.current) return;
+        if (!isVisibleRef.current || document.hidden) return;
         if (i % 2) {
           frame1.visible = false;
           frame2.visible = true;
@@ -180,36 +242,43 @@ export default function BongoCatKeyboard() {
           frame2.visible = false;
         }
         i++;
-    }, 200);
+    }, BONGO_FRAME_MS);
 
     cleanupRef.current.bongoInterval = interval;
   };
 
   useEffect(() => {
-    const cleanup = cleanupRef.current;
     return () => {
-      if (cleanup.bongoInterval) {
-        clearInterval(cleanup.bongoInterval);
-      }
-      if (cleanup.resizeHandler) {
-        window.removeEventListener('resize', cleanup.resizeHandler);
-      }
+      disposeSceneBindings();
+      const cleanup = cleanupRef.current;
       if (cleanup.visibilityObserver) {
         cleanup.visibilityObserver.disconnect();
+        cleanup.visibilityObserver = null;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Separamos dos acciones con costes muy distintos:
-  //   1. PREFETCH del .splinecode (barato, sólo descarga bytes) — con margen
-  //      amplio para que esté en caché cuando llegue el momento de montar.
-  //   2. MONTAR el visor Spline (caro: parsea ~500KB de runtime y construye la
-  //      escena 3D de forma síncrona, bloqueando el hilo ~1s). Esto sólo debe
-  //      ocurrir cuando el teclado está a punto de entrar en pantalla.
-  // Antes ambas cosas pasaban con rootMargin 800px, así que el visor se montaba
-  // mientras el usuario aún recorría los marquees y congelaba el scroll.
+  //   1. PRECALENTAR runtime JS + escena (sólo red, no bloquea el hilo) — en
+  //      idle tras la carga y, como respaldo, con margen amplio de scroll.
+  //   2. MONTAR el visor Spline (caro: construye la escena 3D de forma
+  //      síncrona, bloqueando el hilo ~1s). Esto sólo debe ocurrir cuando el
+  //      teclado está cerca de entrar en pantalla — no en medio de los
+  //      marquees de /capitulo, donde congelaba el scroll.
   useEffect(() => {
     if (shouldLoad) return;
+
+    // 1a. Precalentamiento en idle: con los bytes ya en caché, el montaje sólo
+    // paga el init de la escena y el gato aparece casi al instante.
+    let idleId = null;
+    let idleTimer = null;
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(warmupSplineAssets, { timeout: 3500 });
+    } else {
+      idleTimer = setTimeout(warmupSplineAssets, 2500);
+    }
+
     const el = containerRef.current;
     if (!el) return;
 
@@ -218,19 +287,11 @@ export default function BongoCatKeyboard() {
       return;
     }
 
-    // 1. Prefetch temprano (margen amplio).
+    // 1b. Respaldo por scroll (margen amplio) por si el idle aún no corrió.
     const prefetchObserver = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) {
-          if (!document.querySelector('link[data-spline-preload]')) {
-            const link = document.createElement('link');
-            link.rel = 'prefetch';
-            link.as = 'fetch';
-            link.href = sceneUrl;
-            link.crossOrigin = 'anonymous';
-            link.setAttribute('data-spline-preload', '');
-            document.head.appendChild(link);
-          }
+          warmupSplineAssets();
           prefetchObserver.disconnect();
         }
       },
@@ -238,8 +299,8 @@ export default function BongoCatKeyboard() {
     );
     prefetchObserver.observe(el);
 
-    // 2. Montaje tardío (margen pequeño): el congelamiento de init ocurre cuando
-    // el usuario ya está mirando la sección, no en medio del scroll anterior.
+    // 2. Montaje cercano: 300px de margen para que el init termine justo
+    // cuando la sección entra en pantalla, sin trabar el scroll previo.
     const mountObserver = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) {
@@ -247,11 +308,15 @@ export default function BongoCatKeyboard() {
           mountObserver.disconnect();
         }
       },
-      { rootMargin: '150px' }
+      { rootMargin: '300px' }
     );
     mountObserver.observe(el);
 
     return () => {
+      if (idleId !== null && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId);
+      }
+      if (idleTimer !== null) clearTimeout(idleTimer);
       prefetchObserver.disconnect();
       mountObserver.disconnect();
     };
@@ -281,8 +346,8 @@ export default function BongoCatKeyboard() {
   return (
     <div
       ref={containerRef}
-      className="w-full h-full relative"
-      style={{ pointerEvents: 'auto', minHeight: '300px', contain: 'layout paint' }}
+      className={STAGE_CLASS}
+      style={{ pointerEvents: 'auto', contain: 'layout paint' }}
     >
       {shouldLoad ? (
         <Suspense

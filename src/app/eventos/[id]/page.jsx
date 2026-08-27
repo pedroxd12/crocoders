@@ -42,6 +42,8 @@ function EventoDetalleContent() {
   
   const [isRegistered, setIsRegistered] = useState(false);
   const [qrToken, setQrToken] = useState(null);
+  // Imagen del QR (data URL) generada por nuestro propio backend.
+  const [qrImage, setQrImage] = useState(null);
   const [registrationCheckLoading, setRegistrationCheckLoading] = useState(true);
 
   // Modals
@@ -163,6 +165,31 @@ function EventoDetalleContent() {
       fetchEventoDetails();
     }
   }, [id, fetchEventoDetails]);
+
+  // El QR se pide a nuestro backend al abrir el ticket. Antes la imagen venía
+  // de api.qrserver.com con el token del ticket en la URL, es decir se le
+  // entregaba un credencial de acceso a un servicio de terceros.
+  const abrirTicket = useCallback(async () => {
+    setShowTicketModal(true);
+    if (!qrToken) return;
+
+    try {
+      const res = await fetch('/api/eventos/qr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ qrToken }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      // Se guarda junto al token que lo generó: si el token cambia, la imagen
+      // vieja deja de considerarse válida sin necesidad de limpiarla aparte.
+      if (data.dataUrl) setQrImage({ token: qrToken, dataUrl: data.dataUrl });
+    } catch {
+      // Sin imagen: el modal muestra el aviso de que se está generando.
+    }
+  }, [qrToken]);
+
+  const qrImageSrc = qrImage?.token === qrToken ? qrImage.dataUrl : null;
 
   useEffect(() => {
     if (!authLoading && !loading && evento && isAuthenticated && user) {
@@ -564,7 +591,7 @@ function EventoDetalleContent() {
                     </Button>
 
                     {isRegistered && (
-                        <Button onClick={() => setShowTicketModal(true)} variant="secondary" className="w-full py-3 flex items-center justify-center">
+                        <Button onClick={abrirTicket} variant="secondary" className="w-full py-3 flex items-center justify-center">
                             <QrCode className="mr-2" size={18}/> Ver Ticket de Acceso
                         </Button>
                     )}
@@ -646,17 +673,25 @@ function EventoDetalleContent() {
       <Modal isOpen={showTicketModal} onClose={() => setShowTicketModal(false)} title="Mi Ticket de Acceso" size="sm">
           <div className="flex flex-col items-center justify-center p-6 bg-white rounded-xl">
               <h3 className="text-black font-bold mb-4 text-lg">{evento.nombre_evento}</h3>
-              {/* QR Code generado dinámicamente con token seguro si existe, fallback a legacy JSON */}
-              <div className="border-4 border-black p-2">
-                <Image 
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrToken || JSON.stringify({eventId: evento.id_evento, userId: user?.id_miembro, date: new Date().toISOString()}))}`} 
-                    alt="QR Code" 
-                    width={200} 
-                    height={200}
-                    unoptimized
-                />
+              {/* El QR lo genera /api/eventos/qr: el ticket firmado no sale de este origen. */}
+              <div className="border-4 border-black p-2 flex items-center justify-center" style={{ minWidth: 208, minHeight: 208 }}>
+                {qrImageSrc ? (
+                  <Image
+                      src={qrImageSrc}
+                      alt="Código QR de acceso al evento"
+                      width={200}
+                      height={200}
+                      unoptimized
+                  />
+                ) : (
+                  <Loader className="animate-spin text-black" size={32} />
+                )}
               </div>
-              <p className="text-black text-sm mt-4 text-center">Presenta este código al ingresar al evento.</p>
+              <p className="text-black text-sm mt-4 text-center">
+                {qrImageSrc
+                  ? 'Presenta este código al ingresar al evento.'
+                  : 'Generando tu código de acceso…'}
+              </p>
           </div>
       </Modal>
 

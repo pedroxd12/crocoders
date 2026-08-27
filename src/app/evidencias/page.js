@@ -3,47 +3,45 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
-import { useState, useEffect } from 'react';
-import { CalendarDays, MapPin, X, ArrowRight, Image as ImageIcon } from 'lucide-react';
+import { useState } from 'react';
+import useSWR from 'swr';
+import { CalendarDays, MapPin, X, ArrowRight, RotateCw, Image as ImageIcon } from 'lucide-react';
 import styles from './page.module.css';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import { fetcher } from '@/lib/fetcher';
 
 export default function EvidenciasPage() {
-  const [eventsWithEvidencias, setEventsWithEvidencias] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [eventImages, setEventImages] = useState([]);
   const [loadingImages, setLoadingImages] = useState(false);
+  const [imagesError, setImagesError] = useState(null);
   const [expandedImage, setExpandedImage] = useState(null);
 
-  // Initial Data Fetch. El backend ya filtra eventos con evidencias públicas,
-  // los agrupa por evento (sin duplicados) y los ordena por fecha desc, así que
-  // aquí no hace falta volver a filtrar/deduplicar/ordenar.
-  useEffect(() => {
-    const fetchEvents = async () => {
-      try {
-        const response = await fetch('/api/evidencias');
-        if (!response.ok) throw new Error('Error al cargar eventos');
-        const data = await response.json();
-        setEventsWithEvidencias(Array.isArray(data) ? data : []);
-      } catch (error) {
-        console.error('Error:', error);
-        setError('No se pudieron cargar los eventos. Intenta de nuevo más tarde.');
-      } finally {
-        setLoading(false);
-      }
-    };
+  // SWR: la línea de tiempo se cachea y revalida sola; al volver a la página se
+  // muestra al instante desde caché en vez de bloquear con un fetch cada vez.
+  // El backend ya filtra eventos con evidencias públicas, los agrupa por evento
+  // (sin duplicados) y los ordena por fecha desc, así que aquí no hace falta
+  // volver a filtrar/deduplicar/ordenar.
+  const {
+    data: eventsData,
+    error: eventsError,
+    isLoading: loading,
+    mutate: reloadEvents,
+  } = useSWR('/api/evidencias', fetcher, { revalidateOnFocus: false });
 
-    fetchEvents();
-  }, []);
+  const eventsWithEvidencias = Array.isArray(eventsData) ? eventsData : [];
+  const error = eventsError
+    ? 'No se pudieron cargar los eventos. Intenta de nuevo más tarde.'
+    : null;
 
   // Fetch images for a specific event
   const handleEventClick = async (event) => {
     setSelectedEvent(event);
     setLoadingImages(true);
+    setImagesError(null);
     setEventImages([]);
-    
+
+
     try {
       // La línea de tiempo mezcla eventos y programas; cada item trae
       // `tipo_origen` ('evento'|'programa') y `origen_id` para pedir su galería.
@@ -53,9 +51,10 @@ export default function EvidenciasPage() {
       const response = await fetch(`/api/evidencias?${qs}`);
       if (!response.ok) throw new Error('Error al cargar imágenes');
       const images = await response.json();
-      setEventImages(images);
+      setEventImages(Array.isArray(images) ? images : []);
     } catch (error) {
       console.error('Error fetching images:', error);
+      setImagesError('No se pudieron cargar las fotos de esta actividad.');
     } finally {
       setLoadingImages(false);
     }
@@ -64,6 +63,7 @@ export default function EvidenciasPage() {
   const closeGallery = () => {
     setSelectedEvent(null);
     setEventImages([]);
+    setImagesError(null);
   };
 
   const formatDate = (dateString) => {
@@ -90,8 +90,11 @@ export default function EvidenciasPage() {
   if (error) {
     return (
       <div className={styles.pageWrapper}>
-         <div className={styles.loaderContainer} style={{ flexDirection: 'column', gap: '1rem', color: '#ef4444' }}>
-            <p>{error}</p>
+         <div className={styles.loaderContainer}>
+            <p style={{ color: '#ef4444' }}>{error}</p>
+            <button className={styles.retryButton} onClick={() => reloadEvents()}>
+              <RotateCw size={16} /> Reintentar
+            </button>
          </div>
       </div>
     );
@@ -112,6 +115,12 @@ export default function EvidenciasPage() {
           </p>
         </motion.div>
 
+        {eventsWithEvidencias.length === 0 ? (
+          <div className={styles.emptyState}>
+            <ImageIcon size={48} opacity={0.25} />
+            <p>Todavía no hay evidencias publicadas. Vuelve pronto.</p>
+          </div>
+        ) : (
         <div className={styles.timelineContainer}>
           <div className={styles.timelineLine}></div>
           
@@ -172,7 +181,7 @@ export default function EvidenciasPage() {
 
                     <div className={styles.evidenceCount}>
                         <ImageIcon size={14} className="mr-1"/>
-                        {event.num_evidencias} fotos
+                        {event.num_evidencias} {Number(event.num_evidencias) === 1 ? 'foto' : 'fotos'}
                     </div>
                 </div>
 
@@ -183,6 +192,7 @@ export default function EvidenciasPage() {
             </motion.div>
           ))}
         </div>
+        )}
       </div>
 
       <AnimatePresence>
@@ -209,7 +219,7 @@ export default function EvidenciasPage() {
                             <CalendarDays size={18} />
                             {formatDate(selectedEvent.fecha)}
                             <span className="mx-2">•</span>
-                            <span>{eventImages.length} fotos</span>
+                            <span>{eventImages.length} {eventImages.length === 1 ? 'foto' : 'fotos'}</span>
                         </div>
                     </div>
 
@@ -217,6 +227,18 @@ export default function EvidenciasPage() {
                         {loadingImages ? (
                             <div className="flex justify-center items-center w-full h-full min-h-[300px]">
                                 <LoadingSpinner size="lg" />
+                            </div>
+                        ) : imagesError ? (
+                            <div className={styles.galleryMessage}>
+                                <p style={{ color: '#ef4444' }}>{imagesError}</p>
+                                <button className={styles.retryButton} onClick={() => handleEventClick(selectedEvent)}>
+                                    <RotateCw size={16} /> Reintentar
+                                </button>
+                            </div>
+                        ) : eventImages.length === 0 ? (
+                            <div className={styles.galleryMessage}>
+                                <ImageIcon size={40} opacity={0.25} />
+                                <p>Esta actividad todavía no tiene fotos públicas.</p>
                             </div>
                         ) : (
                             eventImages.map((img, idx) => (
