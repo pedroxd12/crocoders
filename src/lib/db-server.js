@@ -78,11 +78,47 @@ function retryDelayFor(error, attempt) {
   return dbIsBooting ? 1000 * attempt : 150 * attempt;
 }
 
-// Manejo de errores de conexión
+// Manejo de errores de conexión.
+//
+// `pg` cuelga el objeto Client entero del error, así que imprimirlo tal cual
+// vuelca ~80 líneas (credenciales de conexión incluidas) por cada socket que se
+// cae. Cuando la base está caída eso pasa varias veces por segundo y tapa el
+// resto del log, así que se resume a código + mensaje.
+//
+// Además, estos errores llegan de conexiones ociosas que el proxy cerró por su
+// cuenta: el pool ya las descarta solo y el request en curso los reintenta, no
+// hay ninguna acción pendiente. Se agrupan los repetidos dentro de una misma
+// ventana para no repetir la misma línea decenas de veces.
+let ultimoErrorPool = { clave: null, desde: 0, repeticiones: 0 };
+
 pool.on('error', (err) => {
-  console.error('💥 Error inesperado en pool de PostgreSQL:', err);
-  if (err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED') {
-    console.error('⚠️ No se puede conectar a la base de datos. Verifique la conexión.');
+  const clave = `${err?.code || 'sin-codigo'}:${err?.message || ''}`;
+  const ahora = Date.now();
+
+  if (clave === ultimoErrorPool.clave && ahora - ultimoErrorPool.desde < 10000) {
+    ultimoErrorPool.repeticiones++;
+    return;
+  }
+
+  const omitidos = ultimoErrorPool.repeticiones;
+  ultimoErrorPool = { clave, desde: ahora, repeticiones: 0 };
+
+  console.error(
+    `💥 Error en el pool de PostgreSQL: ${err?.code || 'sin código'} — ${err?.message || err}` +
+    (omitidos > 0 ? ` (se omitieron ${omitidos} repeticiones del error anterior)` : '')
+  );
+
+  if (err?.code === 'ENOTFOUND' || err?.code === 'ECONNREFUSED') {
+    console.error(
+      `⚠️ No se llega a ${process.env.DB_HOST}:${process.env.DB_PORT}. Revisa DB_HOST/DB_PORT ` +
+      'y que la base esté levantada.'
+    );
+  } else if (err?.code === 'ECONNRESET' || err?.code === 'ETIMEDOUT') {
+    console.error(
+      `⚠️ ${process.env.DB_HOST}:${process.env.DB_PORT} acepta la conexión TCP pero la corta sin ` +
+      'responder. Suele ser el proxy del proveedor apuntando a una base apagada, dormida o ' +
+      'recién redesplegada (host/puerto del proxy cambian al redesplegar).'
+    );
   }
 });
 

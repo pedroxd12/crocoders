@@ -117,13 +117,13 @@
     /* Tokens compartidos por la etiqueta y la lista: si divergen, las cajas
        de línea tienen alturas distintas y jamás coinciden al centrarse. */
     --list-font-size: clamp(2rem, 4.5vw, 4.5rem);
-    /* 1.5 y no 1.25: cada palabra es un punto de snap, y el navegador se salta
-       uno cuando un solo gesto recorre mas de 1.5 veces la separacion entre
-       ellos. Con 1.25 esa separacion era de ~90px, por debajo de lo que avanza
-       un tic de rueda en muchos ratones. A 1.5 son ~108px (y ~130px si el
-       navegador tiene el tamano de fuente en "Grande"), asi que un tic normal
-       avanza exactamente una palabra. */
     --list-line-height: 1.5;
+    /* Recorrido de scroll que ocupa cada palabra, y por tanto la separacion
+       entre puntos de snap. Se declara aparte del tamano de fuente para poder
+       ajustar el "cuanto hay que scrollear por palabra" en cada breakpoint sin
+       tocar la tipografia. En escritorio vale 1.5 x font-size, exactamente la
+       caja de linea de siempre: aqui no cambia nada. */
+    --list-step: calc(var(--list-line-height) * var(--list-font-size));
 
     display: grid;
     /* minmax(0, auto) permite que las columnas encojan en vez de desbordar el
@@ -174,14 +174,21 @@
 }
 
 .list li {
-    line-height: inherit;
+    /* line-height como LONGITUD (no como factor): la caja de linea mide
+       exactamente un paso y el texto queda centrado dentro de ella por el
+       half-leading, sin flex ni paddings. */
+    line-height: var(--list-step);
     /* El snapport es el scrollport completo, así que `center` deja el <li>
-       exactamente donde está la etiqueta. `always` pide al navegador que no
-       rebase mas de un punto de snap por gesto; Chromium lo ignora mientras el
-       snap sea `proximity`, pero es la declaracion correcta y otros motores si
-       la respetan. Lo que evita los saltos aqui es --list-line-height. */
+       exactamente donde está la etiqueta.
+
+       Sin `scroll-snap-stop: always`: esa declaracion prohibe al scroller
+       rebasar un punto de snap en un solo gesto, y como cada palabra es un
+       punto, la rueda avanzaba de una en una por rapido que se girara. De ahi
+       la sensacion de "hay que moverlo mucho": la lista frenaba en seco
+       mientras los heros de arriba y abajo (sin puntos de snap) corrian
+       libres. Ahora el scroll fluye normal y `proximity` solo se encarga de
+       dejar la palabra clavada en la linea de la etiqueta al soltar. */
     scroll-snap-align: center;
-    scroll-snap-stop: always;
     transition: color 0.3s ease;
 }
 
@@ -211,6 +218,14 @@
         animation-range: cover
             calc(50% - 0.6 * var(--list-line-height) * 1em)
             calc(50% + 0.6 * var(--list-line-height) * 1em);
+        /* Segunda declaracion, atada al paso real: si --list-step se aparta de
+           la caja de linea (movil), la ventana lo sigue. Va despues y no en
+           lugar de la anterior porque un calc() invalido tumbaria
+           animation-range a `normal` y el resaltado dejaria de estar anclado
+           al centro; asi la version en em queda como respaldo. */
+        animation-range: cover
+            calc(50% - 0.6 * var(--list-step))
+            calc(50% + 0.6 * var(--list-step));
     }
 
     /* Todos los items se comportan igual. Antes el primero y el ultimo
@@ -253,6 +268,13 @@
         /* Escala con el ancho para que las dos columnas quepan siempre en una
            sola línea, desde 320px hasta tablet. */
         --list-font-size: clamp(1.5rem, 7vw, 2.75rem);
+        /* En un movil de 390px la caja de linea mide ~41px, mientras que un
+           swipe corriente recorre 300px o mas: cada gesto cruzaba media lista
+           y las palabras pasaban en rafaga. Damos a cada palabra un tramo
+           minimo de 8svh (~67px en un telefono de 844px de alto) para que el
+           recorrido por palabra sea comparable al de escritorio en proporcion
+           a la pantalla, y el snap tenga margen para enganchar. */
+        --list-step: max(calc(var(--list-line-height) * var(--list-font-size)), 8svh);
         padding-block: 15svh;
         height: auto;
     }
