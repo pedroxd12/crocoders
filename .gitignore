@@ -43,3 +43,6 @@ next-env.d.ts
 # backups locales
 *.bak
 *.old
+
+# Scripts de diagnóstico de un solo uso (p. ej. _tmp_ping.cjs)
+_tmp_*
