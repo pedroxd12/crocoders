@@ -1,68 +1,67 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import useSWR from 'swr';
 import { toast } from 'react-toastify';
-import { FaArrowLeft, FaCheck, FaTimes, FaSearch, FaFileInvoiceDollar, FaUserPlus, FaQrcode } from 'react-icons/fa';
+import {
+  ArrowLeft, Check, Search, UserPlus, QrCode, Users, UserRoundCheck,
+} from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Table from '@/components/ui/Table';
 import Modal from '@/components/ui/Modal';
-import LoadingSpinner from '@/components/LoadingSpinner';
+import Badge from '@/components/ui/Badge';
+import StatCard from '@/components/ui/StatCard';
+import PageHeader from '@/components/ui/PageHeader';
+import EmptyState from '@/components/ui/EmptyState';
 import QRScannerModal from '@/components/QRScannerModal';
+import { fetcher } from '@/lib/fetcher';
+import { formatearFechaDia } from '@/lib/fechas';
 
 export default function EventoAsistentes() {
   const { id } = useParams();
   const router = useRouter();
-  const [asistentes, setAsistentes] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+
+  // El evento se pide por su propia vía. Antes el nombre y la fecha salían de
+  // `data[0]` de la lista de asistentes, así que un evento sin inscritos se
+  // quedaba sin cabecera y no había forma de saber en cuál estabas.
+  const { data: evento } = useSWR(id ? `/api/admin/eventos/${id}` : null, fetcher, {
+    revalidateOnFocus: false,
+  });
+
+  const {
+    data: asistentes,
+    isLoading,
+    mutate: mutarAsistentes,
+  } = useSWR(id ? `/api/admin/eventos/${id}/asistentes` : null, fetcher, {
+    revalidateOnFocus: false,
+    onError: () => toast.error('Error al cargar la lista de asistentes'),
+  });
+
+  const lista = useMemo(() => (Array.isArray(asistentes) ? asistentes : []), [asistentes]);
+
   const [searchTerm, setSearchTerm] = useState('');
-  const [eventoInfo, setEventoInfo] = useState({ nombre: '', fecha: '' });
-  
-  // Manual Registration State
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
-  const [usersCatalog, setUsersCatalog] = useState([]);
   const [selectedUserJson, setSelectedUserJson] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
-  
-  // QRScanner State
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
+  const [pagoAConfirmar, setPagoAConfirmar] = useState(null);
 
-  useEffect(() => {
-    fetchAsistentes();
-    fetchUsersCatalog();
-  }, [id]);
+  // El catálogo completo de miembros e invitados sólo se descarga cuando se
+  // abre el modal: antes se pedía en cada montaje aunque nadie fuera a
+  // registrar a mano, y el endpoint no pagina.
+  const { data: usersCatalog } = useSWR(
+    isRegisterModalOpen ? '/api/admin/users' : null,
+    fetcher,
+    { revalidateOnFocus: false },
+  );
 
-  const fetchUsersCatalog = async () => {
-    try {
-        const res = await fetch('/api/admin/users');
-        if (res.ok) {
-            const data = await res.json();
-            setUsersCatalog(data);
-        }
-    } catch (error) {
-        console.error('Error loading users:', error);
-    }
-  };
-
-  const fetchAsistentes = async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetch(`/api/admin/eventos/${id}/asistentes`);
-      if (!res.ok) throw new Error('Error al cargar asistentes');
-      const data = await res.json();
-      setAsistentes(data);
-      if (data.length > 0) {
-        setEventoInfo({ 
-            nombre: data[0].nombre_evento, 
-            fecha: data[0].fecha_inicio 
-        });
-      }
-    } catch (error) {
-      toast.error(error.message);
-    } finally {
-      setIsLoading(false);
-    }
+  const parchearInscripcion = (idInscripcion, cambios) => {
+    mutarAsistentes(
+      (actual = []) => actual.map((a) => (a.id_inscripcion === idInscripcion ? { ...a, ...cambios } : a)),
+      { revalidate: false },
+    );
   };
 
   const toggleAsistencia = async (inscripcionId, currentStatus) => {
@@ -70,229 +69,293 @@ export default function EventoAsistentes() {
       const res = await fetch(`/api/admin/inscripciones/${inscripcionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'toggle_asistencia', value: !currentStatus })
+        body: JSON.stringify({ action: 'toggle_asistencia', value: !currentStatus }),
       });
       if (!res.ok) throw new Error('Error al actualizar');
-      
-      setAsistentes(prev => prev.map(a => 
-        a.id_inscripcion === inscripcionId ? { ...a, asistio: !currentStatus } : a
-      ));
+      parchearInscripcion(inscripcionId, { asistio: !currentStatus });
       toast.success(currentStatus ? 'Asistencia eliminada' : 'Asistencia registrada');
-    } catch (error) {
+    } catch {
       toast.error('No se pudo actualizar la asistencia');
     }
   };
 
-  const togglePago = async (inscripcionId, currentStatus) => {
-    if (!confirm(`¿Confirmar que el pago ha sido ${!currentStatus ? 'COMPLETADO' : 'CANCELADO'}?`)) return;
-
+  const confirmarPago = async () => {
+    if (!pagoAConfirmar) return;
+    const { id_inscripcion, pago_completado } = pagoAConfirmar;
     try {
-      const res = await fetch(`/api/admin/inscripciones/${inscripcionId}`, {
+      const res = await fetch(`/api/admin/inscripciones/${id_inscripcion}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'toggle_pago', value: !currentStatus })
+        body: JSON.stringify({ action: 'toggle_pago', value: !pago_completado }),
       });
       if (!res.ok) throw new Error('Error al actualizar');
-      
-      setAsistentes(prev => prev.map(a => 
-        a.id_inscripcion === inscripcionId ? { ...a, pago_completado: !currentStatus } : a
-      ));
+      parchearInscripcion(id_inscripcion, { pago_completado: !pago_completado });
       toast.success('Estado de pago actualizado');
-    } catch (error) {
+    } catch {
       toast.error('No se pudo actualizar el pago');
+    } finally {
+      setPagoAConfirmar(null);
     }
   };
 
   const handleManualRegister = async (e) => {
     e.preventDefault();
     if (!selectedUserJson) {
-        toast.warning('Seleccione un usuario');
-        return;
+      toast.warning('Selecciona un usuario');
+      return;
     }
 
     setIsRegistering(true);
     try {
-        const user = JSON.parse(selectedUserJson);
-        const res = await fetch('/api/admin/eventos/register', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                id_evento: id,
-                id_usuario: user.id,
-                tipo_usuario: user.tipo
-            })
-        });
+      const user = JSON.parse(selectedUserJson);
+      const res = await fetch('/api/admin/eventos/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_evento: id, id_usuario: user.id, tipo_usuario: user.tipo }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Error al registrar');
 
-        const data = await res.json();
-        
-        if (!res.ok) throw new Error(data.error || 'Error al registrar');
-
-        toast.success(`Usuario ${user.nombre_completo} registrado correctamente`);
-        setIsRegisterModalOpen(false);
-        setSelectedUserJson('');
-        fetchAsistentes(); // Reload list
+      toast.success(`${user.nombre_completo} quedó registrado`);
+      setIsRegisterModalOpen(false);
+      setSelectedUserJson('');
+      mutarAsistentes();
     } catch (error) {
-        toast.error(error.message);
+      toast.error(error.message);
     } finally {
-        setIsRegistering(false);
+      setIsRegistering(false);
     }
   };
 
-  const handleScanQR = () => {
-    setIsQRScannerOpen(true);
-  };
-  
-  const handleQRSuccess = (data) => {
-    // Reload attendance list after successful scan
-    fetchAsistentes();
-  };
+  const filteredAsistentes = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return lista;
+    return lista.filter(
+      (a) =>
+        a.nombre_completo?.toLowerCase().includes(q) ||
+        a.correo?.toLowerCase().includes(q) ||
+        a.numero_ieee?.includes(searchTerm.trim()),
+    );
+  }, [lista, searchTerm]);
 
-  const filteredAsistentes = asistentes.filter(a => 
-    a.nombre_completo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    a.correo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    a.numero_ieee?.includes(searchTerm)
-  );
-  
-  // Filter out users already registered to avoid duplicates in dropdown
-  const availableUsers = usersCatalog.filter(u => 
-    !asistentes.some(a => (a.id_miembro === u.id && u.tipo === 'miembro') || (a.id_invitado === u.id && u.tipo === 'invitado'))
-  );
+  // Excluye del desplegable a quien ya está inscrito.
+  //
+  // Se compara por CORREO y no sólo por id porque el endpoint de asistentes no
+  // devuelve `id_miembro` / `id_invitado` (ver notas): comparar `undefined ===
+  // u.id` daba siempre false y el filtro no excluía a nadie, así que el admin
+  // elegía a alguien ya inscrito y el API respondía con un error de duplicado.
+  // El correo sí viaja en ambas listas. Se mantiene además la comparación por
+  // id para que siga funcionando —y sea más precisa— en cuanto el API los
+  // exponga. Las filas de tipo "Equipo" traen el correo del capitán, que
+  // efectivamente ya está inscrito.
+  const availableUsers = useMemo(() => {
+    const catalogo = Array.isArray(usersCatalog) ? usersCatalog : [];
+    const correosInscritos = new Set(
+      lista.map((a) => a.correo?.trim().toLowerCase()).filter(Boolean),
+    );
+    return catalogo.filter((u) => {
+      if (u.email && correosInscritos.has(u.email.trim().toLowerCase())) return false;
+      return !lista.some(
+        (a) =>
+          (u.tipo === 'miembro' && a.id_miembro != null && a.id_miembro === u.id) ||
+          (u.tipo === 'invitado' && a.id_invitado != null && a.id_invitado === u.id),
+      );
+    });
+  }, [usersCatalog, lista]);
 
-  if (isLoading) return <div className="flex justify-center h-screen items-center"><LoadingSpinner text="Cargando lista..." /></div>;
+  const totalAsistieron = lista.filter((a) => a.asistio).length;
+
+  const columnas = [
+    { header: 'Nombre', accessor: 'nombre_completo', cellClassName: 'font-medium' },
+    { header: 'Correo', accessor: 'correo', cellClassName: 'text-muted' },
+    {
+      header: 'Tipo',
+      render: (row) => <Badge tone="neutral">{row.tipo_usuario}</Badge>,
+    },
+    {
+      header: 'Pago',
+      render: (row) =>
+        row.requiere_pago ? (
+          <button
+            type="button"
+            onClick={() => setPagoAConfirmar(row)}
+            title="Cambiar el estado de pago"
+          >
+            <Badge tone={row.pago_completado ? 'success' : 'warning'}>
+              {row.pago_completado ? 'Pagado' : 'Pendiente'}
+            </Badge>
+          </button>
+        ) : (
+          <span className="text-xs text-faint">Gratuito</span>
+        ),
+    },
+    {
+      header: 'Asistencia',
+      align: 'center',
+      render: (row) => (
+        <button
+          type="button"
+          onClick={() => toggleAsistencia(row.id_inscripcion, row.asistio)}
+          title={row.asistio ? 'Marcar como no asistió' : 'Marcar asistencia'}
+          aria-label={row.asistio ? 'Marcar como no asistió' : 'Marcar asistencia'}
+          aria-pressed={Boolean(row.asistio)}
+          className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
+            row.asistio
+              ? 'border-brand/30 bg-brand-soft text-brand'
+              : 'border-line bg-surface-2 text-faint hover:text-fg'
+          }`}
+        >
+          {row.asistio ? <Check size={16} aria-hidden="true" /> : <span className="h-2 w-2 rounded-full bg-current" />}
+        </button>
+      ),
+    },
+  ];
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="mb-6">
-        <Button onClick={() => router.back()} variant="text" className="mb-4 text-gray-400 hover:text-white flex items-center gap-2">
-            <FaArrowLeft /> Volver a Eventos
-        </Button>
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-                <h1 className="text-2xl font-bold text-white">Lista de Asistencia</h1>
-                {eventoInfo.nombre && (
-                    <p className="text-gray-400 text-sm mt-1">
-                        Evento: <span className="text-green-400 font-semibold">{eventoInfo.nombre}</span> 
-                        <span className="mx-2">|</span> 
-                        Fecha: {new Date(eventoInfo.fecha).toLocaleDateString()}
-                    </p>
-                )}
-            </div>
-            <div className="flex gap-4">
-                 <div className="bg-gray-800 p-2 rounded-lg text-center min-w-[100px]">
-                    <div className="text-2xl font-bold text-white">{asistentes.length}</div>
-                    <div className="text-xs text-gray-400">Inscritos</div>
-                 </div>
-                 <div className="bg-gray-800 p-2 rounded-lg text-center min-w-[100px]">
-                    <div className="text-2xl font-bold text-green-400">{asistentes.filter(a => a.asistio).length}</div>
-                    <div className="text-xs text-gray-400">Asistieron</div>
-                 </div>
-            </div>
-        </div>
-      </div>
+    <div>
+      <Button variant="ghost" size="sm" onClick={() => router.back()} className="mb-4">
+        <ArrowLeft size={16} aria-hidden="true" /> Volver a eventos
+      </Button>
 
-      <div className="bg-gray-800 rounded-lg shadow-md p-4 mb-4 flex flex-col md:flex-row gap-4 justify-between items-center">
-        <Input 
-            placeholder="Buscar por nombre, correo o IEEE..." 
-            value={searchTerm} 
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="bg-gray-700 border-gray-600 focus:border-green-500 w-full md:w-96"
-            icon={<FaSearch className="text-gray-400"/>}
+      <PageHeader
+        title={evento?.nombre ?? 'Lista de asistencia'}
+        description={
+          evento
+            ? `Lista de asistencia · ${formatearFechaDia(evento.fecha_inicio)}`
+            : 'Lista de asistencia'
+        }
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setIsQRScannerOpen(true)}>
+              <QrCode size={16} aria-hidden="true" /> Escanear QR
+            </Button>
+            <Button onClick={() => setIsRegisterModalOpen(true)}>
+              <UserPlus size={16} aria-hidden="true" /> Registrar manualmente
+            </Button>
+          </>
+        }
+      />
+
+      <div className="mb-6 grid grid-cols-2 gap-4 sm:max-w-md">
+        <StatCard icon={Users} label="Inscritos" value={lista.length} tone="info" />
+        <StatCard
+          icon={UserRoundCheck}
+          label="Asistieron"
+          value={totalAsistieron}
+          tone="brand"
+          hint={lista.length ? `${Math.round((totalAsistieron / lista.length) * 100)}% de los inscritos` : undefined}
         />
-        <div className="flex gap-2 w-full md:w-auto">
-            <Button onClick={handleScanQR} variant="secondary" className="flex items-center gap-2">
-                <FaQrcode /> <span className="hidden sm:inline">Escanear QR</span>
-            </Button>
-            <Button onClick={() => setIsRegisterModalOpen(true)} variant="primary" className="flex items-center gap-2">
-                <FaUserPlus /> <span className="hidden sm:inline">Registrar Manualmente</span>
-            </Button>
-        </div>
       </div>
 
-      <div className="bg-gray-800 rounded-lg shadow-md overflow-hidden">
-        <Table
-          columns={[
-            { header: 'Nombre', accessor: 'nombre_completo', cellClassName: 'font-medium text-white py-3 px-4' },
-            { header: 'Correo', accessor: 'correo', cellClassName: 'text-gray-400 text-sm py-3 px-4' },
-            { header: 'Tipo', accessor: 'tipo_usuario', cellClassName: 'text-xs text-gray-500 py-3 px-4' },
-            { 
-              header: 'Estado Pago', 
-              render: (row) => (
-                row.requiere_pago ? (
-                    <button 
-                        onClick={() => togglePago(row.id_inscripcion, row.pago_completado)}
-                        className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold transition ${row.pago_completado ? 'bg-green-900/50 text-green-400 border border-green-500/30' : 'bg-red-900/50 text-red-400 border border-red-500/30'}`}
-                        title="Clic para cambiar estado de pago"
-                    >
-                        {row.pago_completado ? <><FaCheck size={10}/> PAGADO</> : <><FaTimes size={10}/> PENDIENTE</>}
-                    </button>
-                ) : <span className="text-xs text-gray-500">Gratuito</span>
-              ),
-              cellClassName: 'py-3 px-4' 
-            },
-            { 
-              header: 'Asistencia', 
-              render: (row) => (
-                <button 
-                    onClick={() => toggleAsistencia(row.id_inscripcion, row.asistio)}
-                    className={`flex items-center justify-center w-8 h-8 rounded-full transition ${row.asistio ? 'bg-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
-                    title={row.asistio ? "Marcar como no asistió" : "Marcar asistencia"}
-                >
-                    {row.asistio ? <FaCheck /> : <div className="w-2 h-2 rounded-full bg-gray-500"></div>}
-                </button>
-              ),
-              cellClassName: 'py-3 px-4 text-center' 
+      <div className="mb-4">
+        <Input
+          type="search"
+          placeholder="Buscar por nombre, correo o número IEEE…"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          icon={<Search size={16} />}
+          aria-label="Buscar asistentes"
+          wrapperClassName="w-full md:max-w-md"
+        />
+      </div>
+
+      <Table
+        columns={columnas}
+        data={filteredAsistentes}
+        getRowKey={(row) => row.id_inscripcion}
+        loading={isLoading && !asistentes}
+        emptyMessage={
+          <EmptyState
+            icon={Users}
+            title={searchTerm ? 'Sin coincidencias' : 'Nadie se ha inscrito todavía'}
+            description={
+              searchTerm
+                ? 'Prueba con otro nombre, correo o número IEEE.'
+                : 'Cuando alguien se inscriba aparecerá aquí; también puedes registrarlo a mano.'
             }
-          ]}
-          data={filteredAsistentes}
-          emptyMessage="No hay asistentes registrados"
-          className="w-full"
-          headerClassName="bg-gray-700 text-gray-300"
-          rowClassName="border-b border-gray-700 hover:bg-gray-700/50"
-        />
-      </div>
+          />
+        }
+      />
 
-      {/* Manual Register Modal */}
       <Modal
         isOpen={isRegisterModalOpen}
         onClose={() => setIsRegisterModalOpen(false)}
-        title="Registrar Asistente Manualmente"
+        title="Registrar asistente manualmente"
+        description="Inscribe a un miembro o invitado sin que pase por el formulario público."
+        size="md"
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setIsRegisterModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button type="submit" form="formulario-registro-manual" loading={isRegistering}>
+              Registrar
+            </Button>
+          </>
+        }
       >
-        <form onSubmit={handleManualRegister} className="space-y-4">
-            <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Seleccionar Usuario</label>
-                <select 
-                    value={selectedUserJson} 
-                    onChange={(e) => setSelectedUserJson(e.target.value)}
-                    className="w-full p-3 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 min-h-[150px]"
-                    size="5" 
-                >
-                    <option value="" disabled>-- Seleccione un usuario --</option>
-                    {availableUsers.map(user => (
-                        <option key={`${user.tipo}-${user.id}`} value={JSON.stringify(user)} className="py-1">
-                            {user.nombre_completo} ({user.tipo}) - {user.email}
-                        </option>
-                    ))}
-                    {availableUsers.length === 0 && <option disabled>No hay usuarios disponibles para registrar</option>}
-                </select>
-                <p className="text-xs text-gray-400 mt-2">
-                    Lista de usuarios (miembros e invitados) que aún no están inscritos en este evento.
-                </p>
-            </div>
-            
-            <div className="flex justify-end gap-3 mt-6">
-                <Button type="button" onClick={() => setIsRegisterModalOpen(false)} variant="secondary">Cancelar</Button>
-                <Button type="submit" variant="primary" disabled={isRegistering}>
-                    {isRegistering ? <LoadingSpinner size="sm" /> : 'Registrar Usuario'}
-                </Button>
-            </div>
+        <form id="formulario-registro-manual" onSubmit={handleManualRegister}>
+          <label htmlFor="usuario-a-registrar" className="mb-1.5 block text-sm font-medium text-muted">
+            Usuario
+          </label>
+          <select
+            id="usuario-a-registrar"
+            value={selectedUserJson}
+            onChange={(e) => setSelectedUserJson(e.target.value)}
+            size={8}
+            className="w-full rounded-lg border border-line bg-surface-2 p-2 text-sm text-fg focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25"
+          >
+            {availableUsers.map((user) => (
+              <option key={`${user.tipo}-${user.id}`} value={JSON.stringify(user)}>
+                {user.nombre_completo} ({user.tipo}) — {user.email}
+              </option>
+            ))}
+          </select>
+          <p className="mt-2 text-xs text-faint">
+            {usersCatalog
+              ? availableUsers.length > 0
+                ? 'Miembros e invitados que aún no están inscritos en este evento.'
+                : 'No queda nadie por inscribir: todos los usuarios del sistema ya están en la lista.'
+              : 'Cargando usuarios…'}
+          </p>
         </form>
       </Modal>
-      
-      {/* QR Scanner Modal */}
-      <QRScannerModal 
+
+      {/* Cambiar el pago es reversible, así que NO usa ConfirmDialog (que
+          siempre advierte "no se puede deshacer"): basta un modal sobrio. Lo
+          importante era sacarlo del confirm() nativo del navegador. */}
+      <Modal
+        isOpen={Boolean(pagoAConfirmar)}
+        onClose={() => setPagoAConfirmar(null)}
+        title={pagoAConfirmar?.pago_completado ? 'Marcar el pago como pendiente' : 'Confirmar el pago'}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setPagoAConfirmar(null)}>
+              Cancelar
+            </Button>
+            <Button onClick={confirmarPago}>
+              {pagoAConfirmar?.pago_completado ? 'Marcar pendiente' : 'Confirmar pago'}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-muted">
+          {pagoAConfirmar
+            ? `${pagoAConfirmar.nombre_completo} pasará a “${
+                pagoAConfirmar.pago_completado ? 'Pendiente' : 'Pagado'
+              }”. Puedes volver a cambiarlo cuando quieras.`
+            : ''}
+        </p>
+      </Modal>
+
+      <QRScannerModal
         isOpen={isQRScannerOpen}
         onClose={() => setIsQRScannerOpen(false)}
-        onSuccess={handleQRSuccess}
+        // Sin esto, escanear por error el ticket de OTRO evento marcaba la
+        // asistencia allí y respondía "Asistencia registrada".
+        eventoId={id}
+        onSuccess={() => mutarAsistentes()}
       />
     </div>
   );

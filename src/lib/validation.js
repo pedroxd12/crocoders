@@ -1,9 +1,26 @@
 import { z } from 'zod';
+import { PLATAFORMAS, limpiarUsuario } from './plataformas';
 
 const emailSchema = z.string().trim().toLowerCase().email('Email no válido').max(200);
 const phoneSchema = z.string().trim().regex(/^[0-9]{10,15}$/, 'Teléfono debe tener 10-15 dígitos');
-const nameSchema = z.string().trim().min(1).max(100);
-const optionalString = (max = 200) => z.string().trim().max(max).optional().or(z.literal(''));
+const nameSchema = z.string().trim().min(1, 'Este campo es obligatorio').max(100, 'Máximo 100 caracteres');
+// El `.max()` también lleva mensaje en español: sin él, pasarse de largo en un
+// campo opcional (apellido materno, un handle de plataforma) devolvía el texto
+// por defecto de zod en inglés, y ese string viaja tal cual hasta el toast.
+const optionalString = (max = 200) =>
+  z.string().trim().max(max, `Máximo ${max} caracteres`).optional().or(z.literal(''));
+
+/**
+ * Handle de plataforma competitiva: opcional, pero si viene tiene que servir
+ * para consultar la API de esa plataforma. Antes se exigía `min(1)` y luego el
+ * servidor descartaba en silencio lo que no casara con el formato real, así que
+ * el usuario creía haber configurado su perfil y nunca aparecía en /puntajes.
+ */
+const handleSchema = (plataforma, etiqueta) =>
+  optionalString(50).refine(
+    (v) => !v || limpiarUsuario(plataforma, v) !== '',
+    `El usuario de ${etiqueta} no tiene un formato válido`,
+  );
 
 export const integranteSchema = z.object({
   nombre: nameSchema,
@@ -88,32 +105,83 @@ export const evidenciaUpdateSchema = z.object({
   orden: z.coerce.number().int().min(0).optional(),
 }).refine((d) => Object.keys(d).length > 0, { message: 'No hay campos para actualizar' });
 
+/**
+ * Alta pública de miembro.
+ *
+ * CONTRATO CON EL FORMULARIO (/iniciar). El registro RAMIFICA por afiliación:
+ * la pregunta "¿de qué formas parte?" manda sobre el resto del formulario.
+ *
+ *   Siempre obligatorios:
+ *     nombre, apellido_paterno, correo_electronico, contrasena,
+ *     confirmar_contrasena, numero_telefono, semestre, carrera
+ *     y al menos una afiliación (es_club_programacion | es_computer_society).
+ *
+ *   Club de programación (es_club_programacion = true):
+ *     al menos UNO de usuario_codeforces / usuario_vjudge / usuario_omegaup.
+ *     Los tres son opcionales por separado: quien compite en una sola
+ *     plataforma no tiene que inventarse handles en las otras dos.
+ *
+ *   Computer Society (es_computer_society = true):
+ *     numero_ieee OBLIGATORIO y de sólo dígitos. Ojo: en la BD `numero_ieee`
+ *     es UNIQUE además de tener la constraint `numero_ieee_required_cs`, así
+ *     que la cadena vacía NO puede llegar nunca al INSERT (el segundo registro
+ *     sin IEEE chocaría contra el índice único). Cuando no es de Computer
+ *     Society el schema lo normaliza a NULL, que es lo que la columna espera.
+ *
+ * Quien sólo pertenece al capítulo no necesita ningún handle; quien sólo está
+ * en el club no necesita número IEEE.
+ */
 export const authRegisterSchema = z.object({
   nombre: nameSchema,
   apellido_paterno: nameSchema,
   apellido_materno: optionalString(100),
   correo_electronico: emailSchema,
-  contrasena: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres').max(128),
-  confirmar_contrasena: z.string().min(8).max(128),
+  contrasena: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres').max(128, 'Máximo 128 caracteres'),
+  confirmar_contrasena: z.string().min(8, 'Confirma tu contraseña').max(128),
   numero_telefono: phoneSchema,
-  usuario_codeforces: z.string().trim().min(1).max(50),
-  usuario_vjudge: z.string().trim().min(1).max(50),
-  usuario_omegaup: z.string().trim().min(1).max(50),
-  semestre: z.coerce.number().int().min(1).max(14),
-  carrera: z.string().trim().min(1).max(150),
+  usuario_codeforces: handleSchema(PLATAFORMAS.CODEFORCES, 'Codeforces'),
+  usuario_vjudge: handleSchema(PLATAFORMAS.VJUDGE, 'VJudge'),
+  usuario_omegaup: handleSchema(PLATAFORMAS.OMEGAUP, 'OmegaUp'),
+  semestre: z.coerce.number('Selecciona tu semestre').int().min(1, 'El semestre debe estar entre 1 y 14').max(14, 'El semestre debe estar entre 1 y 14'),
+  // 100 y no 150: `catalogo_carrera.nombre` es varchar(100). Con 150 el INSERT
+  // reventaba con un 22001 y el usuario recibía un 500 genérico irreparable.
+  carrera: z.string().trim().min(1, 'Indica tu carrera').max(100, 'La carrera no puede superar 100 caracteres'),
   es_computer_society: z.boolean().optional().default(false),
   es_club_programacion: z.boolean().optional().default(false),
-  numero_ieee: z.union([z.string().regex(/^\d+$/, 'IEEE solo dígitos').max(20), z.literal(''), z.null()]).optional(),
-}).refine((d) => d.contrasena === d.confirmar_contrasena, {
-  message: 'Las contraseñas no coinciden',
-  path: ['confirmar_contrasena'],
-}).refine((d) => d.es_club_programacion || d.es_computer_society, {
-  message: 'Debes seleccionar al menos una afiliación',
-  path: ['es_club_programacion'],
-}).refine((d) => !d.es_computer_society || (d.numero_ieee && /^\d+$/.test(d.numero_ieee)), {
-  message: 'Número IEEE requerido para Computer Society',
-  path: ['numero_ieee'],
-});
+  numero_ieee: z.union([
+    z.string().trim().regex(/^\d+$/, 'El número IEEE sólo puede tener dígitos').max(20, 'Máximo 20 dígitos'),
+    z.literal(''),
+    z.null(),
+  ]).optional(),
+}).superRefine((d, ctx) => {
+  if (d.contrasena !== d.confirmar_contrasena) {
+    ctx.addIssue({ code: 'custom', path: ['confirmar_contrasena'], message: 'Las contraseñas no coinciden' });
+  }
+
+  if (!d.es_club_programacion && !d.es_computer_society) {
+    ctx.addIssue({ code: 'custom', path: ['es_club_programacion'], message: 'Debes seleccionar al menos una afiliación' });
+  }
+
+  if (d.es_club_programacion && !d.usuario_codeforces && !d.usuario_vjudge && !d.usuario_omegaup) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['usuario_codeforces'],
+      message: 'Indica al menos un perfil de plataforma (Codeforces, VJudge u OmegaUp)',
+    });
+  }
+
+  if (d.es_computer_society && !/^\d+$/.test(String(d.numero_ieee ?? '').trim())) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['numero_ieee'],
+      message: 'El número IEEE es obligatorio para Computer Society',
+    });
+  }
+}).transform((d) => ({
+  ...d,
+  // Nunca '' hacia la BD: `numero_ieee` es UNIQUE (ver comentario del contrato).
+  numero_ieee: d.es_computer_society ? String(d.numero_ieee).trim() : null,
+}));
 
 export const checkRegisterBatchSchema = z.object({
   eventIds: z.array(z.coerce.number().int().positive()).min(1).max(200),
@@ -133,6 +201,33 @@ export const programaRegisterSchema = z.discriminatedUnion('tipo', [
   }),
 ]);
 
+// El mensaje de error viaja tal cual hasta un toast del usuario, así que el
+// prefijo no puede ser el nombre técnico de la columna ("usuario_codeforces:").
+const ETIQUETAS_CAMPO = {
+  nombre: 'Nombre',
+  apellido_paterno: 'Apellido paterno',
+  apellido_materno: 'Apellido materno',
+  correo_electronico: 'Correo electrónico',
+  email: 'Correo electrónico',
+  contrasena: 'Contraseña',
+  confirmar_contrasena: 'Confirmación de contraseña',
+  numero_telefono: 'Teléfono',
+  telefono: 'Teléfono',
+  usuario_codeforces: 'Usuario de Codeforces',
+  usuario_vjudge: 'Usuario de VJudge',
+  usuario_omegaup: 'Usuario de OmegaUp',
+  semestre: 'Semestre',
+  carrera: 'Carrera',
+  numero_ieee: 'Número IEEE',
+  es_club_programacion: 'Afiliación',
+  es_computer_society: 'Afiliación',
+  nombre_completo: 'Nombre completo',
+  escuela_institucion: 'Escuela o institución',
+  titulo: 'Título',
+  descripcion: 'Descripción',
+  imagen_url: 'Imagen',
+};
+
 /**
  * Helper: parsea con un schema y devuelve [data, errorResponse].
  * Si error, errorResponse es un payload listo para NextResponse.json.
@@ -141,6 +236,9 @@ export function parseOrError(schema, data) {
   const result = schema.safeParse(data);
   if (result.success) return [result.data, null];
   const issue = result.error.issues[0];
-  const message = issue ? `${issue.path.join('.') || 'campo'}: ${issue.message}` : 'Datos inválidos';
+  const campo = issue ? ETIQUETAS_CAMPO[issue.path?.[0]] || issue.path?.join('.') : '';
+  const message = issue
+    ? (campo ? `${campo}: ${issue.message}` : issue.message)
+    : 'Datos inválidos';
   return [null, { success: false, error: message, issues: result.error.issues }];
 }

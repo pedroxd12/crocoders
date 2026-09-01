@@ -13,10 +13,15 @@ const ALLOWED_ATTR = ['href', 'title', 'target', 'rel', 'src', 'alt', 'width', '
 export function sanitizeHtml(html) {
   if (html === null || html === undefined) return html;
   const input = String(html);
+  // Sin ALLOWED_URI_REGEXP a propósito: la expresión que había aquí añadía a
+  // mano el esquema `data:` a la lista blanca de href/src, así que un
+  // `<a href="data:text/html;base64,...">` guardado en la descripción de un
+  // evento sobrevivía al filtro. Con la regla por defecto de DOMPurify los
+  // `data:` sólo se admiten donde tiene sentido (img/video/audio, vía
+  // DATA_URI_TAGS) y nunca en un enlace.
   return DOMPurify.sanitize(input, {
     ALLOWED_TAGS,
     ALLOWED_ATTR,
-    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
     FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'textarea'],
     FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover'],
   });

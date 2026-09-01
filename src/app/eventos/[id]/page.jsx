@@ -1,7 +1,7 @@
 ﻿// src/app/eventos/[id]/page.jsx
 'use client';
 import { useEffect, useMemo, useState, useCallback, Suspense } from 'react';
-import { useRouter, useParams, usePathname, useSearchParams } from 'next/navigation';
+import { useRouter, useParams, usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'react-toastify';
 import Image from 'next/image';
@@ -11,9 +11,11 @@ import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import EventoImagenes from '@/components/EventoImagenes';
+import { formatearFechaLarga, formatearHora, aDiaISO, combinarFechaHora } from '@/lib/fechas';
 import {
-  Calendar, Users, Clock, ArrowLeft, CheckCircle, XCircle, UserPlus,
-  LogIn, AlertTriangle, DollarSign, Loader, Info, Tag, BookOpen, Building, PartyPopper, QrCode, Trash2, Plus,
+  Calendar, Users, Clock, ArrowLeft, CheckCircle, UserPlus,
+  LogIn, AlertTriangle, Loader, BookOpen, PartyPopper, QrCode, Trash2, Plus,
   Eye as EyeIcon, Shield, MapPin, Globe, ExternalLink
 } from 'lucide-react';
 
@@ -33,7 +35,6 @@ function EventoDetalleContent() {
   const { id } = useParams();
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   
   const [evento, setEvento] = useState(null);
@@ -75,9 +76,23 @@ function EventoDetalleContent() {
     asesor: { nombre: '', email: '', telefono: '', institucion: '' }
   });
 
-  const [formErrors, setFormErrors] = useState({});
+  // ¿Este evento se inscribe por equipos?
+  // `permite_equipos` viene del CATÁLOGO de tipo de evento; por sí solo no
+  // significa que este evento concreto sea por equipos. Hacen falta las tres
+  // condiciones: que el tipo lo permita, que el evento tenga concurso y que el
+  // admin haya elegido modalidad "equipos". Sin esto, un concurso individual
+  // mostraba "Inscribir Equipo" sin ninguna vía de inscripción individual, y un
+  // evento sin concurso llevaba a un modal cuyo envío siempre fallaba con
+  // "Configuración de concurso no encontrada".
+  const esRegistroPorEquipos = Boolean(
+    evento?.permite_equipos && evento?.id_concurso && evento?.modalidad === 'equipos'
+  );
 
-  const semestres = Array.from({ length: 14 }, (_, i) => ({ value: (i + 1).toString(), label: `${i + 1}° Semestre` }));
+  // Rango de integrantes real del concurso, en un solo sitio. Antes había tres
+  // valores por defecto distintos (1, 2 y 5) repartidos por el archivo, así que
+  // el modal anunciaba un mínimo y la validación exigía otro.
+  const minEq = Number(evento?.min_integrantes_equipo) || 1;
+  const maxEq = Number(evento?.max_integrantes_equipo) || null;
 
   const sanitizedDescripcion = useMemo(() => {
     const html = evento?.descripcion || '<p>Sin descripción disponible.</p>';
@@ -101,31 +116,28 @@ function EventoDetalleContent() {
       if (!data || Object.keys(data).length === 0) throw new Error('Evento no encontrado o datos vacíos');
       
       const now = new Date();
-      
-      // Verificar si el registro está cerrado basándose en fecha_limite_registro
-      let registroCerrado = false;
-      if (data.fecha_limite_registro) {
-        const fechaLimiteRegistro = new Date(data.fecha_limite_registro);
-        registroCerrado = now > fechaLimiteRegistro;
-      }
-      
-      // Verificar si el evento ya finalizó (para mostrar badge "Finalizado")
-      // Usar fecha_fin si existe, si no usar fecha_inicio
-      const fechaFinEvento = data.fecha_fin || data.fecha;
-      // Agregar 'T00:00:00' para asegurar que se interprete en timezone local
-      const eventEndDate = new Date(fechaFinEvento + 'T00:00:00');
-      if (data.hora_fin) {
-        const [hours, minutes] = data.hora_fin.split(':');
-        eventEndDate.setHours(parseInt(hours, 10), parseInt(minutes, 10), 59, 999);
-      } else {
-        eventEndDate.setHours(23, 59, 59, 999);
-      }
-      
+
+      // La REGLA de cierre vive en el servidor (src/lib/eventos-fechas.js): es
+      // la fecha límite o, si no hay, una hora antes del inicio, siempre en la
+      // zona del club. `/api/eventos/[id]` ya devuelve el veredicto calculado
+      // en SQL, así que aquí sólo se consume. Recalcularlo en el navegador era
+      // lo que hacía que el botón dijera "Inscribirme Ahora" y el POST
+      // respondiera 400: el cliente sólo miraba `fecha_limite_registro` y
+      // desconocía el margen de una hora.
+      //
+      // El cálculo local queda como respaldo por si la respuesta viene de una
+      // versión anterior del API (o de la caché del navegador) sin las banderas.
+      const eventEndDate = combinarFechaHora(data.fecha_fin || data.fecha, data.hora_fin, { finDelDia: true });
+      const terminadoLocal = eventEndDate ? eventEndDate < now : false;
+      const cerradoLocal = data.fecha_limite_registro
+        ? now > new Date(data.fecha_limite_registro)
+        : false;
+
       setEvento({
         ...data,
-        fecha: new Date(data.fecha).toISOString().split('T')[0],
-        isPastEvent: eventEndDate < now,
-        registroCerrado: registroCerrado, // Nueva propiedad para controlar inscripciones
+        fecha: aDiaISO(data.fecha),
+        isPastEvent: typeof data.evento_terminado === 'boolean' ? data.evento_terminado : terminadoLocal,
+        registroCerrado: typeof data.registro_cerrado === 'boolean' ? data.registro_cerrado : cerradoLocal,
         tipo_evento_display: data.tipo ? data.tipo.charAt(0).toUpperCase() + data.tipo.slice(1) : 'General'
       });
     } catch (err) {
@@ -203,20 +215,14 @@ function EventoDetalleContent() {
   const handleApiRegistration = async (type, payload = {}) => {
     setActionLoading(true);
     const endpoint = type === 'unregister' ? '/api/eventos/unregister' : '/api/eventos/register';
-    
-    // Preparar userId
-    let userIdToUse = user?.id_miembro;
-    if (type === 'register' && !isAuthenticated && !payload.equipo) {
-        // Invitado individual
-        // (Se maneja en el bloque try/catch con llamada previa a /api/invitados si fuese necesario, 
-        // pero ahora el backend soporta creación inline en registro de equipo, 
-        // para individual invitado seguimos usand la lógica anterior o unificada).
-        // Si es guest individual, enviamos datos de guest
-    }
 
     try {
-      let requestBody = { eventoId: evento.id_evento, tipo: isAuthenticated ? 'miembro' : 'invitado', userId: userIdToUse };
-      
+      let requestBody = {
+        eventoId: evento.id_evento,
+        tipo: isAuthenticated ? 'miembro' : 'invitado',
+        userId: user?.id_miembro,
+      };
+
       // Lógica específica por tipo
       if (type === 'register_team') {
           requestBody = {
@@ -227,15 +233,27 @@ function EventoDetalleContent() {
               asesor: payload.asesor
           };
       } else if (type === 'register' && !isAuthenticated) {
-         // Registro Invitado Individual
+         // Registro Invitado Individual.
+         // Los campos vacíos NO se envían: el esquema de `/api/invitados` los
+         // valida con zod y una cadena vacía en `semestre` se convierte en 0,
+         // que no pasa el mínimo y devolvía un 400 antes de crear al invitado.
+         const datosInvitado = Object.fromEntries(
+            Object.entries(payload.guestData || {}).filter(([, v]) => v !== '' && v != null),
+         );
          const guestRes = await fetch('/api/invitados', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload.guestData),
+            body: JSON.stringify(datosInvitado),
          });
          const guestResult = await guestRes.json();
          if (!guestRes.ok) throw new Error(guestResult.error || 'Error al procesar datos de invitado');
          requestBody.userId = guestResult.id_invitado;
+         // `guestToken` es la credencial firmada que acredita que quien pide la
+         // inscripción es quien acaba de dar de alta ese correo. Sin ella
+         // /api/eventos/register rechaza SIEMPRE el registro de invitado: los
+         // ids son secuenciales y aceptarlos a secas permitía inscribir (y
+         // quedarse con el QR) de cualquier tercero.
+         requestBody.guestToken = guestResult.guestToken;
       }
 
       const response = await fetch(endpoint, {
@@ -294,14 +312,19 @@ function EventoDetalleContent() {
   const handleParticipateFlow = () => {
     if (isRegistered) {
       setShowUnregisterModal(true);
+    } else if (evento.isPastEvent) {
+      // El servidor tampoco debería aceptarlo, pero el botón llegaba a estar
+      // activo y rotulado "Inscribirme Ahora" junto al badge "Finalizado".
+      toast.info('Este evento ya ha finalizado.', { theme: "dark" });
     } else if (evento.registroCerrado) {
       toast.info('El periodo de inscripción para este evento ha finalizado.', { theme: "dark" });
-    } else if (evento.permite_equipos) {
+    } else if (esRegistroPorEquipos) {
       // Flujo de Equipos
+      const nuevosIntegrantes = [...teamData.integrantes];
+
       // Pre-llenar datos del capitán si está autenticado
-      if (isAuthenticated && teamData.integrantes[0].nombre === '') {
-          const newTeam = {...teamData};
-          newTeam.integrantes[0] = {
+      if (isAuthenticated && nuevosIntegrantes[0].nombre === '') {
+          nuevosIntegrantes[0] = {
               nombre: user.nombre_completo || '',
               email: user.correo_electronico || '',
               telefono: user.numero_telefono || '',
@@ -312,8 +335,15 @@ function EventoDetalleContent() {
               es_capitan: true,
               es_miembro: true
           };
-          setTeamData(newTeam);
       }
+
+      // El equipo arranca ya con el mínimo de filas exigido. Antes abría con
+      // una sola y al enviar saltaba "Debes registrar al menos 2 integrantes".
+      while (nuevosIntegrantes.length < minEq) {
+          nuevosIntegrantes.push({ nombre: '', email: '', telefono: '', institucion: '', carrera: '', semestre: '', es_capitan: false });
+      }
+
+      setTeamData({ ...teamData, integrantes: nuevosIntegrantes });
       setShowTeamFormModal(true);
     } else if (isAuthenticated) {
       handleApiRegistration('register');
@@ -324,9 +354,8 @@ function EventoDetalleContent() {
 
   // --- Handlers para Equipos ---
   const addTeamMember = () => {
-    const maxMembers = evento.max_integrantes_equipo || 5; 
-    if (teamData.integrantes.length >= maxMembers) {
-        toast.info(`El equipo ya tiene el máximo de ${maxMembers} integrantes.`);
+    if (maxEq && teamData.integrantes.length >= maxEq) {
+        toast.info(`El equipo ya tiene el máximo de ${maxEq} integrantes.`);
         return;
     }
     setTeamData({
@@ -336,11 +365,9 @@ function EventoDetalleContent() {
   };
 
   const removeTeamMember = (index) => {
-    // Check against dynamic minimum if available, otherwise 1
-    const minCount = evento.min_integrantes_equipo || 1;
-    if (teamData.integrantes.length <= minCount) {
-        toast.info(minCount > 1 
-            ? `Este evento requiere equipos de al menos ${minCount} estudiantes.` 
+    if (teamData.integrantes.length <= minEq) {
+        toast.info(minEq > 1
+            ? `Este evento requiere equipos de al menos ${minEq} integrantes.`
             : "Debes tener al menos un integrante.");
         return;
     }
@@ -358,9 +385,8 @@ function EventoDetalleContent() {
   // Validaciones extra antes de enviar
   const handleTeamSubmit = (e) => {
     e.preventDefault();
-    const minMembers = evento.min_integrantes_equipo || 1;
-    if (teamData.integrantes.length < minMembers) {
-        toast.warning(`Debes registrar al menos ${minMembers} integrantes.`);
+    if (teamData.integrantes.length < minEq) {
+        toast.warning(`Debes registrar al menos ${minEq} integrantes.`);
         return;
     }
 
@@ -384,19 +410,14 @@ function EventoDetalleContent() {
     });
   };
 
-  // --- Utils ---
-  const formatTime = (timeStr) => {
-    if (!timeStr) return 'N/A';
-    const [hours, minutes] = timeStr.toString().split(':');
-    const date = new Date();
-    date.setHours(parseInt(hours), parseInt(minutes));
-    return date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true });
-  };
-
   if (authLoading || loading) return <LoadingSpinner fullScreen text="Cargando evento..." />;
   if (error || !evento) return <div className="min-h-screen items-center justify-center flex text-red-400">Error: {error || 'Evento no encontrado'}</div>;
 
-  const canParticipate = !evento.registroCerrado && (evento.cupos === null || evento.cupos_disponibles > 0);
+  // `isPastEvent` entra en la condición: hasta ahora sólo servía para pintar el
+  // badge "Finalizado" y el botón seguía activo, así que se podía uno inscribir
+  // a un evento terminado y recibir por correo el QR de acceso.
+  const canParticipate =
+    !evento.isPastEvent && !evento.registroCerrado && (evento.cupos === null || evento.cupos_disponibles > 0);
 
   return (
     <motion.main 
@@ -425,7 +446,7 @@ function EventoDetalleContent() {
           </div>
 
           <div className="absolute bottom-0 left-0 w-full p-6 md:p-12 max-w-7xl mx-auto flex flex-col md:flex-row items-end gap-8 z-10 w-full left-1/2 -translate-x-1/2">
-              <div className="relative w-48 h-64 md:w-64 md:h-80 shadow-2xl rounded-xl overflow-hidden border-4 border-[#0f1014] hidden md:block flex-shrink-0 cursor-pointer group" onClick={() => setSelectedImageUrl(evento.imagen_url) || setShowImageModal(true)}>
+              <div className="relative w-48 h-64 md:w-64 md:h-80 shadow-2xl rounded-xl overflow-hidden border-4 border-[#0f1014] hidden md:block flex-shrink-0 cursor-pointer group" onClick={() => { setSelectedImageUrl(evento.imagen_url || '/placeholder-event.jpg'); setShowImageModal(true); }}>
                   <Image src={evento.imagen_url || '/placeholder-event.jpg'} alt="Flyer" fill sizes="256px" className="object-cover group-hover:scale-105 transition-transform duration-500"/>
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                      <EyeIcon className="text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" size={32} />
@@ -446,8 +467,8 @@ function EventoDetalleContent() {
                   </h1>
 
                   <div className="flex flex-wrap gap-x-8 gap-y-4 text-gray-300 text-sm md:text-base font-medium">
-                      <div className="flex items-center gap-2"><Calendar className="text-green-400" size={20}/> {new Date(evento.fecha + 'T00:00:00').toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
-                      <div className="flex items-center gap-2"><Clock className="text-blue-400" size={20}/> {formatTime(evento.hora_inicio)} - {formatTime(evento.hora_fin)}</div>
+                      <div className="flex items-center gap-2"><Calendar className="text-green-400" size={20}/> {formatearFechaLarga(evento.fecha)}</div>
+                      <div className="flex items-center gap-2"><Clock className="text-blue-400" size={20}/> {formatearHora(evento.hora_inicio)} – {formatearHora(evento.hora_fin)}</div>
                       <div className="flex items-center gap-2"><MapPin className="text-red-400" size={20}/> {evento.ubicacion || 'Por definir'}</div>
                   </div>
               </div>
@@ -458,19 +479,25 @@ function EventoDetalleContent() {
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-8">
               {/* Image Mobile */}
-              <div className="block md:hidden rounded-xl overflow-hidden shadow-2xl relative h-64 border border-gray-800" onClick={() => setSelectedImageUrl(evento.imagen_url) || setShowImageModal(true)}>
+              <div className="block md:hidden rounded-xl overflow-hidden shadow-2xl relative h-64 border border-line" onClick={() => { setSelectedImageUrl(evento.imagen_url || '/placeholder-event.jpg'); setShowImageModal(true); }}>
                   <Image src={evento.imagen_url || '/placeholder-event.jpg'} alt="Flyer" fill sizes="100vw" className="object-cover"/>
               </div>
 
-              <div className="bg-[#181a20] p-6 md:p-8 rounded-2xl border border-gray-800 shadow-xl">
-                  <h3 className="text-2xl font-bold mb-6 flex items-center text-gray-100">
+              <div className="bg-surface p-6 md:p-8 rounded-2xl border border-line shadow-xl">
+                  <h2 className="text-2xl font-bold mb-6 flex items-center text-fg">
                       <BookOpen className="mr-3 text-purple-400" /> Sobre el evento
-                  </h3>
+                  </h2>
                   <div
                     className="prose prose-invert prose-lg max-w-none prose-p:text-gray-400 prose-headings:text-gray-200 prose-a:text-green-400 hover:prose-a:text-green-300 prose-strong:text-white"
                     dangerouslySetInnerHTML={{ __html: sanitizedDescripcion }}
                   />
               </div>
+
+              {/* Galería de fotos del evento. El componente ya existía y su
+                  endpoint respondía, pero no estaba montado en ninguna ruta:
+                  las evidencias públicas no se veían en ningún sitio. No pinta
+                  nada si el evento aún no tiene fotos. */}
+              <EventoImagenes eventoId={id} />
 
               {/* Requirements/Details Grid - Minimalist Redesign */}
               {evento.id_concurso && (
@@ -480,8 +507,8 @@ function EventoDetalleContent() {
                             <Users className="text-gray-400 mb-2 h-6 w-6" strokeWidth={1.5} />
                             <span className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">Equipo</span>
                             <span className="text-gray-200 font-medium text-sm">
-                                {evento.modalidad === 'equipos' 
-                                    ? `${evento.min_integrantes_equipo || 2} - ${evento.max_integrantes_equipo} pax` 
+                                {evento.modalidad === 'equipos'
+                                    ? `${minEq} - ${maxEq ?? '∞'} pax`
                                     : 'Individual'}
                             </span>
                         </div>
@@ -525,10 +552,10 @@ function EventoDetalleContent() {
 
           {/* Sidebar / Actions */}
           <div className="lg:col-span-1 space-y-6">
-              <div className="bg-[#181a20] p-6 rounded-2xl border border-gray-800 shadow-xl sticky top-24">
+              <div className="bg-surface p-6 rounded-2xl border border-line shadow-xl sticky top-24">
                    {/* Payment Status Section - Fixed */}
                    {evento.tiene_costo && (
-                        <div className="mb-6 p-4 rounded-xl bg-gray-900/50 border border-gray-700">
+                        <div className="mb-6 p-4 rounded-xl bg-surface-2 border border-line">
                             <div className="flex justify-between items-center mb-2">
                                 <span className="text-gray-400 text-sm">Costo de inscripción</span>
                                 <span className="text-xl font-bold text-white">${evento.costo}</span>
@@ -547,7 +574,7 @@ function EventoDetalleContent() {
                         </div>
                    )}
 
-                   <div className="mb-6 pb-6 border-b border-gray-700">
+                   <div className="mb-6 pb-6 border-b border-line">
                        <div className="flex justify-between items-center mb-2">
                            <span className="text-gray-400 font-medium h-6">Cupos disponibles</span>
                            <span className={`font-bold text-xl ${evento.cupos_disponibles > 0 ? 'text-green-400' : 'text-red-400'}`}>
@@ -555,7 +582,7 @@ function EventoDetalleContent() {
                            </span>
                        </div>
                        {evento.cupos && (
-                           <div className="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
+                           <div className="w-full bg-surface-2 h-2 rounded-full overflow-hidden">
                                <div 
                                  className="bg-green-500 h-full" 
                                  style={{ width: `${Math.max(0, Math.min(100, (evento.cupos_disponibles / evento.cupos) * 100))}%` }}
@@ -576,18 +603,24 @@ function EventoDetalleContent() {
                    <Button 
                         onClick={handleParticipateFlow} 
                         variant={isRegistered ? 'danger' : 'primary'} 
-                        disabled={actionLoading || (!canParticipate && !isRegistered)}
+                        // Mientras se comprueba si ya está inscrito, el botón no
+                        // acepta clics: si no, durante ese hueco decía
+                        // "Inscribirme Ahora" a alguien que ya lo estaba y el
+                        // servidor respondía "Ya te encuentras registrado".
+                        disabled={actionLoading || registrationCheckLoading || (!canParticipate && !isRegistered)}
                         className="w-full py-4 text-lg font-bold shadow-lg shadow-green-900/20 mb-3"
                     >
-                        {isRegistered 
-                          ? 'Cancelar Inscripción' 
-                          : evento.registroCerrado 
-                            ? 'Inscripciones Cerradas' 
-                            : !canParticipate 
-                              ? 'Cupos Agotados' 
-                              : evento.permite_equipos 
-                                ? 'Inscribir Equipo' 
-                                : 'Inscribirme Ahora'}
+                        {isRegistered
+                          ? 'Cancelar Inscripción'
+                          : evento.isPastEvent
+                            ? 'Evento finalizado'
+                            : evento.registroCerrado
+                              ? 'Inscripciones Cerradas'
+                              : !canParticipate
+                                ? 'Cupos Agotados'
+                                : esRegistroPorEquipos
+                                  ? 'Inscribir Equipo'
+                                  : 'Inscribirme Ahora'}
                     </Button>
 
                     {isRegistered && (
@@ -596,7 +629,7 @@ function EventoDetalleContent() {
                         </Button>
                     )}
 
-                   <div className="mt-6 pt-6 border-t border-gray-700 text-center">
+                   <div className="mt-6 pt-6 border-t border-line text-center">
                        <p className="text-xs text-gray-500">
                            ¿Tienes dudas? Contacta a los administradores del club.
                        </p>
@@ -611,33 +644,33 @@ function EventoDetalleContent() {
       <Modal isOpen={showTeamFormModal} onClose={() => setShowTeamFormModal(false)} title="Registro de Equipo" size="2xl">
          <form onSubmit={handleTeamSubmit} className="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
             <div className="space-y-4">
-                <h3 className="text-green-400 font-bold border-b border-gray-700 pb-2">Datos del Equipo</h3>
-                <Input label="Nombre del Equipo *" value={teamData.nombre} onChange={e => setTeamData({...teamData, nombre: e.target.value})} required className="bg-gray-700"/>
+                <h3 className="text-brand font-bold border-b border-line pb-2">Datos del Equipo</h3>
+                <Input label="Nombre del equipo" value={teamData.nombre} onChange={e => setTeamData({...teamData, nombre: e.target.value})} required/>
                 
-                <div className="space-y-3 bg-gray-700/30 p-4 rounded-xl border border-gray-600">
+                <div className="space-y-3 bg-surface-2 p-4 rounded-xl border border-line">
                     <h4 className="text-sm font-bold text-gray-300">
-                        Datos del Asesor {evento.requiere_asesor ? <span className="text-red-400">*</span> : <span className="text-gray-500 font-normal">(Opcional)</span>}
+                        Datos del Asesor {evento.requiere_asesor ? <span className="text-danger">*</span> : <span className="text-gray-500 font-normal">(Opcional)</span>}
                     </h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <Input label={`Nombre ${evento.requiere_asesor ? '*' : ''}`} value={teamData.asesor.nombre} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, nombre: e.target.value}})} required={evento.requiere_asesor} className="bg-gray-700"/>
-                        <Input label={`Email ${evento.requiere_asesor ? '*' : ''}`} type="email" value={teamData.asesor.email} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, email: e.target.value}})} required={evento.requiere_asesor} className="bg-gray-700"/>
-                        <Input label={`Teléfono ${evento.requiere_asesor ? '*' : ''}`} value={teamData.asesor.telefono} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, telefono: e.target.value}})} required={evento.requiere_asesor} className="bg-gray-700"/>
-                        <Input label={`Institución ${evento.requiere_asesor ? '*' : ''}`} value={teamData.asesor.institucion} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, institucion: e.target.value}})} required={evento.requiere_asesor} className="bg-gray-700"/>
+                        <Input label="Nombre" value={teamData.asesor.nombre} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, nombre: e.target.value}})} required={evento.requiere_asesor}/>
+                        <Input label="Email" type="email" value={teamData.asesor.email} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, email: e.target.value}})} required={evento.requiere_asesor}/>
+                        <Input label="Teléfono" value={teamData.asesor.telefono} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, telefono: e.target.value}})} required={evento.requiere_asesor}/>
+                        <Input label="Institución" value={teamData.asesor.institucion} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, institucion: e.target.value}})} required={evento.requiere_asesor}/>
                     </div>
                 </div>
                 
                 <div className="space-y-4">
-                    <div className="flex justify-between items-center border-b border-gray-700 pb-2">
-                        <h3 className="text-green-400 font-bold">
-                            Integrantes del Equipo <span className="text-gray-400 text-sm font-normal ml-2">(1 - {evento.max_integrantes_equipo || 5} miembros)</span>
+                    <div className="flex justify-between items-center border-b border-line pb-2">
+                        <h3 className="text-brand font-bold">
+                            Integrantes del Equipo <span className="text-gray-400 text-sm font-normal ml-2">({minEq} - {maxEq ?? '∞'} miembros)</span>
                         </h3>
-                        <Button type="button" size="sm" onClick={addTeamMember} disabled={teamData.integrantes.length >= (evento.max_integrantes_equipo || 5)} variant="secondary">
-                            <Plus size={14} className="mr-1"/> Agregar Integrante ({teamData.integrantes.length}/{evento.max_integrantes_equipo || 5})
+                        <Button type="button" size="sm" onClick={addTeamMember} disabled={Boolean(maxEq) && teamData.integrantes.length >= maxEq} variant="secondary">
+                            <Plus size={14} className="mr-1"/> Agregar Integrante ({teamData.integrantes.length}/{maxEq ?? '∞'})
                         </Button>
                     </div>
                     
                     {teamData.integrantes.map((member, idx) => (
-                        <div key={idx} className="bg-gray-700/50 p-4 rounded-xl border border-gray-600 relative">
+                        <div key={idx} className="bg-surface-2 p-4 rounded-xl border border-line relative">
                             {idx > 0 && (
                                 <button type="button" onClick={() => removeTeamMember(idx)} className="absolute top-2 right-2 text-red-400 hover:text-red-300">
                                     <Trash2 size={16}/>
@@ -645,17 +678,17 @@ function EventoDetalleContent() {
                             )}
                             <h4 className="text-xs uppercase font-bold text-gray-400 mb-2">Integrante {idx + 1} {idx === 0 ? '(Capitán)' : ''}</h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <Input label="Email *" type="email" value={member.email} onChange={e => updateTeamMember(idx, 'email', e.target.value)} required placeholder="Correo personal o institucional" className="bg-gray-700 text-sm"/>
-                                <Input label="Nombre *" value={member.nombre} onChange={e => updateTeamMember(idx, 'nombre', e.target.value)} required className="bg-gray-700 text-sm"/>
+                                <Input label="Email" type="email" value={member.email} onChange={e => updateTeamMember(idx, 'email', e.target.value)} required placeholder="Correo personal o institucional"/>
+                                <Input label="Nombre" value={member.nombre} onChange={e => updateTeamMember(idx, 'nombre', e.target.value)} required/>
                                 <div className="md:col-span-2">
                                     <p className="text-xs text-blue-300 mb-2">* Si el integrante es miembro del club, asegúrese de usar su correo registrado para vincular su cuenta automáticamente.</p>
                                 </div>
                                 {/* Campos extendidos: obligatorios para asegurar datos del concurso.
                                     El label lleva '*' para que la obligatoriedad sea visible (antes
                                     sólo el atributo HTML required la imponía, sin pista visual). */}
-                                <Input label="Teléfono *" value={member.telefono} onChange={e => updateTeamMember(idx, 'telefono', e.target.value.replace(/\D/g, '').slice(0, 15))} required placeholder="10 dígitos" className="bg-gray-700 text-sm"/>
-                                <Input label="Institución *" value={member.institucion} onChange={e => updateTeamMember(idx, 'institucion', e.target.value)} required className="bg-gray-700 text-sm"/>
-                                <Input label="Carrera/Bachillerato *" value={member.carrera} onChange={e => updateTeamMember(idx, 'carrera', e.target.value)} required className="bg-gray-700 text-sm"/>
+                                <Input label="Teléfono" value={member.telefono} onChange={e => updateTeamMember(idx, 'telefono', e.target.value.replace(/\D/g, '').slice(0, 15))} required placeholder="10 dígitos"/>
+                                <Input label="Institución" value={member.institucion} onChange={e => updateTeamMember(idx, 'institucion', e.target.value)} required/>
+                                <Input label="Carrera/Bachillerato" value={member.carrera} onChange={e => updateTeamMember(idx, 'carrera', e.target.value)} required/>
                              </div>
                         </div>
                     ))}
@@ -706,11 +739,11 @@ function EventoDetalleContent() {
       {/* Formulario Invitado (simplificado) */}
       <Modal isOpen={showGuestFormModal} onClose={() => setShowGuestFormModal(false)} title="Registro Invitado">
           <form onSubmit={(e) => { e.preventDefault(); handleApiRegistration('register', { guestData }); }} className="space-y-3">
-             <Input label="Nombre *" value={guestData.nombre_completo} onChange={e => setGuestData({...guestData, nombre_completo: e.target.value})} required className="bg-gray-700"/>
-             <Input label="Email *" type="email" value={guestData.correo_electronico} onChange={e => setGuestData({...guestData, correo_electronico: e.target.value})} required className="bg-gray-700"/>
-             <Input label="Teléfono *" value={guestData.numero_telefono} onChange={e => setGuestData({...guestData, numero_telefono: e.target.value})} required className="bg-gray-700"/>
-             <Input label="Escuela/Institución *" value={guestData.escuela_institucion} onChange={e => setGuestData({...guestData, escuela_institucion: e.target.value})} required className="bg-gray-700"/>
-             <Input label="Carrera *" value={guestData.carrera} onChange={e => setGuestData({...guestData, carrera: e.target.value})} required className="bg-gray-700"/>
+             <Input label="Nombre" value={guestData.nombre_completo} onChange={e => setGuestData({...guestData, nombre_completo: e.target.value})} required/>
+             <Input label="Email" type="email" value={guestData.correo_electronico} onChange={e => setGuestData({...guestData, correo_electronico: e.target.value})} required/>
+             <Input label="Teléfono" value={guestData.numero_telefono} onChange={e => setGuestData({...guestData, numero_telefono: e.target.value})} required/>
+             <Input label="Escuela/Institución" value={guestData.escuela_institucion} onChange={e => setGuestData({...guestData, escuela_institucion: e.target.value})} required/>
+             <Input label="Carrera" value={guestData.carrera} onChange={e => setGuestData({...guestData, carrera: e.target.value})} required/>
              <Button type="submit" loading={actionLoading} className="w-full mt-4">Confirmar</Button>
           </form>
       </Modal>
@@ -752,13 +785,6 @@ function EventoDetalleContent() {
     </motion.main>
   );
 }
-
-const InfoCard = ({ icon, title, children }) => (
-  <div className="bg-gray-700/50 p-4 rounded-xl border border-gray-600 shadow-lg">
-    <h3 className="text-green-300 font-semibold mb-1 flex items-center gap-2">{icon} {title}</h3>
-    <div className="text-white text-lg">{children}</div>
-  </div>
-);
 
 export default function EventoDetallePage() {
     return (

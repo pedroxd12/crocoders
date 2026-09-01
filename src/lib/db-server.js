@@ -164,12 +164,25 @@ export async function connectWithRetry(maxRetries = 3) {
 // texto usaba `$${i + 1}` (índice del template) mientras que los values venían
 // de un `.filter(v => v !== undefined)`, así que un undefined en medio dejaba
 // el texto pidiendo $3 con sólo 2 parámetros y la query reventaba.
+//
+// Un `undefined` interpolado se rechaza en vez de omitirse: al saltarse el
+// placeholder, el hueco quedaba VACÍO en el SQL (`WHERE publica =  AND ...`) y
+// además corría la numeración de los parámetros siguientes, de modo que se
+// ejecutaba una consulta distinta de la escrita y el error llegaba al cliente
+// como un 500 opaco. Fallar aquí señala la línea del template. Para decir
+// «NULL» hay que escribirlo: `${valor ?? null}`.
 function buildQuery(strings, values) {
   let text = '';
   const params = [];
   for (let i = 0; i < strings.length; i++) {
     text += strings[i];
-    if (i < values.length && values[i] !== undefined) {
+    if (i < values.length) {
+      if (values[i] === undefined) {
+        throw new Error(
+          `sql(): parámetro undefined en la posición ${i} del template. ` +
+            'Usa `${valor ?? null}` si de verdad quieres enviar NULL.',
+        );
+      }
       params.push(values[i]);
       text += `$${params.length}`;
     }
@@ -177,19 +190,29 @@ function buildQuery(strings, values) {
   return { text, values: params };
 }
 
-// Función para ejecutar consultas SQL con retry logic
-export async function sql(strings, ...values) {
+/**
+ * Ejecuta una consulta reintentando los fallos transitorios, igual que `sql`
+ * pero para consultas ya construidas (texto + parámetros) y devolviendo el
+ * resultado COMPLETO de `pg` (con `rows` y `rowCount`).
+ *
+ * Es lo que hay que usar en lugar de `pool.query()` a secas: el proxy de
+ * Railway reparte sockets que ya cerró (ECONNRESET al primer uso) y la base se
+ * duerme, así que la primera consulta tras un rato de silencio falla con
+ * ECONNRESET o con 57P03 "the database system is starting up". Sin reintento,
+ * ese fallo se convertía en un 503 y la página salía vacía hasta que alguien
+ * recargaba a mano.
+ */
+export async function query(text, values = []) {
+  const consulta = typeof text === 'string' ? { text, values } : text;
   let lastError;
   const maxRetries = 4;
-  const query = buildQuery(strings, values);
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     let client;
     let socketIsDead = false;
     try {
       client = await pool.connect();
-      const result = await client.query(query);
-      return result.rows;
+      return await client.query(consulta);
     } catch (error) {
       lastError = error;
       // Un ECONNRESET/EPIPE significa que ESTE socket está muerto. Devolverlo
@@ -217,6 +240,12 @@ export async function sql(strings, ...values) {
   }
 
   throw lastError;
+}
+
+// Consultas como template literal. Mismo reintento que `query`; devuelve filas.
+export async function sql(strings, ...values) {
+  const { rows } = await query(buildQuery(strings, values));
+  return rows;
 }
 
 // Función para probar la conexión

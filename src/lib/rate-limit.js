@@ -1,5 +1,18 @@
 // Rate limiter en memoria. Adecuado para una sola instancia.
-// Para producción multi-instancia: usar Redis / Upstash.
+//
+// LIMITACIÓN CONOCIDA (importante): el despliegue es serverless, así que cada
+// instancia fría arranca con este Map vacío y varias atienden peticiones a la
+// vez. El techo real de intentos es, por tanto, bastante más alto que el
+// número que se configura aquí, y una IP rotatoria lo evade del todo.
+//
+// Mientras no haya un almacén compartido (Redis / Upstash), la mitigación es
+// elegir bien la CLAVE: limitar por cuenta/recurso con `key` en vez de por IP
+// hace que rotar de IP no sirva de nada dentro de la misma instancia, y evita
+// castigar a una sala entera detrás de un NAT. Los endpoints sensibles
+// (login, verify-token) ya combinan un límite por IP con otro por cuenta.
+//
+// Cuando exista Redis, basta con reemplazar este Map por ese almacén: la firma
+// de `rateLimit` no cambia y los llamadores no se tocan.
 const buckets = new Map();
 
 // Tope de entradas para que un atacante que rote IPs no haga crecer el Map sin

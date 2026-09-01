@@ -29,10 +29,14 @@ export async function POST(request) {
 
     const normalizedEmail = email.trim().toLowerCase();
 
+    // Mismo predicado que el login: a un miembro dado de baja no se le manda
+    // código de recuperación, porque tampoco podría iniciar sesión con él.
     const [user] = await sql`
       SELECT id_miembro, nombre, apellido_paterno, correo_electronico
       FROM miembro
       WHERE correo_electronico = ${normalizedEmail}
+        AND deleted_at IS NULL
+        AND estado <> 'baja'
     `;
 
     if (user) {

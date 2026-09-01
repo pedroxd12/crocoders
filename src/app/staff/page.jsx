@@ -1,186 +1,161 @@
 'use client';
 
-import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { toast } from 'react-toastify';
-import { FaCalendarAlt, FaUsers, FaClipboardCheck, FaQrcode } from 'react-icons/fa';
+import useSWR from 'swr';
+import { CalendarDays, ClipboardCheck, MapPin, ShieldCheck, Users } from 'lucide-react';
+
+import { fetcher } from '@/lib/fetcher';
+import PageHeader from '@/components/ui/PageHeader';
+import StatCard from '@/components/ui/StatCard';
+import Card from '@/components/ui/Card';
+import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
-import LoadingSpinner from '@/components/LoadingSpinner';
+import EmptyState from '@/components/ui/EmptyState';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { formatearFechaMedia, formatearHora } from '@/lib/fechas';
+import { estadoTemporal, esProximo, estaEnCurso } from './fechas';
 
 export default function StaffDashboard() {
   const router = useRouter();
-  const [eventos, setEventos] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchMisEventos();
-  }, []);
-
-  const fetchMisEventos = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/staff/eventos');
-      if (!res.ok) {
-        if (res.status === 401) {
-          toast.error('Sesión expirada');
-          router.push('/iniciar');
-          return;
-        }
-        throw new Error('Error al cargar eventos');
-      }
-      const data = await res.json();
-      setEventos(data);
-    } catch (error) {
-      toast.error(error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getEventoEstado = (evento) => {
-    const ahora = new Date();
-    const fechaInicio = new Date(`${evento.fecha_inicio}T${evento.hora_inicio || '00:00:00'}`);
-    const fechaFin = new Date(`${evento.fecha_fin}T${evento.hora_fin || '23:59:59'}`);
-
-    if (ahora < fechaInicio) return { label: 'Próximo', color: 'bg-blue-600' };
-    if (ahora >= fechaInicio && ahora <= fechaFin) return { label: 'En Curso', color: 'bg-green-600' };
-    return { label: 'Finalizado', color: 'bg-gray-600' };
-  };
-
-  if (loading) return <LoadingSpinner />;
-
-  const eventosProximos = eventos.filter(e => {
-    const fechaInicio = new Date(`${e.fecha_inicio}T${e.hora_inicio || '00:00:00'}`);
-    return fechaInicio > new Date();
+  const { data, error, isLoading } = useSWR('/api/staff/eventos', fetcher, {
+    revalidateOnFocus: false,
   });
 
-  const eventosEnCurso = eventos.filter(e => {
-    const ahora = new Date();
-    const fechaInicio = new Date(`${e.fecha_inicio}T${e.hora_inicio || '00:00:00'}`);
-    const fechaFin = new Date(`${e.fecha_fin}T${e.hora_fin || '23:59:59'}`);
-    return ahora >= fechaInicio && ahora <= fechaFin;
-  });
+  const eventos = Array.isArray(data) ? data : [];
+  const enCurso = eventos.filter(estaEnCurso);
+  const proximos = eventos.filter(esProximo);
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2">Panel de Staff</h1>
-        <p className="text-gray-400">Gestiona los eventos donde participas como staff</p>
-      </div>
+    <div className="mx-auto w-full max-w-6xl px-4 pt-28 pb-16">
+      <PageHeader
+        title="Panel de staff"
+        description="Eventos donde apoyas al equipo organizador y sus herramientas de asistencia."
+      />
 
-      {/* Dashboard Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className="bg-gray-800 rounded-lg p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-400 text-sm">Total Eventos</p>
-              <p className="text-3xl font-bold text-white mt-1">{eventos.length}</p>
-            </div>
-            <div className="bg-blue-600 p-4 rounded-lg">
-              <FaCalendarAlt className="text-white text-2xl" />
-            </div>
+      {error ? (
+        <Card className="border-danger/30 bg-danger-soft">
+          <p className="text-sm text-danger">
+            {error.status === 401
+              ? 'Tu sesión caducó. Vuelve a iniciar sesión para continuar.'
+              : 'No pudimos cargar tus eventos. Recarga la página.'}
+          </p>
+          {error.status === 401 && (
+            <Button className="mt-3" size="sm" onClick={() => router.push('/iniciar')}>
+              Iniciar sesión
+            </Button>
+          )}
+        </Card>
+      ) : (
+        <>
+          <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <StatCard icon={CalendarDays} label="Eventos asignados" value={eventos.length} tone="info" />
+            <StatCard icon={ClipboardCheck} label="En curso" value={enCurso.length} tone="brand" />
+            <StatCard icon={ShieldCheck} label="Próximos" value={proximos.length} tone="accent" />
           </div>
-        </div>
 
-        <div className="bg-gray-800 rounded-lg p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-400 text-sm">En Curso</p>
-              <p className="text-3xl font-bold text-green-400 mt-1">{eventosEnCurso.length}</p>
-            </div>
-            <div className="bg-green-600 p-4 rounded-lg">
-              <FaClipboardCheck className="text-white text-2xl" />
-            </div>
-          </div>
-        </div>
+          {enCurso.length > 0 && (
+            <section className="mb-8">
+              <h2 className="mb-3 text-sm font-semibold text-fg">Ocurriendo ahora</h2>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {enCurso.map((evento) => (
+                  <TarjetaEvento key={evento.id_evento} evento={evento} router={router} />
+                ))}
+              </div>
+            </section>
+          )}
 
-        <div className="bg-gray-800 rounded-lg p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-400 text-sm">Próximos</p>
-              <p className="text-3xl font-bold text-blue-400 mt-1">{eventosProximos.length}</p>
-            </div>
-            <div className="bg-purple-600 p-4 rounded-lg">
-              <FaUsers className="text-white text-2xl" />
-            </div>
-          </div>
-        </div>
-      </div>
+          <section>
+            <h2 className="mb-3 text-sm font-semibold text-fg">Todos mis eventos</h2>
 
-      {/* Eventos En Curso */}
-      {eventosEnCurso.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
-            <span className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></span>
-            Eventos en Curso
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {eventosEnCurso.map(evento => (
-              <EventoCard key={evento.id_evento} evento={evento} estado={getEventoEstado(evento)} router={router} />
-            ))}
-          </div>
-        </div>
+            {isLoading ? (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {[0, 1, 2].map((i) => (
+                  <Card key={i}>
+                    <Skeleton className="h-4 w-2/3" />
+                    <Skeleton className="mt-3 h-3 w-1/2" />
+                    <Skeleton className="mt-2 h-3 w-1/3" />
+                    <Skeleton className="mt-5 h-8 w-full rounded-lg" />
+                  </Card>
+                ))}
+              </div>
+            ) : eventos.length === 0 ? (
+              <EmptyState
+                icon={ShieldCheck}
+                title="No estás asignado como staff a ningún evento"
+                description="Cuando el equipo de organización te asigne a un evento, aparecerá aquí."
+              />
+            ) : (
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {eventos.map((evento) => (
+                  <TarjetaEvento key={evento.id_evento} evento={evento} router={router} />
+                ))}
+              </div>
+            )}
+          </section>
+        </>
       )}
-
-      {/* Todos los Eventos */}
-      <div>
-        <h2 className="text-2xl font-bold text-white mb-4">Mis Eventos</h2>
-        {eventos.length === 0 ? (
-          <div className="bg-gray-800 rounded-lg p-8 text-center">
-            <p className="text-gray-400">No estás asignado como staff a ningún evento aún.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {eventos.map(evento => (
-              <EventoCard key={evento.id_evento} evento={evento} estado={getEventoEstado(evento)} router={router} />
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
 
-function EventoCard({ evento, estado, router }) {
+function TarjetaEvento({ evento, router }) {
+  const estado = estadoTemporal(evento);
+  const horario = evento.hora_inicio
+    ? `${formatearHora(evento.hora_inicio)} – ${formatearHora(evento.hora_fin)}`
+    : '';
+
   return (
-    <div className="bg-gray-800 rounded-lg overflow-hidden hover:shadow-lg transition-shadow border border-gray-700">
+    <Card padded={false} className="flex h-full flex-col overflow-hidden">
       {evento.imagen_url && (
-        <div 
-          className="h-32 bg-cover bg-center" 
+        // Imagen decorativa del flyer: el nombre del evento ya está en el título.
+        <div
+          className="h-28 bg-cover bg-center"
           style={{ backgroundImage: `url(${evento.imagen_url})` }}
+          role="presentation"
         />
       )}
-      
-      <div className="p-4">
-        <div className="flex justify-between items-start mb-2">
-          <h3 className="text-lg font-bold text-white">{evento.nombre}</h3>
-          <span className={`px-2 py-1 rounded text-xs ${estado.color} text-white`}>
-            {estado.label}
-          </span>
+
+      <div className="flex flex-1 flex-col p-5">
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="text-sm font-semibold text-fg">{evento.nombre}</h3>
+          <Badge tone={estado.tone} className="shrink-0">{estado.label}</Badge>
         </div>
 
-        <div className="space-y-2 text-sm text-gray-400 mb-4">
-          <p className="flex items-center gap-2">
-            <FaCalendarAlt className="text-green-400" />
-            {new Date(evento.fecha_inicio).toLocaleDateString()}
+        <div className="mt-3 space-y-1.5 text-xs text-muted">
+          <p className="flex items-center gap-1.5">
+            <CalendarDays size={13} aria-hidden="true" />
+            {formatearFechaMedia(evento.fecha_inicio)}
+            {horario && <span className="text-faint">· {horario}</span>}
           </p>
-          <p>
-            <span className="font-semibold text-green-400">Mi Rol:</span> {evento.mi_rol}
+          {evento.ubicacion && (
+            <p className="flex items-center gap-1.5">
+              <MapPin size={13} aria-hidden="true" />
+              {evento.ubicacion}
+            </p>
+          )}
+          <p className="flex items-center gap-1.5">
+            <ShieldCheck size={13} aria-hidden="true" />
+            Mi rol: <span className="text-fg">{evento.mi_rol}</span>
           </p>
-          <div className="flex gap-4">
-            <span><span className="font-semibold">Inscritos:</span> {evento.total_inscritos}</span>
-            <span><span className="font-semibold">Asistieron:</span> {evento.total_asistieron}</span>
-          </div>
+          <p className="flex items-center gap-1.5">
+            <Users size={13} aria-hidden="true" />
+            <span className="tabular-nums text-fg">{evento.total_asistieron || 0}</span>
+            de
+            <span className="tabular-nums text-fg">{evento.total_inscritos || 0}</span>
+            asistieron
+          </p>
         </div>
 
-        <Button
-          onClick={() => router.push(`/staff/eventos/${evento.id_evento}`)}
-          variant="primary"
-          className="w-full"
-        >
-          Ver Detalles
-        </Button>
+        <div className="mt-auto pt-5">
+          <Button
+            className="w-full"
+            variant="secondary"
+            onClick={() => router.push(`/staff/eventos/${evento.id_evento}`)}
+          >
+            Ver detalles
+          </Button>
+        </div>
       </div>
-    </div>
+    </Card>
   );
 }

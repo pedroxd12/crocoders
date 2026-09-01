@@ -1,142 +1,257 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import useSWR from 'swr';
+import Image from 'next/image';
 import { toast } from 'react-toastify';
-import { FaPlus, FaEdit, FaTrash, FaUsers, FaCalendarAlt, FaSearch, FaEye, FaUserShield } from 'react-icons/fa';
+import {
+  Plus, Pencil, Trash2, Users, Search, ShieldUser, CalendarX2, ImageOff,
+} from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
+import IconButton from '@/components/ui/IconButton';
 import Input from '@/components/ui/Input';
+import Select from '@/components/ui/Select';
 import Textarea from '@/components/ui/Textarea';
 import Table from '@/components/ui/Table';
-import LoadingSpinner from '@/components/LoadingSpinner';
-import { UploadButton } from "@/utils/uploadthing";
-import Image from 'next/image';
+import Badge from '@/components/ui/Badge';
+import PageHeader from '@/components/ui/PageHeader';
+import EmptyState from '@/components/ui/EmptyState';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import FlyerUploader from '@/components/FlyerUploader';
+import { fetcher } from '@/lib/fetcher';
+import { formatearFechaDia, formatearHora } from '@/lib/fechas';
+
+const FORM_ID = 'formulario-evento';
+
+// El servidor exige equipos de 2 o más (api/admin/eventos: "El mínimo de
+// integrantes por equipo debe ser al menos 2"), así que el formulario arranca
+// en 2. Antes proponía 1 y guardar con los valores por defecto siempre fallaba.
+const MIN_INTEGRANTES = 2;
+
+const ESTADO_TONO = {
+  planificacion: 'neutral',
+  publicado: 'success',
+  en_curso: 'info',
+  finalizado: 'neutral',
+  cancelado: 'danger',
+};
+
+const ESTADO_ETIQUETA = {
+  planificacion: 'Planificación',
+  publicado: 'Publicado',
+  en_curso: 'En curso',
+  finalizado: 'Finalizado',
+  cancelado: 'Cancelado',
+};
+
+const FORM_VACIO = {
+  nombre: '',
+  descripcion_html: '',
+  id_tipo_evento: '',
+  id_alcance: '',
+  fecha_inicio: '',
+  fecha_fin: '',
+  fecha_limite_registro: '',
+  hora_inicio: '',
+  hora_fin: '',
+  ubicacion: '',
+  cupos: 50,
+  costo: 0,
+  tiene_costo: false,
+  imagen_flyer_url: null,
+  imagen_flyer_key: undefined,
+  es_concurso: false,
+  modalidad: 'individual',
+  max_integrantes_equipo: 3,
+  min_integrantes_equipo: MIN_INTEGRANTES,
+  id_plataforma: '',
+  requiere_asesor: false,
+  url_concurso: '',
+};
+
+/** Bloque del formulario. Agrupa campos afines para que el modal deje de ser
+ *  una lista plana de 20 controles sin jerarquía. */
+function Seccion({ title, description, children }) {
+  return (
+    <section className="rounded-xl border border-line bg-surface-2 p-4">
+      <h3 className="text-sm font-semibold text-fg">{title}</h3>
+      {description && <p className="mt-0.5 text-xs text-muted">{description}</p>}
+      <div className="mt-4 space-y-4">{children}</div>
+    </section>
+  );
+}
+
+/** Casilla con etiqueta y explicación de lo que activa. */
+function Casilla({ id, name, checked, onChange, label, help }) {
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <input
+          id={id}
+          name={name}
+          type="checkbox"
+          checked={checked}
+          onChange={onChange}
+          className="h-4 w-4 accent-brand"
+        />
+        <label htmlFor={id} className="cursor-pointer select-none text-sm font-medium text-fg">
+          {label}
+        </label>
+      </div>
+      {help && <p className="ml-6 mt-1 text-xs text-faint">{help}</p>}
+    </div>
+  );
+}
 
 export default function EventosAdmin() {
   const router = useRouter();
-  const [eventos, setEventos] = useState([]);
-  const [catalogs, setCatalogs] = useState({ tipos: [], alcances: [], plataformas: [] });
-  const [isLoading, setIsLoading] = useState(true);
+
+  // SWR en lugar de fetch manual: al volver al panel la tabla se pinta desde
+  // caché y sólo revalida en segundo plano, en vez de vaciarse en cada visita.
+  const {
+    data: eventos,
+    error: eventosError,
+    isLoading: eventosLoading,
+    mutate: mutarEventos,
+  } = useSWR('/api/admin/eventos', fetcher, { revalidateOnFocus: false });
+
+  const { data: catalogosRaw } = useSWR('/api/admin/catalogos', fetcher, {
+    revalidateOnFocus: false,
+  });
+  const catalogs = catalogosRaw ?? { tipos: [], alcances: [], plataformas: [] };
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentEvento, setCurrentEvento] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  
-  const [formData, setFormData] = useState({
-    nombre: '',
-    descripcion_html: '',
-    id_tipo_evento: '',
-    id_alcance: '',
-    fecha_inicio: '',
-    fecha_fin: '',
-    fecha_limite_registro: '',
-    hora_inicio: '',
-    hora_fin: '',
-    ubicacion: '',
-    cupos: 0,
-    costo: 0,
-    tiene_costo: false,
-    imagen_flyer_url: null,
-    imagen_flyer_key: null,
-    // Concurso specific
-    es_concurso: false,
-    modalidad: 'individual',
-    max_integrantes_equipo: 3,
-    min_integrantes_equipo: 1, // Nuevo campo
-    id_plataforma: '',
-    requiere_asesor: false,
-    url_concurso: ''
-  });
+  const [formData, setFormData] = useState(FORM_VACIO);
+  const [formErrors, setFormErrors] = useState({});
+  // Marca si el admin tocó a mano la casilla de concurso. Mientras no lo haga,
+  // el tipo de evento puede sugerirla; en cuanto la toca, manda su elección.
+  const [esConcursoTocado, setEsConcursoTocado] = useState(false);
 
-  useEffect(() => {
-    Promise.all([fetchEventos(), fetchCatalogs()]);
-  }, []);
+  const [eventoAEliminar, setEventoAEliminar] = useState(null);
+  const [eliminando, setEliminando] = useState(false);
+  const [confirmarQuitarConcurso, setConfirmarQuitarConcurso] = useState(false);
 
-  const fetchCatalogs = async () => {
-    try {
-      const res = await fetch('/api/admin/catalogos');
-      if (res.ok) {
-        const data = await res.json();
-        setCatalogs(data);
-      }
-    } catch (error) {
-      console.error('Error fetching catalogs:', error);
-    }
-  };
-
-  const fetchEventos = async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetch('/api/admin/eventos');
-      if (!res.ok) throw new Error('Error al cargar eventos');
-      const data = await res.json();
-      setEventos(data);
-    } catch (error) {
-      toast.error(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const filteredEventos = eventos.filter(evento =>
-    evento.nombre?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (evento.descripcion_html && evento.descripcion_html.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredEventos = useMemo(() => {
+    const lista = Array.isArray(eventos) ? eventos : [];
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return lista;
+    return lista.filter(
+      (evento) =>
+        evento.nombre?.toLowerCase().includes(q) ||
+        evento.descripcion_html?.toLowerCase().includes(q),
+    );
+  }, [eventos, searchTerm]);
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
-    // Special handling for checkboxes
     const val = type === 'checkbox' ? checked : value;
 
-    setFormData(prev => {
+    if (name === 'es_concurso') setEsConcursoTocado(true);
+
+    setFormData((prev) => {
       const newData = { ...prev, [name]: val };
-      
-      // Auto-detect if 'es_concurso' should be enabled based on type
-      if (name === 'id_tipo_evento') {
-        const selectedTipo = catalogs.tipos.find(t => t.id_tipo_evento === parseInt(val));
-        const tipoName = selectedTipo ? selectedTipo.nombre.toLowerCase() : '';
-        if (tipoName.includes('concurso') || tipoName.includes('hackathon')) {
-            newData.es_concurso = true;
-        } else {
-            newData.es_concurso = false;
-        }
+
+      // Sugerencia (no imposición): sólo al CREAR y mientras el admin no haya
+      // tocado la casilla. Antes esto se ejecutaba siempre, así que cambiar el
+      // tipo de un evento ya guardado desmarcaba la casilla sola y al guardar
+      // se borraba la fila de `concurso` con toda su configuración.
+      if (name === 'id_tipo_evento' && !currentEvento && !esConcursoTocado) {
+        const tipo = catalogs.tipos.find((t) => t.id_tipo_evento === parseInt(val, 10));
+        const nombreTipo = tipo?.nombre?.toLowerCase() ?? '';
+        newData.es_concurso = nombreTipo.includes('concurso') || nombreTipo.includes('hackathon');
       }
+
       return newData;
     });
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  /**
+   * Validación cruzada en el cliente. Antes no existía ninguna: las
+   * incoherencias de fecha/hora sólo las detectaba un CHECK de la base de datos
+   * tras el viaje de ida y vuelta, y con un toast que no señalaba el campo. La
+   * fecha límite posterior al evento no la detectaba nadie.
+   */
+  const validarFormulario = () => {
+    const errores = {};
+    const { fecha_inicio, fecha_fin, hora_inicio, hora_fin, fecha_limite_registro } = formData;
+
+    if (fecha_fin && fecha_inicio && fecha_fin < fecha_inicio) {
+      errores.fecha_fin = 'La fecha de fin no puede ser anterior a la de inicio.';
+    }
+
+    const mismoDia = !fecha_fin || fecha_fin === fecha_inicio;
+    if (mismoDia && hora_inicio && hora_fin && hora_fin <= hora_inicio) {
+      errores.hora_fin = 'En un evento de un solo día, la hora de fin debe ser posterior a la de inicio.';
+    }
+
+    if (fecha_limite_registro && fecha_inicio) {
+      const limite = new Date(fecha_limite_registro);
+      const inicio = new Date(`${fecha_inicio}T${hora_inicio || '00:00'}`);
+      if (limite > inicio) {
+        errores.fecha_limite_registro =
+          'El registro debe cerrar antes de que empiece el evento.';
+      }
+    }
+
+    if (Number(formData.cupos) < 1) {
+      errores.cupos = 'Debe haber al menos 1 cupo.';
+    }
+
+    if (formData.tiene_costo && Number(formData.costo) <= 0) {
+      errores.costo = 'Indica un costo mayor que cero o desmarca "Tiene costo".';
+    }
+
+    if (formData.es_concurso && formData.modalidad === 'equipos') {
+      const min = Number(formData.min_integrantes_equipo);
+      const max = Number(formData.max_integrantes_equipo);
+      if (!Number.isFinite(min) || min < MIN_INTEGRANTES) {
+        errores.min_integrantes_equipo = `Un equipo necesita al menos ${MIN_INTEGRANTES} integrantes.`;
+      } else if (max < min) {
+        errores.max_integrantes_equipo = 'El máximo no puede ser menor que el mínimo.';
+      }
+    }
+
+    setFormErrors(errores);
+    return Object.keys(errores).length === 0;
+  };
+
+  const guardarEvento = async () => {
     setIsSubmitting(true);
-    
     try {
       const payload = { ...formData };
       payload.cupos = Number(payload.cupos) || 0;
-      payload.costo = Number(payload.costo) || 0.00;
-      payload.id_tipo_evento = parseInt(payload.id_tipo_evento);
-      payload.id_alcance = parseInt(payload.id_alcance);
-      if (payload.id_plataforma) payload.id_plataforma = parseInt(payload.id_plataforma);
+      payload.costo = Number(payload.costo) || 0;
+      payload.id_tipo_evento = parseInt(payload.id_tipo_evento, 10);
+      payload.id_alcance = parseInt(payload.id_alcance, 10);
+      if (payload.id_plataforma) payload.id_plataforma = parseInt(payload.id_plataforma, 10);
 
       const method = currentEvento ? 'PUT' : 'POST';
-      const url = currentEvento 
+      const url = currentEvento
         ? `/api/admin/eventos/${currentEvento.id_evento}`
         : '/api/admin/eventos';
 
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
+        const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.error || 'Error al guardar el evento');
       }
 
       toast.success(`Evento ${currentEvento ? 'actualizado' : 'creado'} correctamente`);
       setIsModalOpen(false);
-      fetchEventos(); 
+      setConfirmarQuitarConcurso(false);
+      // `mutate()` revalida sin vaciar la tabla: los datos ya cargados siguen
+      // en pantalla mientras llega la respuesta.
+      mutarEventos();
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -144,378 +259,545 @@ export default function EventosAdmin() {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('¿Estás seguro de eliminar este evento?')) return;
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!validarFormulario()) {
+      toast.error('Revisa los campos marcados en rojo.');
+      return;
+    }
+    // Desmarcar la casilla en un evento que YA tiene concurso borra su fila en
+    // la tabla `concurso`. Eso no puede pasar en silencio.
+    if (currentEvento?.id_concurso && !formData.es_concurso) {
+      setConfirmarQuitarConcurso(true);
+      return;
+    }
+    guardarEvento();
+  };
+
+  const confirmarEliminacion = async () => {
+    if (!eventoAEliminar) return;
+    setEliminando(true);
     try {
-      const res = await fetch(`/api/admin/eventos/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Error al eliminar');
+      const res = await fetch(`/api/admin/eventos/${eventoAEliminar.id_evento}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Error al eliminar');
+      }
       toast.success('Evento eliminado correctamente');
-      fetchEventos(); 
+      setEventoAEliminar(null);
+      mutarEventos();
     } catch (error) {
       toast.error(error.message);
+    } finally {
+      setEliminando(false);
     }
   };
 
   const openEditModal = (evento) => {
     setCurrentEvento(evento);
-    
-    const isContest = evento.id_concurso != null;
+    setFormErrors({});
+    // Al editar nunca se autodetecta: la configuración guardada manda.
+    setEsConcursoTocado(true);
 
     setFormData({
-      nombre: evento.nombre,
+      nombre: evento.nombre ?? '',
       descripcion_html: evento.descripcion_html || '',
-      id_tipo_evento: evento.id_tipo_evento,
-      id_alcance: evento.id_alcance,
-      fecha_inicio: evento.fecha_inicio ? evento.fecha_inicio.split('T')[0] : '',
-      fecha_fin: evento.fecha_fin ? evento.fecha_fin.split('T')[0] : '',
+      id_tipo_evento: evento.id_tipo_evento ?? '',
+      id_alcance: evento.id_alcance ?? '',
+      fecha_inicio: evento.fecha_inicio ? String(evento.fecha_inicio).slice(0, 10) : '',
+      fecha_fin: evento.fecha_fin ? String(evento.fecha_fin).slice(0, 10) : '',
       fecha_limite_registro: evento.fecha_limite_registro || '',
-      hora_inicio: evento.hora_inicio || '',
-      hora_fin: evento.hora_fin || '',
+      // Postgres devuelve TIME como "09:00:00"; <input type="time"> sin `step`
+      // sólo admite "HH:MM", así que se recorta o el campo aparece vacío.
+      hora_inicio: evento.hora_inicio ? String(evento.hora_inicio).slice(0, 5) : '',
+      hora_fin: evento.hora_fin ? String(evento.hora_fin).slice(0, 5) : '',
       ubicacion: evento.ubicacion || '',
-      cupos: evento.cupos || 0,
-      costo: evento.costo || 0,
-      tiene_costo: evento.tiene_costo,
-      imagen_flyer_url: evento.imagen_flyer_url,
-      imagen_flyer_key: evento.imagen_key, 
-      es_concurso: isContest,
+      cupos: evento.cupos ?? 0,
+      costo: evento.costo ?? 0,
+      tiene_costo: Boolean(evento.tiene_costo),
+      imagen_flyer_url: evento.imagen_flyer_url ?? null,
+      // Se lee `imagen_flyer_key` (el nombre real de la columna); antes se leía
+      // `imagen_key`, que la API nunca ha devuelto. `undefined` a propósito: si
+      // el admin no toca la imagen, JSON.stringify elimina la clave del payload
+      // y el PUT conserva la que ya hay en la base. Sólo se envía cuando el
+      // admin sube otro flyer o lo quita.
+      imagen_flyer_key: evento.imagen_flyer_key ?? undefined,
+      es_concurso: evento.id_concurso != null,
       modalidad: evento.modalidad || 'individual',
       max_integrantes_equipo: evento.max_integrantes_equipo || 3,
-      min_integrantes_equipo: evento.min_integrantes_equipo || 1, // Cargar valor
+      min_integrantes_equipo: evento.min_integrantes_equipo || MIN_INTEGRANTES,
       id_plataforma: evento.id_plataforma || '',
       requiere_asesor: evento.requiere_asesor || false,
-      url_concurso: evento.url_concurso || ''
+      url_concurso: evento.url_concurso || '',
     });
     setIsModalOpen(true);
   };
 
   const openCreateModal = () => {
     setCurrentEvento(null);
+    setFormErrors({});
+    setEsConcursoTocado(false);
     setFormData({
-      nombre: '',
-      descripcion_html: '',
+      ...FORM_VACIO,
       id_tipo_evento: catalogs.tipos[0]?.id_tipo_evento || '',
       id_alcance: catalogs.alcances[0]?.id_alcance || '',
-      fecha_inicio: '',
-      fecha_fin: '',
-      fecha_limite_registro: '',
-      hora_inicio: '',
-      hora_fin: '',
-      ubicacion: '',
-      cupos: 50,
-      costo: 0,
-      tiene_costo: false,
-      imagen_flyer_url: null,
-      imagen_flyer_key: null,
-      es_concurso: false,
-      modalidad: 'individual',
-      max_integrantes_equipo: 3,
-      min_integrantes_equipo: 1, // Reset
-      id_plataforma: '',
-      requiere_asesor: false,
-      url_concurso: ''
     });
     setIsModalOpen(true);
   };
-  
-  const viewAsistentes = (idEvento) => {
-    router.push(`/admin/eventos/${idEvento}/asistentes`);
-  };
 
-  const viewStaff = (idEvento) => {
-    router.push(`/admin/eventos/${idEvento}/staff`);
-  };
-
-  if (isLoading && !eventos.length) {
-    return <div className="flex justify-center items-center h-screen"><LoadingSpinner text="Cargando eventos..." /></div>;
-  }
+  const columnas = [
+    {
+      header: 'Evento',
+      render: (evento) => (
+        <div className="flex items-center gap-3">
+          {evento.imagen_flyer_url ? (
+            <Image
+              src={evento.imagen_flyer_url}
+              alt=""
+              width={48}
+              height={48}
+              className="h-12 w-12 shrink-0 rounded-lg object-cover"
+            />
+          ) : (
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-line bg-surface-2 text-faint">
+              <ImageOff size={16} aria-hidden="true" />
+            </div>
+          )}
+          <div className="min-w-0">
+            <div className="truncate font-medium text-fg">{evento.nombre}</div>
+            <div className="text-xs text-muted">{evento.tipo_nombre}</div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      header: 'Fecha',
+      render: (evento) => (
+        <div>
+          <div>{formatearFechaDia(evento.fecha_inicio)}</div>
+          <div className="text-xs text-muted">
+            {formatearHora(evento.hora_inicio)} – {formatearHora(evento.hora_fin)}
+          </div>
+        </div>
+      ),
+    },
+    {
+      header: 'Estado',
+      render: (evento) => (
+        <Badge tone={ESTADO_TONO[evento.estado] || 'neutral'}>
+          {ESTADO_ETIQUETA[evento.estado] || evento.estado || '—'}
+        </Badge>
+      ),
+    },
+    { header: 'Alcance', accessor: 'alcance_nombre' },
+    {
+      header: 'Cupos',
+      align: 'center',
+      render: (evento) => (
+        <span className="tabular-nums">
+          {evento.cupos_disponibles ?? '∞'} / {evento.cupos ?? '∞'}
+        </span>
+      ),
+    },
+    {
+      header: 'Inscritos',
+      align: 'center',
+      render: (evento) => <span className="tabular-nums font-medium">{evento.total_inscritos}</span>,
+    },
+    {
+      header: 'Acciones',
+      align: 'right',
+      render: (evento) => (
+        <div className="flex justify-end gap-1">
+          <IconButton
+            icon={ShieldUser}
+            label="Gestionar staff"
+            tone="accent"
+            onClick={() => router.push(`/admin/eventos/${evento.id_evento}/staff`)}
+          />
+          <IconButton
+            icon={Users}
+            label="Ver asistentes"
+            tone="info"
+            onClick={() => router.push(`/admin/eventos/${evento.id_evento}/asistentes`)}
+          />
+          <IconButton icon={Pencil} label="Editar evento" tone="brand" onClick={() => openEditModal(evento)} />
+          <IconButton
+            icon={Trash2}
+            label="Eliminar evento"
+            tone="danger"
+            onClick={() => setEventoAEliminar(evento)}
+          />
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-          <FaCalendarAlt /> Gestión de Eventos
-        </h2>
-        <div className="flex flex-col md:flex-row gap-4 w-full md:w-auto">
-          <Input
-            type="text"
-            placeholder="Buscar eventos..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full md:w-64 bg-gray-700 border-gray-600 focus:border-green-500"
-          />
-          <Button onClick={openCreateModal} variant="primary" className="w-full md:w-auto flex items-center justify-center">
-            <FaPlus className="mr-2"/> Nuevo Evento
-          </Button>
-        </div>
-      </div>
+    <div>
+      <PageHeader
+        title="Gestión de eventos"
+        description="Crea eventos, controla su aforo y revisa quién se inscribe."
+        actions={
+          <>
+            <Input
+              type="search"
+              placeholder="Buscar eventos…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              icon={<Search size={16} />}
+              aria-label="Buscar eventos"
+              wrapperClassName="w-full sm:w-64"
+            />
+            <Button onClick={openCreateModal}>
+              <Plus size={16} aria-hidden="true" /> Nuevo evento
+            </Button>
+          </>
+        }
+      />
 
-      <div className="bg-gray-800 rounded-lg shadow-md overflow-hidden">
-        <Table
-          columns={[
-            { 
-              header: 'Info',
-              render: (evento) => (
-                <div className="flex items-center gap-3">
-                    {evento.imagen_flyer_url ? 
-                        <Image src={evento.imagen_flyer_url} alt="Flyer" width={48} height={48} className="object-cover rounded h-12 w-12" /> 
-                        : <div className="h-12 w-12 bg-gray-700 rounded flex items-center justify-center text-xs text-gray-400">Sin img</div>
-                    }
-                    <div>
-                        <div className="font-semibold text-white">{evento.nombre}</div>
-                        <div className="text-xs text-gray-400">{evento.tipo_nombre}</div>
-                    </div>
-                </div>
-              ),
-              cellClassName: 'py-3 px-4'
-            },
-            { 
-              header: 'Fecha', 
-              render: (evento) => (
-                <div className="text-sm">
-                  <div>{new Date(evento.fecha_inicio).toLocaleDateString()}</div>
-                  <div className="text-gray-400 text-xs">
-                    {evento.hora_inicio} - {evento.hora_fin}
-                  </div>
-                </div>
-              ),
-              cellClassName: 'py-3 px-4'
-            },
-            { header: 'Alcance', accessor: 'alcance_nombre', cellClassName: 'py-3 px-4 text-sm' },
-            { 
-                header: 'Cupos', 
-                render: (e) => <span title={`${e.cupos_disponibles} disponibles`}>{e.cupos_disponibles} / {e.cupos}</span>,
-                cellClassName: 'py-3 px-4 text-center' 
-            },
-            { 
-                header: 'Inscritos', 
-                accessor: 'total_inscritos',
-                cellClassName: 'py-3 px-4 text-center font-bold text-green-400' 
-            },
-            {
-              header: 'Acciones',
-              render: (evento) => (
-                <div className="flex gap-2 justify-end">
-                  <Button onClick={() => viewStaff(evento.id_evento)} variant="text" size="sm" title="Gestionar Staff" className="text-purple-400 hover:text-purple-300 p-1"><FaUserShield /></Button>
-                  <Button onClick={() => viewAsistentes(evento.id_evento)} variant="text" size="sm" title="Ver asistentes" className="text-blue-400 hover:text-blue-300 p-1"><FaUsers /></Button>
-                  <Button onClick={() => openEditModal(evento)} variant="text" size="sm" title="Editar" className="text-green-400 hover:text-green-300 p-1"><FaEdit /></Button>
-                  <Button onClick={() => handleDelete(evento.id_evento)} variant="text" size="sm" title="Eliminar" className="text-red-400 hover:text-red-300 p-1"><FaTrash /></Button>
-                </div>
-              ),
-              cellClassName: "text-right px-4"
-            }
-          ]}
-          data={filteredEventos}
-          emptyMessage={<div className="text-center py-8 text-gray-400">No hay eventos registrados</div>}
-          className="w-full"
-          headerClassName="bg-gray-700 text-gray-300"
-          rowClassName="border-b border-gray-700 hover:bg-gray-700/50"
-        />
-      </div>
+      {eventosError && (
+        <p className="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
+          No se pudieron cargar los eventos.{' '}
+          <button type="button" onClick={() => mutarEventos()} className="underline">
+            Reintentar
+          </button>
+        </p>
+      )}
+
+      <Table
+        columns={columnas}
+        data={filteredEventos}
+        getRowKey={(evento) => evento.id_evento}
+        // Sólo la PRIMERA carga muestra esqueleto. Al revalidar tras una
+        // mutación los datos siguen en pantalla en lugar de desaparecer.
+        loading={eventosLoading && !eventos}
+        emptyMessage={
+          searchTerm ? (
+            <EmptyState
+              icon={Search}
+              title="Sin coincidencias"
+              description={`Ningún evento coincide con “${searchTerm}”.`}
+              action={
+                <Button variant="secondary" onClick={() => setSearchTerm('')}>
+                  Limpiar búsqueda
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              icon={CalendarX2}
+              title="Todavía no hay eventos"
+              description="Crea el primero para que aparezca en la web y admita inscripciones."
+              action={
+                <Button onClick={openCreateModal}>
+                  <Plus size={16} aria-hidden="true" /> Nuevo evento
+                </Button>
+              }
+            />
+          )
+        }
+      />
 
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={currentEvento ? 'Editar Evento' : 'Crear Nuevo Evento'}
-      >
-        <form onSubmit={handleSubmit} className="space-y-4 pr-2">
-          {/* Main Info */}
-          <div className="grid grid-cols-1 gap-4">
-             <Input label="Nombre del Evento" name="nombre" value={formData.nombre} onChange={handleInputChange} required className="bg-gray-700 border-gray-600 focus:border-green-500" />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Tipo de Evento</label>
-              <select name="id_tipo_evento" value={formData.id_tipo_evento} onChange={handleInputChange} required className="w-full p-2.5 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none">
-                <option value="">Seleccionar Tipo</option>
-                {catalogs.tipos.map(t => <option key={t.id_tipo_evento} value={t.id_tipo_evento}>{t.nombre}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Alcance (Visibilidad)</label>
-              <select name="id_alcance" value={formData.id_alcance} onChange={handleInputChange} required className="w-full p-2.5 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-green-500 focus:outline-none">
-                <option value="">Seleccionar Alcance</option>
-                {catalogs.alcances.map(a => <option key={a.id_alcance} value={a.id_alcance}>{a.nombre}</option>)}
-              </select>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-2 px-1">
-             <input id="es_concurso" name="es_concurso" type="checkbox" checked={formData.es_concurso} onChange={handleInputChange} className="w-4 h-4 text-green-600 bg-gray-700 border-gray-500 rounded focus:ring-green-500" />
-             <label htmlFor="es_concurso" className="font-medium text-gray-300 text-sm select-none cursor-pointer">Habilitar funciones de Concurso/Competencia</label>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input label="Fecha Inicio" type="date" name="fecha_inicio" value={formData.fecha_inicio} onChange={handleInputChange} required className="bg-gray-700 border-gray-600" />
-            <Input label="Fecha Fin" type="date" name="fecha_fin" value={formData.fecha_fin} onChange={handleInputChange} className="bg-gray-700 border-gray-600" />
-            <Input label="Hora Inicio" type="time" name="hora_inicio" value={formData.hora_inicio} onChange={handleInputChange} required className="bg-gray-700 border-gray-600" />
-            <Input label="Hora Fin" type="time" name="hora_fin" value={formData.hora_fin} onChange={handleInputChange} required className="bg-gray-700 border-gray-600" />
-          </div>
-          
-          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-            <Input 
-              label="Fecha Límite de Registro" 
-              type="datetime-local" 
-              name="fecha_limite_registro" 
-              value={formData.fecha_limite_registro} 
-              onChange={handleInputChange} 
-              className="bg-gray-700 border-gray-600" 
-            />
-            <p className="text-xs text-gray-400 mt-2">
-              ⚠️ Fecha y hora límite para que los usuarios puedan inscribirse. Si se deja vacío, se permitirán inscripciones hasta 1 hora antes del inicio del evento.
-            </p>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Input label="Ubicación" name="ubicacion" value={formData.ubicacion} onChange={handleInputChange} className="bg-gray-700 border-gray-600 md:col-span-2" />
-            <Input label="Cupos" type="number" name="cupos" min="1" value={formData.cupos} onChange={handleInputChange} required className="bg-gray-700 border-gray-600" />
-          </div>
-
-          <div className="flex gap-4 items-center bg-gray-700/50 p-3 rounded-lg border border-gray-600">
-             <div className="flex items-center h-5">
-               <input id="tiene_costo" name="tiene_costo" type="checkbox" checked={formData.tiene_costo} onChange={handleInputChange} className="w-4 h-4 text-green-600 bg-gray-700 border-gray-500 rounded focus:ring-green-500" />
-             </div>
-             <div className="ml-2 text-sm">
-               <label htmlFor="tiene_costo" className="font-medium text-gray-300">¿Tiene costo de acceso?</label>
-             </div>
-             {formData.tiene_costo && (
-                <div className="ml-auto w-32">
-                    <Input type="number" name="costo" placeholder="0.00" min="0" step="0.01" value={formData.costo} onChange={handleInputChange} className="bg-gray-700 border-gray-600 py-1" />
-                </div>
-             )}
-          </div>
-          
-          {/* Concurso Logic - Improved UI */}
-          {formData.es_concurso && (
-            <div className="bg-gray-700/50 p-5 rounded-xl border border-blue-500/20 shadow-lg">
-                <h3 className="text-blue-400 font-bold mb-4 flex items-center border-b border-blue-500/10 pb-2">
-                    <span className="bg-blue-500/20 p-1.5 rounded-lg mr-2"><FaUsers size={14}/></span>
-                    Configuración de Competencia
-                </h3>
-                
-                <div className="space-y-4">
-                    {/* Fila 1: Modalidad y Plataforma */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-600">
-                             <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Modalidad de Participación</label>
-                             <select 
-                                name="modalidad" 
-                                value={formData.modalidad} 
-                                onChange={handleInputChange} 
-                                className="w-full bg-gray-700 text-white rounded-lg p-2.5 border border-gray-600 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                             >
-                                <option value="individual">Individual</option>
-                                <option value="equipos">Por Equipos</option>
-                             </select>
-                        </div>
-                        
-                         <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-600">
-                            <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Plataforma / Online Judge</label>
-                            <select 
-                                name="id_plataforma" 
-                                value={formData.id_plataforma} 
-                                onChange={handleInputChange} 
-                                className="w-full bg-gray-700 text-white rounded-lg p-2.5 border border-gray-600 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                            >
-                                <option value="">Ninguna / Otra</option>
-                                {catalogs.plataformas.map(p => <option key={p.id_plataforma} value={p.id_plataforma}>{p.nombre}</option>)}
-                            </select>
-                        </div>
-                    </div>
-
-                    {/* Fila 2: Configuración de Equipos (Solo si es equipos) */}
-                     {formData.modalidad === 'equipos' && (
-                        <div className="grid grid-cols-2 gap-4 bg-gray-800/50 p-3 rounded-lg border border-gray-600 animate-in fade-in slide-in-from-top-2 duration-300">
-                            <Input 
-                                label="Mín. Integrantes" 
-                                type="number" 
-                                name="min_integrantes_equipo" 
-                                min="1" 
-                                value={formData.min_integrantes_equipo} 
-                                onChange={handleInputChange} 
-                                className="bg-gray-700 border-gray-600" 
-                            />
-                            <Input 
-                                label="Máx. Integrantes" 
-                                type="number" 
-                                name="max_integrantes_equipo" 
-                                min={formData.min_integrantes_equipo || 1} 
-                                value={formData.max_integrantes_equipo} 
-                                onChange={handleInputChange} 
-                                className="bg-gray-700 border-gray-600" 
-                            />
-                        </div>
-                    )}
-                    
-                    {/* Fila 3: Opciones de Registro */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-                         <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-600 h-full">
-                            <label className="block text-xs font-bold text-gray-400 uppercase mb-3">Requisitos Adicionales</label>
-                            <label className="flex items-center gap-3 cursor-pointer group p-2 hover:bg-gray-700/50 rounded transition-colors">
-                                <div className="relative flex items-center">
-                                    <input 
-                                        type="checkbox" 
-                                        name="requiere_asesor" 
-                                        checked={formData.requiere_asesor} 
-                                        onChange={handleInputChange} 
-                                        className="peer w-5 h-5 cursor-pointer appearance-none rounded border border-gray-500 bg-gray-700 checked:bg-green-500 checked:border-green-500 transition-all"
-                                    />
-                                    <FaUserShield className="absolute pointer-events-none opacity-0 peer-checked:opacity-100 text-white text-[10px] left-[5px]" />
-                                </div>
-                                <span className="text-gray-300 text-sm group-hover:text-white transition-colors">Requerir Asesor (Obligatorio)</span>
-                            </label>
-                         </div>
-                         
-                         <div className="bg-gray-800/50 p-3 rounded-lg border border-gray-600">
-                             <Input 
-                                label="URL del Concurso (Externo)" 
-                                name="url_concurso" 
-                                value={formData.url_concurso} 
-                                onChange={handleInputChange} 
-                                placeholder="https://..." 
-                                className="bg-gray-700 border-gray-600" 
-                            />
-                         </div>
-                    </div>
-                </div>
-            </div>
-          )}
-
-          <Textarea label="Descripción (Soporta HTML básico)" name="descripcion_html" value={formData.descripcion_html} onChange={handleInputChange} rows={3} className="bg-gray-700 border-gray-600" />
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Imagen (Flyer)</label>
-            <div className="flex items-center gap-4">
-                <div className="flex-1">
-                    <UploadButton
-                        endpoint="eventoImageUploader"
-                        onClientUploadComplete={(res) => {
-                            if (res && res.length > 0) {
-                                toast.success("Imagen subida!");
-                                setFormData(prev => ({ ...prev, imagen_flyer_url: res[0].url, imagen_flyer_key: res[0].key }));
-                            }
-                        }}
-                        onUploadError={(error) => toast.error(`Error: ${error.message}`)}
-                        className="ut-button:bg-green-600 ut-button:ut-hover:bg-green-700 text-sm"
-                    />
-                </div>
-                {formData.imagen_flyer_url && (
-                    <div className="relative">
-                        <Image src={formData.imagen_flyer_url} alt="Preview" width={80} height={80} className="h-20 w-auto rounded border border-gray-600" />
-                        <button type="button" onClick={() => setFormData(p => ({...p, imagen_flyer_url: null, imagen_flyer_key: null}))} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 text-xs">✕</button>
-                    </div>
-                )}
-            </div>
-          </div>
-
-          <div className="flex justify-end space-x-4 mt-6 pt-4 border-t border-gray-700">
-            <Button type="button" onClick={() => setIsModalOpen(false)} variant="secondary" disabled={isSubmitting}>Cancelar</Button>
-            <Button type="submit" variant="primary" disabled={isSubmitting} className="min-w-32">
-              {isSubmitting ? <LoadingSpinner size="sm" /> : (currentEvento ? 'Guardar Cambios' : 'Crear Evento')}
+        title={currentEvento ? 'Editar evento' : 'Crear nuevo evento'}
+        description={
+          currentEvento
+            ? 'Los cambios se reflejan de inmediato en la ficha pública del evento.'
+            : 'Rellena los datos mínimos; el resto puede completarse después.'
+        }
+        size="xl"
+        // Barra de acciones FIJA: antes los botones vivían al final del scroll
+        // del formulario y había que bajar a ciegas para guardar.
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setIsModalOpen(false)}
+              disabled={isSubmitting}
+            >
+              Cancelar
             </Button>
-          </div>
+            <Button type="submit" form={FORM_ID} loading={isSubmitting}>
+              {currentEvento ? 'Guardar cambios' : 'Crear evento'}
+            </Button>
+          </>
+        }
+      >
+        <form id={FORM_ID} onSubmit={handleSubmit} className="space-y-5" noValidate>
+          <Seccion title="Identidad" description="Cómo se anuncia el evento y dónde ocurre.">
+            <Input
+              label="Nombre del evento"
+              name="nombre"
+              value={formData.nombre}
+              onChange={handleInputChange}
+              required
+              placeholder="Ej. Maratón de Programación 2026"
+            />
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Select
+                label="Tipo de evento"
+                name="id_tipo_evento"
+                value={formData.id_tipo_evento}
+                onChange={handleInputChange}
+                required
+                placeholder="Seleccionar tipo"
+                options={catalogs.tipos.map((t) => ({ value: t.id_tipo_evento, label: t.nombre }))}
+              />
+              <Select
+                label="Alcance"
+                name="id_alcance"
+                value={formData.id_alcance}
+                onChange={handleInputChange}
+                required
+                placeholder="Seleccionar alcance"
+                help="Determina a qué comunidad se anuncia."
+                options={catalogs.alcances.map((a) => ({ value: a.id_alcance, label: a.nombre }))}
+              />
+            </div>
+            <Input
+              label="Ubicación"
+              name="ubicacion"
+              value={formData.ubicacion}
+              onChange={handleInputChange}
+              placeholder="Aula, laboratorio o enlace de la sesión"
+            />
+          </Seccion>
+
+          <Seccion title="Fechas y horario" description="Cuándo empieza y cuándo termina.">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Input
+                label="Fecha de inicio"
+                type="date"
+                name="fecha_inicio"
+                value={formData.fecha_inicio}
+                onChange={handleInputChange}
+                required
+              />
+              <Input
+                label="Fecha de fin"
+                type="date"
+                name="fecha_fin"
+                value={formData.fecha_fin}
+                onChange={handleInputChange}
+                min={formData.fecha_inicio || undefined}
+                error={formErrors.fecha_fin}
+                help="Déjala igual a la de inicio si dura un solo día."
+              />
+              <Input
+                label="Hora de inicio"
+                type="time"
+                name="hora_inicio"
+                value={formData.hora_inicio}
+                onChange={handleInputChange}
+                required
+              />
+              <Input
+                label="Hora de fin"
+                type="time"
+                name="hora_fin"
+                value={formData.hora_fin}
+                onChange={handleInputChange}
+                required
+                error={formErrors.hora_fin}
+              />
+            </div>
+          </Seccion>
+
+          <Seccion title="Aforo y acceso" description="Cuánta gente cabe, hasta cuándo se acepta y a qué precio.">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Input
+                label="Cupos"
+                type="number"
+                name="cupos"
+                min="1"
+                value={formData.cupos}
+                onChange={handleInputChange}
+                required
+                error={formErrors.cupos}
+              />
+              <Input
+                label="Fecha límite de registro"
+                type="datetime-local"
+                name="fecha_limite_registro"
+                value={formData.fecha_limite_registro}
+                onChange={handleInputChange}
+                max={
+                  formData.fecha_inicio
+                    ? `${formData.fecha_inicio}T${formData.hora_inicio || '23:59'}`
+                    : undefined
+                }
+                error={formErrors.fecha_limite_registro}
+                help="Si se deja vacío, se permitirán inscripciones hasta 1 hora antes del inicio del evento."
+              />
+            </div>
+
+            <Casilla
+              id="tiene_costo"
+              name="tiene_costo"
+              checked={formData.tiene_costo}
+              onChange={handleInputChange}
+              label="El evento tiene costo de acceso"
+              help="El cobro se gestiona fuera de la plataforma; aquí sólo se muestra el importe."
+            />
+            {formData.tiene_costo && (
+              <Input
+                label="Costo (MXN)"
+                type="number"
+                name="costo"
+                min="0"
+                step="0.01"
+                value={formData.costo}
+                onChange={handleInputChange}
+                error={formErrors.costo}
+                wrapperClassName="max-w-xs"
+              />
+            )}
+          </Seccion>
+
+          <Seccion title="Concurso" description="Sólo para competencias con equipos, plataforma o asesor.">
+            <Casilla
+              id="es_concurso"
+              name="es_concurso"
+              checked={formData.es_concurso}
+              onChange={handleInputChange}
+              label="Habilitar funciones de concurso"
+              help="Activa el registro por equipos, la plataforma u online judge y el asesor obligatorio."
+            />
+
+            {formData.es_concurso && (
+              <div className="space-y-4 rounded-lg border border-line bg-surface p-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Select
+                    label="Modalidad de participación"
+                    name="modalidad"
+                    value={formData.modalidad}
+                    onChange={handleInputChange}
+                    required
+                    placeholder="Seleccionar modalidad"
+                    options={[
+                      { value: 'individual', label: 'Individual' },
+                      { value: 'equipos', label: 'Por equipos' },
+                    ]}
+                  />
+                  <Select
+                    label="Plataforma / online judge"
+                    name="id_plataforma"
+                    value={formData.id_plataforma}
+                    onChange={handleInputChange}
+                    placeholder="Ninguna u otra"
+                    options={catalogs.plataformas.map((p) => ({
+                      value: p.id_plataforma,
+                      label: p.nombre,
+                    }))}
+                  />
+                </div>
+
+                {formData.modalidad === 'equipos' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <Input
+                      label="Mín. integrantes"
+                      type="number"
+                      name="min_integrantes_equipo"
+                      min={MIN_INTEGRANTES}
+                      value={formData.min_integrantes_equipo}
+                      onChange={handleInputChange}
+                      error={formErrors.min_integrantes_equipo}
+                    />
+                    <Input
+                      label="Máx. integrantes"
+                      type="number"
+                      name="max_integrantes_equipo"
+                      min={Math.max(MIN_INTEGRANTES, Number(formData.min_integrantes_equipo) || MIN_INTEGRANTES)}
+                      value={formData.max_integrantes_equipo}
+                      onChange={handleInputChange}
+                      error={formErrors.max_integrantes_equipo}
+                    />
+                  </div>
+                )}
+
+                <Casilla
+                  id="requiere_asesor"
+                  name="requiere_asesor"
+                  checked={formData.requiere_asesor}
+                  onChange={handleInputChange}
+                  label="Requerir asesor"
+                  help="El formulario de inscripción pedirá los datos del asesor como obligatorios."
+                />
+
+                <Input
+                  label="URL del concurso (externo)"
+                  name="url_concurso"
+                  value={formData.url_concurso}
+                  onChange={handleInputChange}
+                  placeholder="https://…"
+                />
+              </div>
+            )}
+          </Seccion>
+
+          <Seccion title="Contenido" description="Lo que verá quien abra la ficha del evento.">
+            <Textarea
+              label="Descripción"
+              name="descripcion_html"
+              value={formData.descripcion_html}
+              onChange={handleInputChange}
+              rows={5}
+              help="Admite HTML básico: párrafos, negritas, listas y enlaces."
+            />
+            <div>
+              <p className="mb-1.5 block text-sm font-medium text-muted">Flyer del evento</p>
+              <FlyerUploader
+                url={formData.imagen_flyer_url}
+                onChange={({ url, key }) =>
+                  setFormData((prev) => ({ ...prev, imagen_flyer_url: url, imagen_flyer_key: key }))
+                }
+                onError={(mensaje) => toast.error(mensaje)}
+              />
+            </div>
+          </Seccion>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={Boolean(eventoAEliminar)}
+        onClose={() => setEventoAEliminar(null)}
+        onConfirm={confirmarEliminacion}
+        loading={eliminando}
+        title={`Eliminar “${eventoAEliminar?.nombre ?? ''}”`}
+        // El DELETE del servidor es una BAJA LÓGICA (deleted_at + estado
+        // 'cancelado' + listable = FALSE), no un borrado físico. El texto tiene
+        // que decir eso y no prometer una destrucción que no ocurre: el
+        // historial se conserva, lo que se pierde es el acceso desde el panel.
+        message="Se da de baja el evento: se marca como cancelado y desaparece de la web y del panel. No hay forma de recuperarlo desde aquí."
+        consequences={[
+          `Se cierran las inscripciones; las ${eventoAEliminar?.total_inscritos ?? 0} personas inscritas dejan de ver el evento y su ticket`,
+          'Desaparece del listado público y del panel de staff',
+          'El historial de asistencia, los pagos y las evidencias se conservan en la base de datos, pero ya no serán consultables desde el panel',
+        ]}
+        confirmLabel="Eliminar evento"
+      />
+
+      <ConfirmDialog
+        isOpen={confirmarQuitarConcurso}
+        onClose={() => setConfirmarQuitarConcurso(false)}
+        onConfirm={guardarEvento}
+        loading={isSubmitting}
+        tone="warning"
+        title="Desactivar las funciones de concurso"
+        message={`“${currentEvento?.nombre ?? ''}” tiene una configuración de competencia guardada.`}
+        consequences={[
+          'Modalidad, plataforma y URL del concurso',
+          'El rango de integrantes por equipo',
+          'El requisito de asesor',
+        ]}
+        confirmLabel="Sí, desactivar"
+      />
     </div>
   );
 }

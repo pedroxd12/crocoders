@@ -178,6 +178,16 @@
     resize: vertical;
 }
 
+/* Contador de caracteres del mensaje: discreto, alineado al final del campo.
+   El color sale del token de texto terciario (@theme de globals.css) en vez de
+   un gris nuevo inventado para este solo elemento. */
+.contador {
+    margin: 0.4rem 0 0;
+    text-align: right;
+    font-size: 0.75rem;
+    color: var(--color-faint);
+}
+
 .submitButton {
     width: 100%;
     padding: 1rem;

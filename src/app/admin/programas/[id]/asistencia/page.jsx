@@ -1,73 +1,75 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import useSWR from 'swr';
 import { toast } from 'react-toastify';
-import { FaArrowLeft, FaCertificate, FaDownload, FaCheckCircle, FaTimesCircle, FaUserPlus } from 'react-icons/fa';
+import {
+  ArrowLeft, Download, UserPlus, UserMinus, Check, Minus, Users, Award, BadgeCheck, CalendarDays, Search,
+} from 'lucide-react';
 import Button from '@/components/ui/Button';
+import IconButton from '@/components/ui/IconButton';
 import Table from '@/components/ui/Table';
 import Modal from '@/components/ui/Modal';
 import Select from '@/components/ui/Select';
-import LoadingSpinner from '@/components/LoadingSpinner';
+import Input from '@/components/ui/Input';
+import Badge from '@/components/ui/Badge';
+import StatCard from '@/components/ui/StatCard';
+import PageHeader from '@/components/ui/PageHeader';
+import EmptyState from '@/components/ui/EmptyState';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { fetcher } from '@/lib/fetcher';
 
 export default function ProgramaAsistencia() {
   const { id } = useParams();
   const router = useRouter();
-  const [programa, setPrograma] = useState(null);
-  const [asistencia, setAsistencia] = useState([]);
-  const [loading, setLoading] = useState(true);
+
+  const { data: programa } = useSWR(`/api/admin/programas/${id}`, fetcher, { revalidateOnFocus: false });
+  const { data: asistenciaData, isLoading, mutate } = useSWR(
+    `/api/admin/programas/${id}/asistencia`, fetcher, { revalidateOnFocus: false },
+  );
+  const asistencia = Array.isArray(asistenciaData) ? asistenciaData : [];
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [usuariosDisponibles, setUsuariosDisponibles] = useState([]);
   const [selectedUsuario, setSelectedUsuario] = useState('');
+  const [busqueda, setBusqueda] = useState('');
+  const [aDarDeBaja, setADarDeBaja] = useState(null);
+  const [dandoBaja, setDandoBaja] = useState(false);
+  const [acreditando, setAcreditando] = useState(null);
 
-  useEffect(() => {Promise.all([
-      fetchPrograma(),
-      fetchAsistencia(),
-      fetchUsuariosDisponibles()
-    ]).finally(() => setLoading(false));
-  }, [id]);
+  // El catálogo de usuarios se pide solo al abrir el modal: pedirlo en el montaje
+  // bloqueaba la carga de la página entera con la descarga de TODOS los miembros
+  // e invitados aunque el admin nunca fuera a inscribir a nadie.
+  const { data: usuariosData, isLoading: cargandoUsuarios } = useSWR(
+    isModalOpen ? '/api/admin/users' : null, fetcher, { revalidateOnFocus: false },
+  );
+  const usuariosDisponibles = Array.isArray(usuariosData) ? usuariosData : [];
 
-  const fetchPrograma = async () => {
-    try {
-      const res = await fetch(`/api/admin/programas/${id}`);
-      if (res.ok) {
-        setPrograma(await res.json());
-      }
-    } catch (error) {
-      toast.error('Error al cargar programa');
-    }
-  };
+  const yaInscritos = useMemo(
+    () => asistencia.map((a) => `${a.tipo}-${a.id_miembro || a.id_invitado}`),
+    [asistencia],
+  );
 
-  const fetchAsistencia = async () => {
-    try {
-      const res = await fetch(`/api/admin/programas/${id}/asistencia`);
-      if (res.ok) {
-        setAsistencia(await res.json());
-      }
-    } catch (error) {
-      toast.error('Error al cargar asistencia');
-    }
-  };
-
-  const fetchUsuariosDisponibles = async () => {
-    try {
-      const res = await fetch('/api/admin/users');
-      if (res.ok) {
-        setUsuariosDisponibles(await res.json());
-      }
-    } catch (error) {
-      console.error('Error loading users:', error);
-    }
-  };
+  const opcionesUsuarios = useMemo(() => {
+    const termino = busqueda.trim().toLowerCase();
+    return usuariosDisponibles
+      .filter((u) => !yaInscritos.includes(`${u.tipo}-${u.id}`))
+      .filter((u) => !termino ||
+        `${u.nombre_completo || ''} ${u.email || ''}`.toLowerCase().includes(termino))
+      .slice(0, 100) // el desplegable nativo no soporta miles de opciones: se acota y se busca
+      .map((u) => ({
+        value: JSON.stringify({ id: u.id, tipo: u.tipo }),
+        label: `${u.nombre_completo} (${u.email}) — ${u.tipo}`,
+      }));
+  }, [usuariosDisponibles, yaInscritos, busqueda]);
 
   const handleInscribir = async (e) => {
     e.preventDefault();
     if (!selectedUsuario) {
-      toast.warning('Seleccione un usuario');
+      toast.warning('Selecciona un usuario');
       return;
     }
-
     setIsSubmitting(true);
     try {
       const user = JSON.parse(selectedUsuario);
@@ -76,19 +78,17 @@ export default function ProgramaAsistencia() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id_miembro: user.tipo === 'miembro' ? user.id : null,
-          id_invitado: user.tipo === 'invitado' ? user.id : null
-        })
+          id_invitado: user.tipo === 'invitado' ? user.id : null,
+        }),
       });
+      const resultado = await res.json();
+      if (!res.ok) throw new Error(resultado.error || 'Error al inscribir');
 
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || 'Error al inscribir');
-      }
-
-      toast.success('Usuario inscrito correctamente');
+      toast.success(resultado.message || 'Usuario inscrito correctamente');
       setIsModalOpen(false);
       setSelectedUsuario('');
-      fetchAsistencia();
+      setBusqueda('');
+      mutate();
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -96,7 +96,37 @@ export default function ProgramaAsistencia() {
     }
   };
 
-  const emitirCertificado = async (row) => {
+  const darDeBaja = async () => {
+    if (!aDarDeBaja) return;
+    setDandoBaja(true);
+    try {
+      const res = await fetch(`/api/admin/programas/${id}/inscribir`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id_miembro: aDarDeBaja.tipo === 'miembro' ? aDarDeBaja.id_miembro : null,
+          id_invitado: aDarDeBaja.tipo === 'invitado' ? aDarDeBaja.id_invitado : null,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Error al dar de baja');
+      }
+      toast.success('Inscripción dada de baja');
+      setADarDeBaja(null);
+      mutate();
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setDandoBaja(false);
+    }
+  };
+
+  // OJO: esto NO genera ningún documento. Marca al participante como acreditado
+  // en su inscripción; la entrega del certificado sigue siendo manual.
+  const acreditar = async (row) => {
+    const clave = `${row.tipo}-${row.id_miembro || row.id_invitado}`;
+    setAcreditando(clave);
     try {
       const res = await fetch(`/api/admin/programas/${id}/asistencia`, {
         method: 'POST',
@@ -107,11 +137,13 @@ export default function ProgramaAsistencia() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Error al emitir certificado');
-      toast.success('Certificado emitido correctamente');
-      fetchAsistencia();
+      if (!res.ok) throw new Error(data.error || 'Error al acreditar');
+      toast.success('Participante marcado como acreditado (la entrega del certificado es manual)');
+      mutate();
     } catch (error) {
       toast.error(error.message);
+    } finally {
+      setAcreditando(null);
     }
   };
 
@@ -121,8 +153,8 @@ export default function ProgramaAsistencia() {
       const s = v === null || v === undefined ? '' : String(v);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const headers = ['Nombre', 'Email', 'Teléfono', 'Tipo', 'Sesiones Asistidas', '% Asistencia', 'Elegible Certificado', 'Certificado Emitido'];
-    const rows = asistencia.map(a => [
+    const headers = ['Nombre', 'Email', 'Teléfono', 'Tipo', 'Sesiones asistidas', '% Asistencia', 'Elegible', 'Acreditado'];
+    const rows = asistencia.map((a) => [
       a.nombre_completo,
       a.email,
       a.telefono || '',
@@ -130,10 +162,10 @@ export default function ProgramaAsistencia() {
       a.sesiones_asistidas,
       `${a.porcentaje_asistencia}%`,
       a.elegible_certificado ? 'Sí' : 'No',
-      a.certificado_emitido ? 'Sí' : 'No'
+      a.certificado_emitido ? 'Sí' : 'No',
     ]);
 
-    const csv = [headers, ...rows].map(row => row.map(esc).join(',')).join('\n');
+    const csv = [headers, ...rows].map((row) => row.map(esc).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -142,167 +174,179 @@ export default function ProgramaAsistencia() {
     link.click();
   };
 
-  const usuariosYaInscritos = asistencia.map(a => ({
-    id: a.id_miembro || a.id_invitado,
-    tipo: a.tipo
-  }));
+  const elegibles = asistencia.filter((a) => a.elegible_certificado && !a.certificado_emitido);
+  const acreditados = asistencia.filter((a) => a.certificado_emitido);
 
-  const usuariosFiltrados = usuariosDisponibles.filter(u => 
-    !usuariosYaInscritos.some(yi => yi.id === u.id && yi.tipo === u.tipo)
-  );
-
-  if (loading) return <LoadingSpinner />;
-
-  const elegibles = asistencia.filter(a => a.elegible_certificado && !a.certificado_emitido);
+  const columnas = [
+    { key: 'nombre_completo', label: 'Nombre' },
+    { key: 'email', label: 'Email' },
+    {
+      key: 'tipo',
+      label: 'Tipo',
+      render: (row) => <Badge tone={row.tipo === 'miembro' ? 'info' : 'neutral'}>{row.tipo}</Badge>,
+    },
+    { key: 'sesiones_asistidas', label: 'Sesiones', align: 'center', cellClassName: 'tabular-nums' },
+    {
+      key: 'porcentaje_asistencia',
+      label: '% Asistencia',
+      align: 'center',
+      render: (row) => {
+        const pct = parseFloat(row.porcentaje_asistencia) || 0;
+        const minimo = parseFloat(programa?.porcentaje_asistencia_minimo ?? 80);
+        // El color compara contra el umbral REAL del programa, no contra un 80 fijo.
+        const color = pct >= minimo ? 'text-brand' : pct >= minimo / 2 ? 'text-warning' : 'text-danger';
+        return <span className={`font-semibold tabular-nums ${color}`}>{pct.toFixed(1)}%</span>;
+      },
+    },
+    {
+      key: 'elegible_certificado',
+      label: 'Elegible',
+      align: 'center',
+      render: (row) =>
+        row.elegible_certificado ? (
+          <Check size={18} className="mx-auto text-brand" aria-label="Cumple los requisitos" />
+        ) : (
+          <Minus size={18} className="mx-auto text-faint" aria-label="No cumple los requisitos" />
+        ),
+    },
+    {
+      key: 'certificado_emitido',
+      label: 'Acreditación',
+      align: 'center',
+      render: (row) => {
+        const clave = `${row.tipo}-${row.id_miembro || row.id_invitado}`;
+        if (row.certificado_emitido) return <Badge tone="success">Acreditado</Badge>;
+        if (!row.elegible_certificado) return <span className="text-xs text-faint">No elegible</span>;
+        return (
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={acreditando === clave}
+            onClick={() => acreditar(row)}
+          >
+            Marcar acreditado
+          </Button>
+        );
+      },
+    },
+    {
+      key: 'acciones',
+      label: 'Acciones',
+      align: 'right',
+      render: (row) => (
+        <IconButton
+          icon={UserMinus}
+          label="Dar de baja del programa"
+          tone="danger"
+          onClick={() => setADarDeBaja(row)}
+        />
+      ),
+    },
+  ];
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="mb-6">
-        <Button onClick={() => router.back()} variant="text" className="text-gray-400 hover:text-white mb-4 flex items-center gap-2">
-          <FaArrowLeft /> Volver a Programas
-        </Button>
+    <div className="w-full">
+      <Button onClick={() => router.back()} variant="ghost" size="sm" className="mb-4">
+        <ArrowLeft size={16} /> Volver a programas
+      </Button>
 
-        {programa && (
-          <div className="bg-gray-800 rounded-lg p-6 mb-6">
-            <h1 className="text-3xl font-bold text-white mb-2 flex items-center gap-2">
-              <FaCertificate /> Reporte de Asistencia
-            </h1>
-            <h2 className="text-xl text-gray-400 mb-4">{programa.nombre}</h2>
-            
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-gray-700 p-4 rounded-lg text-center">
-                <div className="text-2xl font-bold text-white">{asistencia.length}</div>
-                <div className="text-xs text-gray-400">Total Inscritos</div>
-              </div>
-              <div className="bg-gray-700 p-4 rounded-lg text-center">
-                <div className="text-2xl font-bold text-green-400">{elegibles.length}</div>
-                <div className="text-xs text-gray-400">Elegibles Certificado</div>
-              </div>
-              <div className="bg-gray-700 p-4 rounded-lg text-center">
-                <div className="text-2xl font-bold text-blue-400">
-                  {asistencia.filter(a => a.certificado_emitido).length}
-                </div>
-                <div className="text-xs text-gray-400">Certificados Emitidos</div>
-              </div>
-              <div className="bg-gray-700 p-4 rounded-lg text-center">
-                <div className="text-2xl font-bold text-purple-400">{programa.total_sesiones}</div>
-                <div className="text-xs text-gray-400">Total Sesiones</div>
-              </div>
-            </div>
-          </div>
-        )}
+      <PageHeader
+        title="Reporte de asistencia"
+        description={programa?.nombre || 'Cargando el programa…'}
+        actions={
+          <>
+            <Button onClick={() => setIsModalOpen(true)} variant="primary">
+              <UserPlus size={16} /> Inscribir usuario
+            </Button>
+            <Button onClick={exportarCSV} variant="secondary" disabled={asistencia.length === 0}>
+              <Download size={16} /> Exportar CSV
+            </Button>
+          </>
+        }
+      />
+
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard icon={Users} tone="neutral" label="Inscritos activos" value={asistencia.length} hint="Sin contar las bajas" />
+        <StatCard icon={Award} tone="brand" label="Elegibles" value={elegibles.length} hint="Cumplen y aún no están acreditados" />
+        <StatCard icon={BadgeCheck} tone="info" label="Acreditados" value={acreditados.length} />
+        <StatCard icon={CalendarDays} tone="accent" label="Sesiones del programa" value={programa?.total_sesiones ?? '—'} />
       </div>
 
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-2xl font-bold text-white">Participantes</h2>
-        <div className="flex gap-2">
-          <Button onClick={() => setIsModalOpen(true)} variant="primary">
-            <FaUserPlus /> Inscribir Usuario
-          </Button>
-          <Button onClick={exportarCSV} variant="secondary">
-            <FaDownload /> Exportar CSV
-          </Button>
-        </div>
-      </div>
-
-      <div className="bg-gray-800 rounded-lg shadow-md p-4">
-        <Table
-          columns={[
-            { key: 'nombre_completo', label: 'Nombre' },
-            { key: 'email', label: 'Email' },
-            { 
-              key: 'tipo', 
-              label: 'Tipo',
-              render: (row) => (
-                <span className={`px-2 py-1 rounded text-xs ${row.tipo === 'miembro' ? 'bg-blue-600' : 'bg-purple-600'}`}>
-                  {row.tipo}
-                </span>
-              )
-            },
-            { 
-              key: 'sesiones_asistidas', 
-              label: 'Sesiones',
-              cellClassName: 'text-center font-bold'
-            },
-            { 
-              key: 'porcentaje_asistencia', 
-              label: '% Asistencia',
-              render: (row) => {
-                const porcentaje = parseFloat(row.porcentaje_asistencia);
-                const color = porcentaje >= 80 ? 'text-green-400' : porcentaje >= 50 ? 'text-yellow-400' : 'text-red-400';
-                return <span className={`font-bold ${color}`}>{porcentaje.toFixed(1)}%</span>;
-              },
-              cellClassName: 'text-center'
-            },
-            {
-              key: 'elegible_certificado',
-              label: 'Elegible',
-              render: (row) => row.elegible_certificado ? (
-                <FaCheckCircle className="text-green-400 text-xl" />
-              ) : (
-                <FaTimesCircle className="text-gray-500 text-xl" />
-              ),
-              cellClassName: 'text-center'
-            },
-            {
-              key: 'certificado_emitido',
-              label: 'Certificado',
-              render: (row) => row.certificado_emitido ? (
-                <span className="px-2 py-1 bg-green-600 rounded text-xs">Emitido</span>
-              ) : row.elegible_certificado ? (
-                <Button
-                  variant="text"
-                  size="sm"
-                  className="text-blue-400 hover:text-blue-300"
-                  onClick={() => emitirCertificado(row)}
-                >
-                  Emitir
-                </Button>
-              ) : (
-                <span className="text-gray-500 text-xs">No elegible</span>
-              ),
-              cellClassName: 'text-center'
+      <Table
+        columns={columnas}
+        data={asistencia}
+        loading={isLoading && asistencia.length === 0}
+        getRowKey={(row) => row.id_inscripcion_programa}
+        emptyMessage={
+          <EmptyState
+            icon={Users}
+            title="Todavía no hay participantes"
+            description="Nadie se ha inscrito a este programa, o todas las inscripciones están dadas de baja."
+            action={
+              <Button onClick={() => setIsModalOpen(true)} variant="primary">
+                <UserPlus size={16} /> Inscribir usuario
+              </Button>
             }
-          ]}
-          data={asistencia}
-          emptyMessage="No hay participantes inscritos aún"
-          className="w-full"
-          headerClassName="bg-gray-700 text-gray-300"
-          rowClassName="border-b border-gray-700 hover:bg-gray-700/50"
-        />
-      </div>
+          />
+        }
+      />
 
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title="Inscribir Usuario al Programa"
-      >
-        <form onSubmit={handleInscribir} className="space-y-4">
-          <Select
-            label="Seleccionar Usuario *"
-            value={selectedUsuario}
-            onChange={(e) => setSelectedUsuario(e.target.value)}
-            options={usuariosFiltrados.map(u => ({
-              value: JSON.stringify({ id: u.id, tipo: u.tipo }),
-              label: `${u.nombre_completo} (${u.email}) - ${u.tipo}`
-            }))}
-            required
-          />
-
-          <div className="bg-blue-900/30 border border-blue-700 rounded p-3 text-sm text-blue-300">
-            <strong>Nota:</strong> El usuario será inscrito al programa completo. Su asistencia se actualizará automáticamente cuando asista a las sesiones individuales.
-          </div>
-
-          <div className="flex justify-end gap-2 pt-4">
+        title="Inscribir usuario al programa"
+        description="Se inscribe al programa completo. Si el usuario se había dado de baja, su inscripción se reactiva."
+        footer={
+          <>
             <Button type="button" onClick={() => setIsModalOpen(false)} variant="secondary">
               Cancelar
             </Button>
-            <Button type="submit" variant="primary" disabled={isSubmitting}>
-              {isSubmitting ? <LoadingSpinner size="sm" /> : 'Inscribir'}
+            <Button type="submit" form="form-inscribir" variant="primary" loading={isSubmitting}>
+              Inscribir
             </Button>
-          </div>
+          </>
+        }
+      >
+        <form id="form-inscribir" onSubmit={handleInscribir} className="space-y-4">
+          <Input
+            label="Buscar"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Nombre o correo"
+            icon={<Search size={16} />}
+            help="El desplegable muestra los 100 primeros resultados: acota la búsqueda si no encuentras a alguien."
+          />
+
+          <Select
+            label="Usuario"
+            value={selectedUsuario}
+            onChange={(e) => setSelectedUsuario(e.target.value)}
+            options={opcionesUsuarios}
+            placeholder={cargandoUsuarios ? 'Cargando usuarios…' : 'Selecciona un usuario'}
+            disabled={cargandoUsuarios}
+            required
+          />
+
+          <p className="rounded-lg border border-line bg-surface-2 p-3 text-sm text-muted">
+            Su asistencia se actualiza sola conforme se registre en cada sesión.
+          </p>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={Boolean(aDarDeBaja)}
+        onClose={() => setADarDeBaja(null)}
+        onConfirm={darDeBaja}
+        loading={dandoBaja}
+        tone="danger"
+        title={`¿Dar de baja a ${aDarDeBaja?.nombre_completo || ''}?`}
+        message="La inscripción pasa a cancelada. El historial de asistencia se conserva."
+        consequences={[
+          'Desaparece de las listas de asistencia de las sesiones',
+          'Deja de contar como inscrito y no puede acreditarse',
+        ]}
+        confirmLabel="Dar de baja"
+      />
     </div>
   );
 }

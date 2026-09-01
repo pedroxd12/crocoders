@@ -1,10 +1,9 @@
 // API para verificar y marcar asistencia mediante QR
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { connectWithRetry } from '@/lib/db-server';
 import { requireAuth } from '@/lib/auth';
+import { sqlFinEvento } from '@/lib/eventos-fechas';
 
-// Ventana máxima de validez del QR: 24 horas. Permite cierto margen sin abrir indefinidamente.
-const QR_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // Tolerancia frente a relojes desincronizados / sellos generados ligeramente en el "futuro".
 const QR_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
@@ -87,17 +86,18 @@ export async function POST(request) {
         error: 'QR con fecha futura inválida'
       }, { status: 400 });
     }
-    if (now - tsNum > QR_MAX_AGE_MS) {
-      return NextResponse.json({
-        success: false,
-        error: 'QR expirado, solicite uno nuevo'
-      }, { status: 401 });
-    }
+    // La caducidad NO se mide en horas desde la emisión, sino contra el fin del
+    // evento (se comprueba más abajo, con los datos ya cargados). La ventana fija
+    // de 24 h dejaba fuera a los invitados: no tienen cuenta, su único ticket es
+    // el del correo y no existe ninguna pantalla para pedir otro, así que quien
+    // se inscribía con más de un día de antelación llegaba a la puerta con un QR
+    // rechazado. Los miembros no lo notaban porque /api/eventos/check-register
+    // les regenera el token en cada lectura.
 
     try {
       client = await connectWithRetry();
     } catch (connectionError) {
-      console.error('💥 Error de conexión en /api/eventos/verify-qr:', connectionError);
+      console.error('Error de conexión en /api/eventos/verify-qr:', connectionError);
       return NextResponse.json(
         { success: false, error: 'No se pudo conectar con la base de datos. Intente nuevamente.', code: 'DB_CONNECTION_ERROR' },
         { status: 503 }
@@ -110,14 +110,33 @@ export async function POST(request) {
     // el staff solo los eventos donde está asignado.
     const role = (guard.session.role || '').toLowerCase();
     if (role !== 'administrador') {
+      // No basta con estar en staff_evento: el rol tiene que poder ESCRIBIR.
+      // `catalogo_rol_staff` define puede_administrar/puede_editar/puede_ver y
+      // hasta ahora nadie los leía, así que un rol de sólo consulta marcaba
+      // asistencia igual que el coordinador.
       const staffRes = await client.query(
-        'SELECT 1 FROM staff_evento WHERE id_evento = $1 AND id_miembro = $2',
+        `SELECT r.puede_administrar, r.puede_editar
+           FROM staff_evento se
+           LEFT JOIN catalogo_rol_staff r ON se.id_rol = r.id_rol
+          WHERE se.id_evento = $1 AND se.id_miembro = $2`,
         [eventoId, Number(guard.session.id)],
       );
       if (staffRes.rows.length === 0) {
         await client.query('ROLLBACK');
         return NextResponse.json(
           { success: false, error: 'No tienes permiso para registrar asistencia en este evento.' },
+          { status: 403 },
+        );
+      }
+      // Si la asignación no tiene rol (id_rol NULL) se conserva el comportamiento
+      // anterior y se permite: negarlo dejaría fuera al staff ya asignado sin rol.
+      const puedeEscribir = staffRes.rows.some(
+        (r) => r.puede_administrar === null || r.puede_administrar || r.puede_editar,
+      );
+      if (!puedeEscribir) {
+        await client.query('ROLLBACK');
+        return NextResponse.json(
+          { success: false, error: 'Tu rol en este evento es de solo consulta; no puedes registrar asistencia.' },
           { status: 403 },
         );
       }
@@ -130,10 +149,15 @@ export async function POST(request) {
         ie.id_evento,
         ie.asistio,
         ie.hora_registro_asistencia,
+        ie.pago_completado,
+        e.tiene_costo,
         e.nombre as nombre_evento,
         e.fecha_inicio,
         e.hora_inicio,
         e.hora_fin,
+        -- El ticket vale hasta 6 h después del fin del evento (margen para el
+        -- cierre). Comparado en SQL con la zona fija del club, no en JS.
+        ((${sqlFinEvento('e')} + INTERVAL '6 hours') < NOW()) AS ticket_vencido,
         COALESCE(m.nombre || ' ' || m.apellido_paterno, i.nombre_completo) as nombre_completo,
         COALESCE(m.correo_electronico, i.correo_electronico) as correo,
         ie.estado
@@ -152,7 +176,9 @@ export async function POST(request) {
       }, { status: 404 });
     }
 
-    if (inscripcionRes.rows[0].estado === 'cancelada') {
+    const inscripcion = inscripcionRes.rows[0];
+
+    if (inscripcion.estado === 'cancelada') {
       await client.query('ROLLBACK');
       return NextResponse.json({
         success: false,
@@ -160,7 +186,25 @@ export async function POST(request) {
       }, { status: 400 });
     }
 
-    const inscripcion = inscripcionRes.rows[0];
+    if (inscripcion.ticket_vencido) {
+      await client.query('ROLLBACK');
+      return NextResponse.json({
+        success: false,
+        error: 'Este ticket corresponde a un evento que ya terminó.'
+      }, { status: 401 });
+    }
+
+    // Evento con costo y pago sin verificar: no se deja entrar. El registro deja
+    // la inscripción en 'pendiente' hasta que un administrador marca el cobro
+    // desde el panel (no hay pasarela de pago en el proyecto).
+    if (inscripcion.tiene_costo && !inscripcion.pago_completado) {
+      await client.query('ROLLBACK');
+      return NextResponse.json({
+        success: false,
+        error: 'El pago de esta inscripción aún no está verificado. Regístralo en el panel antes de marcar asistencia.',
+        code: 'PAGO_PENDIENTE'
+      }, { status: 402 });
+    }
 
     // Check if already attended
     if (inscripcion.asistio) {
@@ -207,10 +251,10 @@ export async function POST(request) {
       try {
         await client.query('ROLLBACK');
       } catch (rollbackError) {
-        console.error('⚠️ Error en ROLLBACK:', rollbackError);
+        console.error('Error en ROLLBACK:', rollbackError);
       }
     }
-    console.error('💥 Error en verificación QR:', error);
+    console.error('Error en verificación QR:', error);
 
     if (['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(error.code)) {
       return NextResponse.json(

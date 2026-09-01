@@ -1,21 +1,11 @@
 // src/app/api/evidencias/[id]/route.js
 import { NextResponse } from 'next/server';
-import pool, { sql } from '@/lib/db-server';
-import { UTApi } from "uploadthing/server";
+import { sql, query } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 import { evidenciaUpdateSchema, parseOrError } from '@/lib/validation';
-
-const utapi = new UTApi();
-
-async function deleteFromUploadThing(fileKey) {
-  if (!fileKey) return;
-  try {
-    await utapi.deleteFiles(fileKey);
-    console.log(`Successfully deleted ${fileKey} from UploadThing`);
-  } catch (e) {
-    console.error(`Error deleting ${fileKey} from UploadThing:`, e);
-  }
-}
+// Helper compartido: el borrado en el CDN vive en un solo sitio para que ningún
+// camino de error se olvide de limpiar y deje archivos huérfanos.
+import { deleteFromUploadThing } from '@/lib/uploadthing-server';
 
 // PUT: editar metadata de una evidencia (título, descripción, tipo, visibilidad, orden).
 // No toca el archivo en el CDN; sólo la fila en BD.
@@ -66,7 +56,7 @@ export async function PUT(request, { params }) {
   values.push(idNum); // último parámetro = WHERE id
 
   try {
-    const result = await pool.query(
+    const result = await query(
       `UPDATE evidencia SET ${sets.join(', ')}
         WHERE id_evidencia = $${i}
         RETURNING id_evidencia, id_evento, titulo as nombre, descripcion, tipo,

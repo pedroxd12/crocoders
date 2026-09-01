@@ -1,16 +1,66 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Sistema de diseño (fuente única de verdad).
+
+   `@theme` es el mecanismo de Tailwind v4 para registrar tokens: cada
+   `--color-x` de aquí genera automáticamente `bg-x`, `text-x`, `border-x`,
+   `ring-x`, etc. Antes los tokens vivían en un `:root` suelto, así que no
+   existía forma de usarlos desde Tailwind y el color de marca acababa escrito
+   a mano (`bg-[#1ef184]`) en decenas de sitios.
+
+   Superficies: una sola escala de elevación. `bg` es el fondo de la app;
+   `surface` la tarjeta; `surface-2` lo que va DENTRO de una tarjeta (campos,
+   cabecera de tabla); `surface-3` el estado elevado (hover, popovers). Nada de
+   grises sueltos: si algo necesita un fondo, sale de esta escala.
+--------------------------------------------------------------------------- */
+@theme {
+  --color-bg: #1a1a1a;
+  --color-surface: #212227;
+  --color-surface-2: #2a2c32;
+  --color-surface-3: #33363d;
+
+  --color-line: #ffffff14;
+  --color-line-strong: #ffffff26;
+
+  --color-fg: #e8e8ea;
+  --color-muted: #a1a3ab;
+  --color-faint: #6f7178;
+
+  --color-brand: #1ef184;
+  --color-brand-strong: #15c46e;
+  --color-brand-soft: #1ef1841f;
+
+  --color-accent: #f6922c;
+  --color-danger: #f4636e;
+  --color-danger-soft: #f4636e1f;
+  --color-warning: #f6b93b;
+  --color-info: #5aa9f6;
+  --color-info-soft: #5aa9f61f;
+}
+
+/* Alias heredados: varios CSS Modules del sitio público siguen leyendo estos
+   nombres. Se derivan de los tokens de arriba para que exista un solo valor. */
 :root {
-  --background: #1a1a1a;
-  --foreground: #e0e0e0;
-  --highlight: #1ef184;
-  --highlight1: #1ef184;
-  --highlight2: #f6922c;
+  --background: var(--color-bg);
+  --foreground: var(--color-fg);
+  --highlight: var(--color-brand);
+  --highlight1: var(--color-brand);
+  --highlight2: var(--color-accent);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--color-bg);
+  color: var(--color-fg);
+}
+
+/* Le dice al navegador que la UI es oscura. Sin esto, los controles nativos
+   (desplegables de <select>, calendario de <input type="date">, reloj de
+   <input type="time">, barras de scroll) se pintan en claro sobre un formulario
+   oscuro. Es la causa de los hacks `<option style={{color:'black'}}>` que había
+   repartidos por los formularios. */
+:root {
+  color-scheme: dark;
 }
 
 .dot-pattern {

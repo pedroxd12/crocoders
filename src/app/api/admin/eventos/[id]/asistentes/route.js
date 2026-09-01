@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 export async function GET(request, { params }) {
@@ -32,7 +32,20 @@ export async function GET(request, { params }) {
         CASE
             WHEN m.id_miembro IS NOT NULL THEN m.correo_electronico
             WHEN i.id_invitado IS NOT NULL THEN i.correo_electronico
-            WHEN eq.id_equipo IS NOT NULL THEN eq.correo_asesor
+            -- Para un equipo, el contacto es el CAPITÁN (es a quien se le manda
+            -- el correo de confirmación). Antes se usaba el correo del asesor,
+            -- que es opcional y casi nunca se rellena: la columna salía vacía y
+            -- el admin no tenía forma de contactar al equipo. Se resuelve con
+            -- una subconsulta escalar y no con JOIN para que un dato antiguo con
+            -- dos capitanes no duplique la fila del listado.
+            WHEN eq.id_equipo IS NOT NULL THEN COALESCE(
+                (SELECT COALESCE(cm.correo_electronico, ci.correo_electronico)
+                   FROM integrante_equipo cap
+                   LEFT JOIN miembro cm ON cm.id_miembro = cap.id_miembro
+                   LEFT JOIN invitado ci ON ci.id_invitado = cap.id_invitado
+                  WHERE cap.id_equipo = eq.id_equipo AND cap.es_capitan = true
+                  LIMIT 1),
+                eq.correo_asesor)
         END as correo,
         CASE
             WHEN m.id_miembro IS NOT NULL THEN 'Miembro'

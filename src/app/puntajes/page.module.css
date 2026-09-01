@@ -1,3 +1,12 @@
+/* Tabla de posiciones (/puntajes).
+
+   Escala fija — no inventar valores intermedios:
+     radios      16px tarjetas y tablas · 9999px píldoras (chips, botones
+                 redondeados) · 50% sólo avatares y medallas.
+     tipografía  0.75rem · 0.875rem · 1rem · 1.25rem · 1.5rem · 1.75rem.
+   Antes convivían 50px, 9999px y rounded-full para la MISMA píldora y tamaños
+   ajustados a ojo (0.78rem, 0.85rem, 0.9rem) que no correspondían a nada. */
+
 .pageWrapper {
   width: 100%;
   min-height: 100vh;
@@ -119,7 +128,7 @@
 
 .totalSolved {
   text-align: center;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
   color: #9ca3af;
   margin-bottom: 1.5rem;
 }
@@ -136,7 +145,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: #9ca3af;
 }
 
@@ -158,11 +167,11 @@
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 0.75rem 1.5rem;
-  border-radius: 50px;
+  border-radius: 9999px;
   color: #9ca3af;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -204,7 +213,7 @@
   padding: 1.25rem 1.5rem;
   font-weight: 600;
   color: #9ca3af;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -261,18 +270,29 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.6rem 1.25rem;
-  border-radius: 50px;
+  border-radius: 9999px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #e0e0e0;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
 }
 
 .retryButton:hover {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Aviso dentro del estado vacío: la página reintenta sola mientras el API no
+   responde (la base se duerme y tarda unos segundos en despertar). Sin decirlo,
+   parece que se quedó colgada y la gente recarga a mano. */
+.reintentando {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+  color: #6b7280;
 }
 
 .headerRow {
@@ -352,7 +372,7 @@
   align-items: center;
   gap: 0.35rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   color: #9ca3af;
   text-decoration: none;
   transition: color 0.2s ease;
@@ -377,7 +397,7 @@
   display: inline-block;
   margin-left: 0.5rem;
   padding: 0.1rem 0.5rem;
-  border-radius: 50px;
+  border-radius: 9999px;
   background: rgba(30, 241, 132, 0.12);
   color: #1ef184;
   font-size: 0.75rem;
@@ -392,7 +412,7 @@
   flex-wrap: wrap;
   gap: 0.75rem;
   margin-top: 0.75rem;
-  font-size: 0.85rem;
+  font-size: 0.875rem;
   color: #6b7280;
 }
 
@@ -401,11 +421,11 @@
   align-items: center;
   gap: 0.4rem;
   padding: 0.2rem 0.7rem;
-  border-radius: 50px;
+  border-radius: 9999px;
   background: rgba(30, 241, 132, 0.08);
   border: 1px solid rgba(30, 241, 132, 0.2);
   color: #1ef184;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
 }
 
 

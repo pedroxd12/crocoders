@@ -1,254 +1,249 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import useSWR from 'swr';
 import { toast } from 'react-toastify';
+import { Plus, Search, ShieldCheck, Users } from 'lucide-react';
+import { fetcher } from '@/lib/fetcher';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Table from '@/components/ui/Table';
-import LoadingSpinner from '@/components/LoadingSpinner';
+import Badge from '@/components/ui/Badge';
+import PageHeader from '@/components/ui/PageHeader';
+import EmptyState from '@/components/ui/EmptyState';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useAuth } from '@/context/AuthContext';
 
 export default function GestionAdministradores() {
-  const [miembros, setMiembros] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [formData, setFormData] = useState({
-    correo_electronico: ''
+  const [correo, setCorreo] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  // { miembro, hacerAdmin } — confirmación pendiente
+  const [cambioPendiente, setCambioPendiente] = useState(null);
+  const [aplicandoCambio, setAplicandoCambio] = useState(false);
+  const { user: currentUser } = useAuth();
+
+  // Misma clave SWR que /admin/miembros: las dos pantallas comparten la caché,
+  // así que saltar de una a otra ya no vuelve a pedir la lista entera.
+  const { data: miembros = [], error, isLoading, mutate } = useSWR('/api/admin/miembros', fetcher, {
+    keepPreviousData: true,
+    revalidateOnFocus: false,
   });
 
-  useEffect(() => {
-    fetchMiembros();
-  }, []);
+  const filteredMiembros = miembros.filter((miembro) => {
+    const q = searchQuery.toLowerCase();
+    return (
+      (miembro.nombre_completo || '').toLowerCase().includes(q) ||
+      (miembro.correo_electronico || '').toLowerCase().includes(q)
+    );
+  });
 
-  const fetchMiembros = async () => {
-    setIsLoading(true);
+  const totalAdmins = miembros.filter((m) => m.rol === 'administrador' && m.estado === 'activo').length;
+
+  const aplicarCambioRol = async () => {
+    if (!cambioPendiente) return;
+    const { miembro, hacerAdmin } = cambioPendiente;
+    const nuevoRol = hacerAdmin ? 'administrador' : 'usuario';
+
+    setAplicandoCambio(true);
     try {
-      const res = await fetch('/api/admin/miembros');
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Error al cargar miembros');
-      }
-      
-      const data = await res.json();
-      setMiembros(data);
-    } catch (error) {
-      toast.error(error.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleSearchChange = (e) => {
-    setSearchQuery(e.target.value);
-  };
-
-  const filteredMiembros = miembros.filter(miembro =>
-    miembro.nombre_completo.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    miembro.correo_electronico.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const handleRoleChange = async (id, makeAdmin) => {
-    // Verificar si es el último administrador
-    const adminCount = miembros.filter(m => m.rol === 'administrador').length;
-    const isLastAdmin = adminCount <= 1 && !makeAdmin;
-
-    if (isLastAdmin) {
-      toast.error('Debe haber al menos un administrador en el sistema');
-      return;
-    }
-
-    if (!confirm(`¿Está seguro que desea ${makeAdmin ? 'hacer' : 'quitar'} administrador a este usuario?`)) return;
-
-    const nuevoRol = makeAdmin ? 'administrador' : 'usuario';
-
-    try {
-      const res = await fetch(`/api/admin/miembros/${id}/rol`, {
+      const res = await fetch(`/api/admin/miembros/${miembro.id_miembro}/rol`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rol: nuevoRol })
+        body: JSON.stringify({ rol: nuevoRol }),
       });
+      const data = await res.json().catch(() => ({}));
+      // La regla del "último administrador" la decide el servidor dentro de una
+      // transacción: el conteo del cliente podía estar desactualizado y dejar el
+      // sistema sin ningún admin.
+      if (!res.ok) throw new Error(data.error || 'No se pudo actualizar el rol');
 
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || `Error al ${makeAdmin ? 'promover' : 'degradar'} usuario`);
-      }
+      await mutate(
+        (actuales = []) =>
+          actuales.map((m) => (m.id_miembro === miembro.id_miembro ? { ...m, rol: data.rol } : m)),
+        { revalidate: true },
+      );
 
-      const updatedUser = await res.json();
-      const updatedRol = updatedUser.rol ?? nuevoRol;
-
-      // Actualizar el estado local
-      setMiembros(miembros.map(m =>
-        m.id_miembro === updatedUser.id_miembro ? { ...m, rol: updatedRol } : m
-      ));
-
-      toast.success(`Rol actualizado correctamente a ${updatedRol}`);
-    } catch (error) {
-      toast.error(error.message);
+      setCambioPendiente(null);
+      toast.success(`Rol actualizado a ${data.rol}`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setAplicandoCambio(false);
     }
   };
 
   const handleAddAdmin = async (e) => {
     e.preventDefault();
-    
+    setGuardando(true);
     try {
       const res = await fetch('/api/admin/miembros', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify({ correo_electronico: correo }),
       });
-      
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Error al agregar administrador');
-      }
-      
-      const newAdmin = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Error al agregar administrador');
 
-      // El miembro promovido ya figura en la lista (como usuario): actualizamos
-      // su registro en vez de duplicarlo. Si por algún motivo no estuviera, lo
-      // añadimos.
-      setMiembros((prev) => {
-        const existe = prev.some((m) => m.id_miembro === newAdmin.id_miembro);
-        return existe
-          ? prev.map((m) => (m.id_miembro === newAdmin.id_miembro ? { ...m, rol: newAdmin.rol } : m))
-          : [...prev, newAdmin];
-      });
-
+      await mutate();
       toast.success('Administrador agregado correctamente');
       setIsModalOpen(false);
-      setFormData({ correo_electronico: '' });
-    } catch (error) {
-      toast.error(error.message);
+      setCorreo('');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setGuardando(false);
     }
   };
 
-  if (isLoading) {
-    return <LoadingSpinner className="my-8" />;
-  }
+  const columns = [
+    { header: 'Nombre', accessor: 'nombre_completo', cellClassName: 'font-medium' },
+    { header: 'Correo', accessor: 'correo_electronico', cellClassName: 'text-muted' },
+    {
+      header: 'Rol',
+      // El color ya no es decorativo: 'administrador' es la excepción que hay
+      // que poder localizar de un vistazo, el resto es información neutra.
+      render: (m) => (
+        <Badge tone={m.rol === 'administrador' ? 'info' : 'neutral'}>{m.rol || 'usuario'}</Badge>
+      ),
+    },
+    {
+      header: 'Acciones',
+      align: 'right',
+      render: (m) => (
+        <div className="flex justify-end">
+          {/* variant="secondary": antes era variant="outline", que no existía,
+              así que el botón salía sin fondo ni borde — dos palabras de color
+              suelto que no parecían clicables. */}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              setCambioPendiente({ miembro: m, hacerAdmin: m.rol !== 'administrador' })
+            }
+            disabled={m.id_miembro === currentUser?.id}
+            title={
+              m.id_miembro === currentUser?.id
+                ? 'No puedes cambiar tu propio rol'
+                : undefined
+            }
+          >
+            {m.rol === 'administrador' ? 'Quitar admin' : 'Hacer admin'}
+          </Button>
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <div className="p-4">
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Input
-          type="text"
-          placeholder="Buscar por nombre o correo..."
-          value={searchQuery}
-          onChange={handleSearchChange}
-          className="w-full sm:w-1/2"
-        />
-        <Button
-          type="button"
-          onClick={() => setIsModalOpen(true)}
-          variant="primary"
-          className="bg-purple-600 hover:bg-purple-700 w-full sm:w-auto whitespace-nowrap"
-        >
-          + Añadir Administrador
-        </Button>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Administradores"
+        description={`Quién puede entrar al panel. Actualmente hay ${totalAdmins} administrador${totalAdmins === 1 ? '' : 'es'} activo${totalAdmins === 1 ? '' : 's'}.`}
+        actions={
+          <>
+            <Input
+              type="search"
+              aria-label="Buscar miembros"
+              placeholder="Buscar por nombre o correo…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              icon={<Search size={16} />}
+              wrapperClassName="w-full sm:w-72"
+            />
+            <Button onClick={() => setIsModalOpen(true)}>
+              <Plus size={16} aria-hidden="true" />
+              Añadir administrador
+            </Button>
+          </>
+        }
+      />
 
-      <div className="bg-gray-800 rounded-lg shadow overflow-hidden">
-        <Table
-          columns={[
-            { 
-              header: 'Nombre', 
-              accessor: 'nombre_completo',
-              cellClassName: 'font-medium text-gray-100'
-            },
-            { 
-              header: 'Correo', 
-              accessor: 'correo_electronico',
-              cellClassName: 'text-gray-400'
-            },
-            {
-              header: 'Rol',
-              render: (miembro) => (
-                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
-                  miembro.rol === 'administrador'
-                    ? 'bg-purple-600 text-purple-100'
-                    : 'bg-blue-600 text-blue-100'
-                }`}>
-                  {miembro.rol || 'usuario'}
-                </span>
-              )
-            },
-            {
-              header: 'Acciones',
-              render: (miembro) => (
-                <div className="flex space-x-2">
-                  {miembro.rol === 'administrador' ? (
-                    <Button 
-                      onClick={() => handleRoleChange(miembro.id_miembro, false)}
-                      variant="outline"
-                      size="sm"
-                      className="text-yellow-400 border-yellow-400 hover:bg-yellow-500/10"
-                    >
-                      Quitar Admin
-                    </Button>
-                  ) : (
-                    <Button 
-                      onClick={() => handleRoleChange(miembro.id_miembro, true)}
-                      variant="outline"
-                      size="sm"
-                      className="text-purple-400 border-purple-400 hover:bg-purple-500/10"
-                    >
-                      Hacer Admin
-                    </Button>
-                  )}
-                </div>
-              )
-            }
-          ]}
-          data={filteredMiembros}
-          emptyMessage="No se encontraron miembros"
-          className="bg-gray-800"
-          headerClassName="bg-gray-700 text-gray-300"
-          rowClassName="border-b border-gray-700 hover:bg-gray-700/50"
+      {error && !miembros.length ? (
+        <EmptyState
+          icon={Users}
+          title="No se pudo cargar la lista"
+          description="Comprueba tu conexión y vuelve a intentarlo."
         />
-      </div>
+      ) : (
+        <Table
+          columns={columns}
+          data={filteredMiembros}
+          loading={isLoading && !miembros.length}
+          getRowKey={(m) => m.id_miembro}
+          emptyMessage={
+            <EmptyState
+              icon={ShieldCheck}
+              title="No se encontraron miembros"
+              description="Sólo los miembros ya registrados pueden ser promovidos a administradores."
+            />
+          }
+        />
+      )}
 
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title="Añadir Nuevo Administrador"
-        className="bg-gray-800 text-gray-100"
+        title="Añadir nuevo administrador"
+        description="El miembro debe estar ya registrado en la plataforma."
+        size="md"
       >
-        <form onSubmit={handleAddAdmin}>
-          <div className="mb-6">
-            <Input
-              label="Correo Electrónico"
-              type="email"
-              name="correo_electronico"
-              value={formData.correo_electronico}
-              onChange={(e) => setFormData({...formData, correo_electronico: e.target.value})}
-              required
-              className="bg-gray-700 border-gray-600 focus:border-purple-500"
-              labelClassName="text-gray-300"
-            />
-            <p className="mt-1 text-sm text-gray-400">
-              Ingrese el correo electrónico del miembro que desea hacer administrador
-            </p>
-          </div>
+        <form onSubmit={handleAddAdmin} className="space-y-4">
+          <Input
+            label="Correo electrónico"
+            type="email"
+            name="correo_electronico"
+            value={correo}
+            onChange={(e) => setCorreo(e.target.value)}
+            required
+            placeholder="nombre@ejemplo.com"
+            help="Se buscará el miembro con ese correo y se le dará el rol de administrador."
+          />
 
-          <div className="flex justify-end space-x-4">
-            <Button 
-              type="button"
-              onClick={() => setIsModalOpen(false)}
-              variant="secondary"
-              className="bg-gray-700 hover:bg-gray-600"
-            >
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)} disabled={guardando}>
               Cancelar
             </Button>
-            <Button 
-              type="submit" 
-              variant="primary"
-              className="bg-purple-600 hover:bg-purple-700"
-            >
+            <Button type="submit" loading={guardando}>
               Guardar
             </Button>
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={!!cambioPendiente}
+        onClose={() => (aplicandoCambio ? null : setCambioPendiente(null))}
+        onConfirm={aplicarCambioRol}
+        loading={aplicandoCambio}
+        tone={cambioPendiente?.hacerAdmin ? 'warning' : 'danger'}
+        title={
+          cambioPendiente?.hacerAdmin
+            ? `¿Hacer administrador a ${cambioPendiente?.miembro?.nombre_completo}?`
+            : `¿Quitar el rol de administrador a ${cambioPendiente?.miembro?.nombre_completo}?`
+        }
+        message={
+          cambioPendiente?.hacerAdmin
+            ? 'Tendrá acceso completo al panel de administración.'
+            : 'Perderá el acceso al panel de administración.'
+        }
+        consequences={
+          cambioPendiente?.hacerAdmin
+            ? [
+                'Podrá crear, editar y eliminar eventos, programas y evidencias.',
+                'Podrá dar de baja miembros y cambiar roles, incluido el tuyo.',
+                'El cambio surte efecto en su sesión al volver a iniciar sesión.',
+              ]
+            : [
+                'Dejará de ver el panel /admin por completo.',
+                'Si sigue siendo staff de algún evento conservará ese rol, no bajará a usuario.',
+                'El sistema no permitirá quitar el rol al último administrador activo.',
+              ]
+        }
+        confirmLabel={cambioPendiente?.hacerAdmin ? 'Hacer administrador' : 'Quitar administrador'}
+      />
     </div>
   );
 }

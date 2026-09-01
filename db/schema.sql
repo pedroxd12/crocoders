@@ -6,6 +6,15 @@
 -- la fuente de verdad. Refleja el estado real tras aplicar:
 --   db/migrations/001_rediseno_eventos.sql
 --   db/migrations/002_trigger_estadisticas_programa.sql
+--   db/migrations/003_evidencia_programa.sql
+--   db/migrations/004_hash_codigo_verificacion.sql
+--   db/migrations/005_puntajes_sync_avatar.sql
+--
+-- Ver db/migrations/README.md para el estado de cada migración (aplicada o
+-- pendiente). Este dump venía por detrás de 003 y 004: quien levantara una base
+-- desde aquí obtenía evidencias sin `id_programa` y una columna
+-- `codigo_verificacion varchar(6)` donde el código guarda un hash de 64
+-- caracteres, así que la recuperación de contraseña reventaba.
 --
 -- Para regenerarlo:
 --   pg_dump --schema-only --no-owner --no-privileges \
@@ -776,7 +785,8 @@ ALTER SEQUENCE public.evento_imagenes_id_imagen_seq OWNED BY public.evento_image
 
 CREATE TABLE public.evidencia (
     id_evidencia integer NOT NULL,
-    id_evento integer NOT NULL,
+    id_evento integer,
+    id_programa integer,
     titulo character varying(255) NOT NULL,
     descripcion text,
     tipo character varying(20),
@@ -790,6 +800,7 @@ CREATE TABLE public.evidencia (
     id_miembro_creador integer,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT evidencia_target_xor CHECK ((((((id_evento IS NOT NULL))::integer + ((id_programa IS NOT NULL))::integer) = 1))),
     CONSTRAINT evidencia_tipo_check CHECK (((tipo)::text = ANY (ARRAY[('imagen'::character varying)::text, ('video'::character varying)::text, ('documento'::character varying)::text, ('enlace'::character varying)::text])))
 );
 
@@ -799,6 +810,13 @@ CREATE TABLE public.evidencia (
 --
 
 COMMENT ON TABLE public.evidencia IS 'Evidencias multimedia de eventos para lÃ­nea de tiempo';
+
+
+--
+-- Name: COLUMN evidencia.id_programa; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.evidencia.id_programa IS 'Programa recurrente al que pertenece la evidencia. Exactamente uno de id_evento / id_programa debe estar presente (evidencia_target_xor).';
 
 
 --
@@ -1234,12 +1252,19 @@ CREATE TABLE public.password_reset_token (
     id_token integer NOT NULL,
     id_miembro integer NOT NULL,
     token character varying(255) NOT NULL,
-    codigo_verificacion character varying(6),
+    codigo_verificacion character varying(64),
     expires_at timestamp without time zone NOT NULL,
     usado boolean DEFAULT false,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     used_at timestamp without time zone
 );
+
+
+--
+-- Name: COLUMN password_reset_token.codigo_verificacion; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.password_reset_token.codigo_verificacion IS 'Hash SHA-256 (hex) del cÃ³digo de verificaciÃ³n de 6 dÃ­gitos. Nunca en texto plano.';
 
 
 --
@@ -2309,6 +2334,13 @@ CREATE INDEX idx_evidencia_fecha ON public.evidencia USING btree (fecha_captura)
 
 
 --
+-- Name: idx_evidencia_programa; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_evidencia_programa ON public.evidencia USING btree (id_programa) WHERE (id_programa IS NOT NULL);
+
+
+--
 -- Name: idx_evidencia_publica; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2800,6 +2832,14 @@ ALTER TABLE ONLY public.evento_imagenes
 
 ALTER TABLE ONLY public.evidencia
     ADD CONSTRAINT evidencia_id_evento_fkey FOREIGN KEY (id_evento) REFERENCES public.evento(id_evento) ON DELETE CASCADE;
+
+
+--
+-- Name: evidencia evidencia_id_programa_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.evidencia
+    ADD CONSTRAINT evidencia_id_programa_fkey FOREIGN KEY (id_programa) REFERENCES public.programa_recurrente(id_programa) ON DELETE CASCADE;
 
 
 --

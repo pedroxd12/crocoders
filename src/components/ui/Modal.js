@@ -1,100 +1,126 @@
-// Asegúrate de que la ruta de importación sea correcta para tu proyecto
-// Ejemplo: src/components/ui/Modal.jsx
-'use client'; // Si es un Client Component en Next.js App Router
+'use client';
 
-import { useEffect } from 'react';
-import { X } from 'lucide-react'; // O tu icono de cierre preferido
+import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { X } from 'lucide-react';
 
-export default function Modal({ 
-  isOpen, 
-  onClose, 
-  title, 
-  children, 
-  size = 'lg',      // Tamaños: 'fit', 'sm', 'md', 'lg', 'xl', '2xl', '3xl', 'full'
-  className = '',   // Clases personalizadas para el panel del modal
-  hideHeader = false, // Para ocultar la cabecera (título y botón de cierre)
-  bodyClassName = '', // Clases personalizadas para el área del contenido (children)
+const SIZES = {
+  sm: 'max-w-sm',
+  md: 'max-w-md',
+  lg: 'max-w-2xl',
+  xl: 'max-w-4xl',
+  '2xl': 'max-w-5xl',
+  '3xl': 'max-w-7xl',
+  fit: 'max-w-[90vw] sm:max-w-md',
+  full: 'max-w-none w-full h-full',
+};
+
+/**
+ * Diálogo modal.
+ *
+ * Correcciones sobre la versión anterior:
+ *  - El velo usaba `bg-opacity-75`, una utilidad ELIMINADA en Tailwind v4, así
+ *    que no generaba CSS y el fondo quedaba negro 100% opaco: el modal tapaba
+ *    por completo la página. Ahora usa la sintaxis v4 `bg-black/70`.
+ *  - No cerraba con Escape ni con clic fuera (el handler estaba comentado en el
+ *    código), así que la única salida era acertar la X.
+ *  - Bloqueaba el scroll de <body>, pero en /admin el body no scrollea nunca
+ *    (el scroll vive en un div interno), así que el fondo seguía moviéndose.
+ *    Al montarse en un portal sobre <body> y bloquear también el scroller
+ *    marcado con [data-scroll-lock], eso queda resuelto.
+ *  - No declaraba role/aria-modal ni movía el foco.
+ *
+ * `footer` permite fijar la barra de acciones fuera del área con scroll, para
+ * que en formularios largos los botones Guardar/Cancelar estén siempre visibles.
+ */
+export default function Modal({
+  isOpen,
+  onClose,
+  title,
+  description,
+  children,
+  footer,
+  size = 'lg',
+  className = '',
+  bodyClassName = '',
+  hideHeader = false,
+  closeOnBackdrop = true,
 }) {
+  const panelRef = useRef(null);
+
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'auto';
-    }
-    // Limpia el estilo cuando el componente se desmonta o isOpen cambia
-    return () => {
-      document.body.style.overflow = 'auto';
+    if (!isOpen) return;
+
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') onClose?.();
     };
-  }, [isOpen]);
+    document.addEventListener('keydown', onKeyDown);
+
+    // Congela tanto el body como el scroller propio del panel admin.
+    const targets = [document.body, ...document.querySelectorAll('[data-scroll-lock]')];
+    const previous = targets.map((el) => el.style.overflow);
+    targets.forEach((el) => { el.style.overflow = 'hidden'; });
+
+    panelRef.current?.focus();
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      targets.forEach((el, i) => { el.style.overflow = previous[i]; });
+    };
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
+  if (typeof document === 'undefined') return null;
 
-  const sizeClasses = {
-    fit: 'w-auto max-w-[90vw] sm:max-w-md', // Se ajusta al contenido, con un máximo
-    sm: 'max-w-sm',
-    md: 'max-w-md',
-    lg: 'max-w-2xl', // Tamaño original que tenías
-    xl: 'max-w-4xl',
-    '2xl': 'max-w-5xl',
-    '3xl': 'max-w-7xl',
-    'full': 'w-full h-full', // Ocupa todo el espacio disponible en el backdrop
-  };
+  const isFull = size === 'full';
 
-  // Clases base para el panel del modal
-  const modalPanelBaseClasses = "bg-gray-800 shadow-xl w-full flex flex-col";
-  
-  // Clases para la forma y altura por defecto, se modifican si size es 'full'
-  const defaultShapeClasses = size === 'full' 
-    ? 'h-full max-h-full rounded-none' // Sin bordes redondeados y altura completa para 'full'
-    : 'rounded-lg max-h-[90vh]';      // Bordes redondeados y altura máxima para otros tamaños
-  
-  const currentSizeClass = sizeClasses[size] || sizeClasses.lg;
-
-  // Clases para el padding del cuerpo, dependen de si la cabecera está oculta
-  const defaultBodyPadding = hideHeader ? 'p-0' : 'p-4 md:p-6';
-
-  return (
-    <div 
-      className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50 transition-opacity duration-150 ease-in-out animate-fadeIn"
-      // Descomenta la siguiente línea si quieres que el clic en el fondo cierre el modal:
-      // onClick={onClose} 
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-fadeIn"
+      onClick={closeOnBackdrop ? onClose : undefined}
     >
       <div
-        className={`${modalPanelBaseClasses} ${defaultShapeClasses} ${currentSizeClass} ${className}`}
-        onClick={(e) => e.stopPropagation()} // Evita que el clic en el contenido del modal cierre el modal (si el clic en el fondo está activado)
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={typeof title === 'string' ? title : undefined}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+        className={[
+          'flex w-full flex-col bg-surface border border-line shadow-2xl outline-none',
+          isFull ? 'h-full rounded-none' : 'rounded-2xl max-h-[90vh]',
+          SIZES[size] || SIZES.lg,
+          className,
+        ].join(' ')}
       >
-        {/* Cabecera del Modal (opcional) */}
         {!hideHeader && (
-          <div className="flex justify-between items-center p-4 border-b border-gray-700 flex-shrink-0">
-            <h3 className="text-xl font-semibold text-white truncate pr-2">
-              {title || ''} {/* Muestra el título o nada si no hay título */}
-            </h3>
+          <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4 shrink-0">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-fg truncate">{title}</h2>
+              {description && <p className="mt-0.5 text-sm text-muted">{description}</p>}
+            </div>
             <button
+              type="button"
               onClick={onClose}
-              className="text-gray-400 hover:text-white transition-colors rounded-full p-1 hover:bg-gray-700 flex-shrink-0"
-              aria-label="Cerrar modal"
+              aria-label="Cerrar"
+              className="shrink-0 rounded-lg p-1.5 text-faint hover:bg-surface-2 hover:text-fg transition-colors"
             >
-              <X size={24} />
+              <X size={18} />
             </button>
           </div>
         )}
 
-        {/* Cuerpo del Modal (Contenido) */}
-        <div className={`flex-grow overflow-y-auto ${defaultBodyPadding} ${bodyClassName}`}>
+        <div className={`flex-1 overflow-y-auto ${hideHeader ? '' : 'px-5 py-4'} ${bodyClassName}`}>
           {children}
         </div>
+
+        {footer && (
+          <div className="flex items-center justify-end gap-2 border-t border-line px-5 py-3 shrink-0">
+            {footer}
+          </div>
+        )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
-
-// Opcional: Si usas la clase `animate-fadeIn`, añade estas keyframes a tu CSS global:
-/*
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-.animate-fadeIn {
-  animation: fadeIn 0.15s ease-in-out;
-}
-*/

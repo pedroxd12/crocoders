@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { connectWithRetry } from '@/lib/db-server';
 import { requireAuth } from '@/lib/auth';
 
 // GET - Obtener eventos donde el usuario es staff.
@@ -19,11 +19,24 @@ export async function GET(request) {
         e.id_evento,
         e.nombre,
         e.descripcion_html AS descripcion,
-        e.fecha_inicio,
+        -- fecha_inicio/fecha_fin son de tipo date: pg las convierte en Date y
+        -- NextResponse.json las serializa como ISO completo
+        -- ("2026-08-31T06:00:00.000Z"). El cliente las concatenaba con la hora
+        -- ("...ZT18:00:00") y obtenía Invalid Date, por lo que TODOS los eventos
+        -- se clasificaban como "Finalizado". Se devuelven ya como texto.
+        to_char(e.fecha_inicio, 'YYYY-MM-DD') AS fecha_inicio,
+        to_char(e.fecha_fin,    'YYYY-MM-DD') AS fecha_fin,
+        -- Las horas NO necesitan to_char: el tipo time no tiene parser en el
+        -- driver y llega ya como texto ("18:00:00"). Envolverlas dependía de un
+        -- cast implícito time-interval para elegir la sobrecarga de to_char,
+        -- riesgo gratuito en la consulta de la que cuelga todo el panel de
+        -- staff. El recorte a "18:00" lo hace formatearHora() en el cliente.
         e.hora_inicio,
-        e.fecha_fin,
         e.hora_fin,
         e.ubicacion,
+        e.estado,
+        e.cupos,
+        e.cupos_disponibles,
         e.imagen_flyer_url AS imagen_url,
         te.nombre as tipo_evento,
         ae.nombre as alcance,

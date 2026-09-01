@@ -24,7 +24,9 @@
 //    ranking global (verificado: un miembro con 137 problemas aparecía en 0).
 //    Se usa `api/user/problemsSolved/`, que sí devuelve la lista real.
 
-import pool from '@/lib/db-server';
+// `query` (no `pool.query`) para que los cortes de conexión de Railway se
+// reintenten en vez de convertirse en un 503 con la tabla vacía.
+import { query } from '@/lib/db-server';
 import * as cheerio from 'cheerio';
 import {
   PLATAFORMAS,
@@ -381,7 +383,7 @@ async function guardarResultados(resultados) {
   // Un solo UPDATE para todas las cuentas del lote. COALESCE conserva el valor
   // anterior cuando la plataforma no informó ese campo, para que un fallo
   // parcial nunca borre datos buenos.
-  const { rowCount } = await pool.query(
+  const { rowCount } = await query(
     `UPDATE cuenta_plataforma cp SET
         problemas_resueltos_total = COALESCE(d.total, cp.problemas_resueltos_total),
         problema_mas_dificil      = COALESCE(d.dificil, cp.problema_mas_dificil),
@@ -449,28 +451,53 @@ const SQL_CUENTAS_PENDIENTES = `
    ORDER BY cp.ultima_actualizacion ASC NULLS FIRST, cp.id_cuenta
    LIMIT $4`;
 
+/**
+ * Cuánto trabajo queda. Devuelve las dos medidas porque no son lo mismo y
+ * confundirlas se veía en pantalla: `cuentas` son PERFILES de plataforma (cada
+ * miembro tiene hasta tres: Codeforces, VJudge y omegaUp), así que con 20
+ * miembros el contador llegaba a 53 y parecía un número inventado; `miembros`
+ * es la cifra que la gente reconoce.
+ */
 export async function contarPendientes() {
-  const { rows } = await pool.query(
-    `SELECT count(*)::int AS n FROM (${SQL_CUENTAS_PENDIENTES}) s`,
+  const { rows } = await query(
+    `SELECT count(*)::int AS cuentas,
+            count(DISTINCT id_miembro)::int AS miembros
+       FROM (${SQL_CUENTAS_PENDIENTES}) s`,
     [false, TTL_MINUTOS, REINTENTO_NO_ENCONTRADO_DIAS, 1000],
   );
-  return rows[0]?.n ?? 0;
+  return { cuentas: rows[0]?.cuentas ?? 0, miembros: rows[0]?.miembros ?? 0 };
 }
 
-let sincronizacionEnCurso = null;
+// Lote en vuelo, junto con las opciones con que se lanzó. Guardar `forzar` es
+// necesario para no mentir: quien pide un refresco completo mientras corre un
+// lote parcial NO obtiene lo que pidió.
+let sincronizacionEnCurso = null; // { tarea, forzar }
 
 /**
  * Refresca un lote de cuentas. Acotada en tiempo y en cantidad para que una
  * sola invocación nunca se alargue: las cuentas se toman de la más antigua a la
  * más reciente, así que llamadas sucesivas recorren a todos por turnos.
+ *
+ * Si ya hay un lote corriendo se engancha a él (no tiene sentido machacar las
+ * APIs externas en paralelo) pero el resultado sale marcado con
+ * `reutilizada: true` y con el `forzar` REAL del lote al que se enganchó. Antes
+ * se devolvía la tarea en curso a secas y las opciones recibidas se perdían en
+ * silencio: el botón "Actualizar" de /puntajes (que pide `?forzar=1`) se
+ * colgaba del lote de fondo que el GET acababa de lanzar SIN forzar, así que
+ * sólo se refrescaban las cuentas vencidas por TTL mientras la pantalla decía
+ * que se había actualizado todo.
  */
 export async function sincronizar({ presupuestoMs = 25000, limite = 40, forzar = false } = {}) {
-  if (sincronizacionEnCurso) return sincronizacionEnCurso;
+  if (sincronizacionEnCurso) {
+    const { tarea: enCurso, forzar: forzarEnCurso } = sincronizacionEnCurso;
+    const resultado = await enCurso;
+    return { ...resultado, reutilizada: true, forzada: forzarEnCurso, forzarSolicitado: forzar };
+  }
 
   const tarea = (async () => {
     const deadline = Date.now() + presupuestoMs;
 
-    const { rows } = await pool.query(SQL_CUENTAS_PENDIENTES, [
+    const { rows } = await query(SQL_CUENTAS_PENDIENTES, [
       forzar,
       TTL_MINUTOS,
       REINTENTO_NO_ENCONTRADO_DIAS,
@@ -500,34 +527,58 @@ export async function sincronizar({ presupuestoMs = 25000, limite = 40, forzar =
       return cuentas.map((c) => ({ ...c, estado: 'error', motivo: e.message }));
     };
 
+    // Se guarda en cuanto CADA plataforma termina, no al final de las tres.
+    // Con un único guardado al cierre, si la invocación se cortaba antes
+    // (límite de duración de la función, redeploy, red caída) se perdía el
+    // lote entero: esas cuentas seguían pendientes, el siguiente pase repetía
+    // el mismo trabajo y la cola no bajaba nunca.
+    let guardadas = 0;
+    const guardarLote = async (lista) => {
+      try {
+        guardadas += await guardarResultados(lista);
+      } catch (e) {
+        console.error(`[puntajes] guardado parcial falló: ${e.message}`);
+      }
+      return lista;
+    };
+    const guardarAlTerminar = async (promesa) => guardarLote((await promesa).filter(Boolean));
+
+    // Los handles imposibles ("No tengo") no gastan red: se marcan de entrada.
+    await guardarLote(invalidas);
+
     // Las tres plataformas corren en paralelo entre sí (hosts distintos, sin
     // rate limit compartido); dentro de cada una se respeta su propio ritmo.
     const [cf, vj, ou] = await Promise.all([
-      sincronizarCodeforces(porPlataforma[PLATAFORMAS.CODEFORCES], deadline).catch(
-        conError(porPlataforma[PLATAFORMAS.CODEFORCES]),
+      guardarAlTerminar(
+        sincronizarCodeforces(porPlataforma[PLATAFORMAS.CODEFORCES], deadline).catch(
+          conError(porPlataforma[PLATAFORMAS.CODEFORCES]),
+        ),
       ),
 
-      conConcurrencia(porPlataforma[PLATAFORMAS.VJUDGE], VJ_CONCURRENCIA, async (c) => {
-        if (Date.now() > deadline) return null;
-        try {
-          return { ...c, ...(await sincronizarVJudge(c)) };
-        } catch (e) {
-          return { ...c, estado: 'error', motivo: e.message };
-        }
-      }),
+      guardarAlTerminar(
+        conConcurrencia(porPlataforma[PLATAFORMAS.VJUDGE], VJ_CONCURRENCIA, async (c) => {
+          if (Date.now() > deadline) return null;
+          try {
+            return { ...c, ...(await sincronizarVJudge(c)) };
+          } catch (e) {
+            return { ...c, estado: 'error', motivo: e.message };
+          }
+        }),
+      ),
 
-      conConcurrencia(porPlataforma[PLATAFORMAS.OMEGAUP], OU_CONCURRENCIA, async (c) => {
-        if (Date.now() > deadline) return null;
-        try {
-          return { ...c, ...(await sincronizarOmegaUp(c)) };
-        } catch (e) {
-          return { ...c, estado: 'error', motivo: e.message };
-        }
-      }),
+      guardarAlTerminar(
+        conConcurrencia(porPlataforma[PLATAFORMAS.OMEGAUP], OU_CONCURRENCIA, async (c) => {
+          if (Date.now() > deadline) return null;
+          try {
+            return { ...c, ...(await sincronizarOmegaUp(c)) };
+          } catch (e) {
+            return { ...c, estado: 'error', motivo: e.message };
+          }
+        }),
+      ),
     ]);
 
-    const todos = [...invalidas, ...cf, ...vj, ...ou].filter(Boolean);
-    const guardadas = await guardarResultados(todos);
+    const todos = [...invalidas, ...cf, ...vj, ...ou];
 
     return {
       revisadas: rows.length,
@@ -538,9 +589,9 @@ export async function sincronizar({ presupuestoMs = 25000, limite = 40, forzar =
     };
   })();
 
-  sincronizacionEnCurso = tarea;
+  sincronizacionEnCurso = { tarea, forzar };
   try {
-    return await tarea;
+    return { ...(await tarea), reutilizada: false, forzada: forzar };
   } finally {
     sincronizacionEnCurso = null;
   }
@@ -550,10 +601,16 @@ export function haySincronizacionEnCurso() {
   return sincronizacionEnCurso !== null;
 }
 
-/** Lanza una sincronización en segundo plano sin bloquear la respuesta. */
+/**
+ * Lanza una sincronización sin bloquear la respuesta. DEVUELVE la promesa: en
+ * un entorno serverless (esta web está en Vercel) hay que entregársela a
+ * `after()` para que la plataforma mantenga viva la invocación. Como promesa
+ * suelta, el proceso se congela al enviar la respuesta y el lote se queda a
+ * medias.
+ */
 export function sincronizarEnSegundoPlano(opciones) {
-  if (sincronizacionEnCurso) return;
-  sincronizar(opciones).catch((e) =>
+  if (sincronizacionEnCurso) return sincronizacionEnCurso.tarea;
+  return sincronizar(opciones).catch((e) =>
     console.error('[puntajes] sincronización en segundo plano falló:', e.message),
   );
 }
@@ -573,7 +630,7 @@ const CLAVE_PLATAFORMA = {
  * responde rápido y con exactamente los mismos datos para todos los visitantes.
  */
 export async function leerPuntajes() {
-  const { rows } = await pool.query(`
+  const { rows } = await query(`
     SELECT
       cp.id_miembro,
       -- CONCAT_WS ignora NULL (antes un apellido nulo dejaba el nombre completo

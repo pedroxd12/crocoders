@@ -1,8 +1,27 @@
 // src/app/api/evidencias/route.js
 import { NextResponse } from 'next/server';
-import { sql } from '@/lib/db-server';
+import {
+  listarTimelineEvidencias,
+  listarEvidenciasDeEvento,
+  listarEvidenciasDePrograma,
+} from '@/lib/evidencias-listado';
 
 export const dynamic = 'force-dynamic'; // Se evalúa dinámicamente en cada solicitud
+
+// Caché de CDN para las respuestas públicas.
+//
+// Son fotos de actividades YA CELEBRADAS: sólo cambian cuando un admin sube o
+// retira material, nunca por acción del visitante. Sin esta cabecera cada
+// petición arrancaba la función y abría conexión a la base de datos — 0.49 s
+// medidos contra producción, y hasta 1.5 s si la función estaba fría — para
+// devolver los mismos 272 bytes.
+//
+// La ventana de `stale-while-revalidate` es larga a propósito, igual que en
+// /api/puntajes: con una corta, cualquier visita tras unos minutos de silencio
+// vuelve a caer en MISS y paga otra vez el arranque en frío. Así ese coste lo
+// paga la revalidación en segundo plano y no la persona que abre la página; a
+// cambio, una foto recién subida puede tardar hasta un minuto en aparecer.
+const CACHE_PUBLICO = 'public, s-maxage=60, stale-while-revalidate=86400';
 
 // GET público:
 //  - ?evento=<id>   -> evidencias públicas de ese evento.
@@ -10,6 +29,12 @@ export const dynamic = 'force-dynamic'; // Se evalúa dinámicamente en cada sol
 //  - sin parámetro  -> línea de tiempo mixta: eventos Y programas que tienen
 //    evidencias públicas, ordenados por fecha desc. Cada item lleva
 //    `tipo_origen` ('evento'|'programa') y `origen_id` para pedir su galería.
+//
+// Las consultas viven en src/lib/evidencias-listado.js porque la página
+// /evidencias precarga la línea de tiempo en el servidor para mandarla dentro
+// del HTML. Este endpoint sigue sirviendo las galerías, que se piden al pulsar
+// una actividad, y las revalidaciones de SWR.
+//
 // La creación/edición/borrado vive en /api/evidencias/upload y /api/evidencias/[id]
 // (ambos protegidos por requireAdmin). Este archivo NO expone POST.
 export async function GET(request) {
@@ -23,14 +48,9 @@ export async function GET(request) {
       if (isNaN(Number(eventoIdParam))) {
         return NextResponse.json({ error: 'El ID de evento proporcionado no es un número válido.' }, { status: 400 });
       }
-      const evidencias = await sql`
-        SELECT id_evidencia, id_evento, id_programa, titulo as nombre, descripcion, tipo,
-               url as imagen_url, storage_key as imagen_key, publica, orden, fecha_captura as fecha
-        FROM evidencia
-        WHERE id_evento = ${Number(eventoIdParam)} AND publica = true
-        ORDER BY orden ASC, fecha_captura DESC
-      `;
-      return NextResponse.json(evidencias);
+      return NextResponse.json(await listarEvidenciasDeEvento(eventoIdParam), {
+        headers: { 'Cache-Control': CACHE_PUBLICO },
+      });
     }
 
     // --- Galería de un PROGRAMA ---
@@ -38,59 +58,22 @@ export async function GET(request) {
       if (isNaN(Number(programaIdParam))) {
         return NextResponse.json({ error: 'El ID de programa proporcionado no es un número válido.' }, { status: 400 });
       }
-      const evidencias = await sql`
-        SELECT id_evidencia, id_evento, id_programa, titulo as nombre, descripcion, tipo,
-               url as imagen_url, storage_key as imagen_key, publica, orden, fecha_captura as fecha
-        FROM evidencia
-        WHERE id_programa = ${Number(programaIdParam)} AND publica = true
-        ORDER BY orden ASC, fecha_captura DESC
-      `;
-      return NextResponse.json(evidencias);
+      return NextResponse.json(await listarEvidenciasDePrograma(programaIdParam), {
+        headers: { 'Cache-Control': CACHE_PUBLICO },
+      });
     }
 
     // --- Línea de tiempo mixta (eventos + programas con evidencias públicas) ---
-    // UNION ALL de ambas fuentes con un esquema común; el front las mezcla y ordena.
-    const timeline = await sql`
-      SELECT
-        'evento' AS tipo_origen,
-        e.id_evento AS origen_id,
-        e.nombre AS nombre_evento,
-        e.fecha_inicio AS fecha,
-        t.nombre AS tipo,
-        e.ubicacion AS lugar,
-        (SELECT COUNT(*) FROM evidencia ev WHERE ev.id_evento = e.id_evento AND ev.publica = true) AS num_evidencias,
-        (SELECT ev.url FROM evidencia ev
-          WHERE ev.id_evento = e.id_evento AND ev.publica = true
-          ORDER BY ev.orden ASC, ev.fecha_captura DESC LIMIT 1) AS portada_url
-      FROM evento e
-      LEFT JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
-      WHERE EXISTS (SELECT 1 FROM evidencia ev WHERE ev.id_evento = e.id_evento AND ev.publica = true)
-
-      UNION ALL
-
-      SELECT
-        'programa' AS tipo_origen,
-        p.id_programa AS origen_id,
-        p.nombre AS nombre_evento,
-        p.fecha_inicio AS fecha,
-        t.nombre AS tipo,
-        p.ubicacion AS lugar,
-        (SELECT COUNT(*) FROM evidencia ev WHERE ev.id_programa = p.id_programa AND ev.publica = true) AS num_evidencias,
-        (SELECT ev.url FROM evidencia ev
-          WHERE ev.id_programa = p.id_programa AND ev.publica = true
-          ORDER BY ev.orden ASC, ev.fecha_captura DESC LIMIT 1) AS portada_url
-      FROM programa_recurrente p
-      LEFT JOIN catalogo_tipo_evento t ON p.id_tipo_evento = t.id_tipo_evento
-      WHERE EXISTS (SELECT 1 FROM evidencia ev WHERE ev.id_programa = p.id_programa AND ev.publica = true)
-
-      ORDER BY fecha DESC
-    `;
-    return NextResponse.json(timeline);
+    return NextResponse.json(await listarTimelineEvidencias(), {
+      headers: { 'Cache-Control': CACHE_PUBLICO },
+    });
   } catch (error) {
     console.error('[API /api/evidencias] Error en GET:', error);
     return NextResponse.json(
       { error: 'Error al obtener datos de evidencias' },
-      { status: 500 },
+      // El error NO se cachea: si la base falla, la siguiente visita debe
+      // volver a intentarlo en vez de recibir el fallo guardado un día entero.
+      { status: 500, headers: { 'Cache-Control': 'no-store' } },
     );
   }
 }

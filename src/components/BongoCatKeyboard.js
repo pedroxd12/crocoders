@@ -81,7 +81,50 @@ export default function BongoCatKeyboard() {
   const containerRef = useRef(null);
   const splineRef = useRef(null);
   const isVisibleRef = useRef(true);
-  const cleanupRef = useRef({ resizeHandler: null, bongoInterval: null, visibilityObserver: null });
+  const rectSyncFrameRef = useRef(0);
+  const cleanupRef = useRef({
+    resizeHandler: null,
+    bongoInterval: null,
+    visibilityObserver: null,
+    scrollRectHandler: null,
+    pointerRectHandler: null,
+  });
+
+  // ---------------------------------------------------------------------
+  // Sincronización del área interactiva (hit-test) con el canvas visible.
+  //
+  // El runtime de Spline no calcula el raycast contra la posición real del
+  // canvas: usa un rect CACHEADO (eventManager.eventContext.domRect) que sólo
+  // refresca en dos situaciones — su propio ResizeObserver y un listener de
+  // `scroll` sobre `document` en fase de burbuja. En cuanto el canvas se mueve
+  // por cualquier otro motivo, el área que responde al mouse se queda atrás y
+  // hay que apuntar lejos del teclado que se ve. Pasa en toda la página:
+  //   - En el inicio el scroll ocurre dentro de .pageWrapper (el body está en
+  //     overflow:hidden), y los eventos `scroll` de un elemento NO burbujean,
+  //     así que ese listener de `document` nunca se ejecuta: el hit-test queda
+  //     congelado donde estaba el teclado al cargar la escena — 300px por
+  //     debajo del viewport, por el rootMargin del observer de montaje.
+  //   - En /capitulo y /contacto el bloque entra con una animación de
+  //     framer-motion (20-30px de desplazamiento) que ocurre después de que el
+  //     rect ya quedó cacheado.
+  // Lo refrescamos nosotros en fase de CAPTURA, así el rect ya está corregido
+  // cuando el listener del propio canvas procesa ese mismo evento.
+  const syncPointerRect = () => {
+    const spline = splineRef.current;
+    const context = spline?.eventManager?.eventContext;
+    const canvas = spline?.canvas;
+    if (!context || !canvas) return;
+    context.domRect = canvas.getBoundingClientRect();
+  };
+
+  // Durante el scroll basta con un refresco por frame.
+  const scheduleRectSync = () => {
+    if (rectSyncFrameRef.current) return;
+    rectSyncFrameRef.current = requestAnimationFrame(() => {
+      rectSyncFrameRef.current = 0;
+      syncPointerRect();
+    });
+  };
 
   // Suelta lo que crea onLoad. Se llama al desmontar y también al principio de
   // onLoad: Spline puede reemitir `load` (StrictMode en dev, remount al navegar
@@ -97,6 +140,23 @@ export default function BongoCatKeyboard() {
     if (cleanup.resizeHandler) {
       window.removeEventListener('resize', cleanup.resizeHandler);
       cleanup.resizeHandler = null;
+    }
+    if (cleanup.scrollRectHandler) {
+      window.removeEventListener('scroll', cleanup.scrollRectHandler, true);
+      cleanup.scrollRectHandler = null;
+    }
+    if (cleanup.pointerRectHandler) {
+      const stage = containerRef.current;
+      if (stage) {
+        stage.removeEventListener('pointerenter', cleanup.pointerRectHandler, true);
+        stage.removeEventListener('pointermove', cleanup.pointerRectHandler, true);
+        stage.removeEventListener('pointerdown', cleanup.pointerRectHandler, true);
+      }
+      cleanup.pointerRectHandler = null;
+    }
+    if (rectSyncFrameRef.current) {
+      cancelAnimationFrame(rectSyncFrameRef.current);
+      rectSyncFrameRef.current = 0;
     }
   };
 
@@ -152,11 +212,38 @@ export default function BongoCatKeyboard() {
     let resizeTimeout = null;
     const debouncedResize = () => {
       if (resizeTimeout) clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(updateLayout, 150);
+      resizeTimeout = setTimeout(() => {
+        updateLayout();
+        syncPointerRect();
+      }, 150);
     };
 
     window.addEventListener('resize', debouncedResize, { passive: true });
     cleanupRef.current.resizeHandler = debouncedResize;
+
+    // El rect que Spline cacheó al arrancar la escena ya puede estar obsoleto:
+    // el observer monta el visor 300px antes de que entre en pantalla.
+    syncPointerRect();
+
+    // `capture: true` es lo que hace que también lleguen los scrolls de
+    // scrollers internos como .pageWrapper del inicio: los eventos `scroll` de
+    // un elemento no burbujean, pero sí bajan por la fase de captura.
+    const onScrollRect = () => scheduleRectSync();
+    window.addEventListener('scroll', onScrollRect, { capture: true, passive: true });
+    cleanupRef.current.scrollRectHandler = onScrollRect;
+
+    // Red de seguridad para todo lo que mueve el canvas sin scroll ni resize
+    // (animaciones de entrada, imágenes que cargan más arriba, fuentes). Como
+    // el contenedor es ancestro del canvas, en captura corremos antes que el
+    // handler de Spline y ese mismo evento ya usa el rect corregido.
+    const stage = containerRef.current;
+    if (stage) {
+      const onPointerRect = () => syncPointerRect();
+      stage.addEventListener('pointerenter', onPointerRect, true);
+      stage.addEventListener('pointermove', onPointerRect, true);
+      stage.addEventListener('pointerdown', onPointerRect, true);
+      cleanupRef.current.pointerRectHandler = onPointerRect;
+    }
 
     spline.addEventListener("mouseHover", (e) => handleMouseHover(e, spline));
     spline.addEventListener("mouseDown", (e) => handleKeyPress(e, spline));

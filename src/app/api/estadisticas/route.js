@@ -1,6 +1,16 @@
 import { sql } from '@/lib/db-server';
 import { NextResponse } from 'next/server';
 
+// Año en que se fundó el club. Estaba incrustado en la resta que calcula la
+// antigüedad; aquí al menos tiene nombre y un solo sitio donde corregirlo.
+const ANIO_FUNDACION = 2023;
+
+// Endpoint público y sin sesión que lanza tres agregados contra `miembro`,
+// `cuenta_plataforma` y `evento`. Se sirve desde la caché de la CDN para que
+// golpearlo en bucle no se traduzca en consultas a la base: los números cambian
+// como mucho cada pocos minutos.
+const CACHE_GET = 'public, s-maxage=300, stale-while-revalidate=86400';
+
 export async function GET() {
   try {
     const [miembrosRes, problemasRes, eventosRes] = await Promise.all([
@@ -24,17 +34,20 @@ export async function GET() {
       miembros: parseInt(miembrosRes[0]?.total || 0),
       problemas: parseInt(problemasRes[0]?.total || 0),
       eventos: parseInt(eventosRes[0]?.total || 0),
-      años: new Date().getFullYear() - 2023 // O un valor fijo si prefieres
+      años: new Date().getFullYear() - ANIO_FUNDACION
     };
 
-    return NextResponse.json(estadisticas);
+    return NextResponse.json(estadisticas, {
+      headers: { 'Cache-Control': CACHE_GET },
+    });
 
   } catch (error) {
     console.error('Error al obtener estadísticas:', error);
     return NextResponse.json({
       error: "Error al obtener estadísticas del servidor.",
     }, {
-      status: 500
+      status: 500,
+      headers: { 'Cache-Control': 'no-store' },
     });
   }
 }

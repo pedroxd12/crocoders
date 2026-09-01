@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 // GET - Reporte de asistencia del programa
@@ -7,6 +7,11 @@ export async function GET(request, { params }) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
   const { id } = await params;
+  // Misma guarda que el POST de más abajo y que el resto del módulo: sin ella un
+  // id no numérico llega a Postgres (22P02) y se responde 500 en vez de 400.
+  if (!id || isNaN(Number(id))) {
+    return NextResponse.json({ error: 'ID de programa inválido' }, { status: 400 });
+  }
 
   let client;
   try {
@@ -64,10 +69,13 @@ export async function GET(request, { params }) {
              ELSE 0
         END AS porcentaje_asistencia,
         -- Elegible: cumple el nº mínimo de sesiones Y el % mínimo de asistencia.
+        -- La división va con NULLIF porque el AND de SQL no garantiza el
+        -- cortocircuito: un programa sin sesiones obligatorias hacía saltar
+        -- "division by zero" y el reporte entero respondía 500.
         (
           COALESCE(am.asistencias, ai.asistencias, 0) >= GREATEST(p.sesiones_requeridas_certificado, 0)
           AND s.total_obligatorias > 0
-          AND (100.0 * COALESCE(am.asistencias, ai.asistencias, 0) / s.total_obligatorias) >= p.porcentaje_asistencia_minimo
+          AND (100.0 * COALESCE(am.asistencias, ai.asistencias, 0) / NULLIF(s.total_obligatorias, 0)) >= p.porcentaje_asistencia_minimo
         ) AS elegible_certificado,
         -- La emisión se materializa en inscripcion_programa.
         ip.certificado_emitido,
@@ -79,7 +87,9 @@ export async function GET(request, { params }) {
       LEFT JOIN invitado i ON ip.id_invitado = i.id_invitado
       LEFT JOIN asistencia_miembros am ON am.id_miembro = ip.id_miembro
       LEFT JOIN asistencia_invitados ai ON ai.id_invitado = ip.id_invitado
-      WHERE ip.id_programa = $1
+      -- Mismo criterio que la lista de asistencia por sesión: los dados de baja
+      -- no cuentan como inscritos ni pueden acreditarse.
+      WHERE ip.id_programa = $1 AND ip.estado <> 'cancelada'
       ORDER BY porcentaje_asistencia DESC, nombre_completo
       `,
       [id],
@@ -150,7 +160,7 @@ export async function POST(request, { params }) {
              ELSE 0 END AS porcentaje,
         (asis.asistencias >= GREATEST(prog.sesiones_requeridas_certificado, 0)
          AND sesiones.total_obligatorias > 0
-         AND (100.0 * asis.asistencias / sesiones.total_obligatorias) >= prog.porcentaje_asistencia_minimo
+         AND (100.0 * asis.asistencias / NULLIF(sesiones.total_obligatorias, 0)) >= prog.porcentaje_asistencia_minimo
         ) AS elegible
       FROM prog CROSS JOIN sesiones CROSS JOIN asis
       `,
@@ -181,6 +191,7 @@ export async function POST(request, { params }) {
               fecha_certificado = NOW(),
               updated_at = NOW()
         WHERE id_programa = $1 AND ${col} = $2 AND certificado_emitido = FALSE
+          AND estado <> 'cancelada'
         RETURNING id_inscripcion_programa, fecha_certificado`,
       [id, targetId, asistencias, porcentaje],
     );
@@ -188,11 +199,17 @@ export async function POST(request, { params }) {
     if (upd.rowCount === 0) {
       // O no está inscrito, o ya tenía certificado emitido.
       const existe = await client.query(
-        `SELECT certificado_emitido FROM inscripcion_programa WHERE id_programa = $1 AND ${col} = $2`,
+        `SELECT certificado_emitido, estado FROM inscripcion_programa WHERE id_programa = $1 AND ${col} = $2`,
         [id, targetId],
       );
       if (existe.rows.length === 0) {
         return NextResponse.json({ error: 'El usuario no está inscrito en el programa' }, { status: 404 });
+      }
+      if (existe.rows[0].estado === 'cancelada') {
+        return NextResponse.json(
+          { error: 'El usuario dio de baja su inscripción: vuelve a inscribirlo antes de acreditarlo.' },
+          { status: 409 },
+        );
       }
       return NextResponse.json({ error: 'El certificado ya fue emitido', code: 'YA_EMITIDO' }, { status: 409 });
     }

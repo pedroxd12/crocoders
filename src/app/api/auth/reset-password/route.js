@@ -2,8 +2,19 @@ import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { rateLimit } from '@/lib/rate-limit';
 
 export async function POST(request) {
+  // Era el único endpoint del flujo de recuperación sin freno (login, registro,
+  // recovery y verify-token sí lo tienen).
+  const rl = rateLimit(request, { scope: 'reset-password', limit: 10, windowMs: 15 * 60 * 1000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Demasiadas solicitudes. Intente más tarde.' },
+      { status: 429, headers: { 'Retry-After': String(Math.ceil((rl.resetAt - Date.now()) / 1000)) } }
+    );
+  }
+
   try {
     const { newPassword, email } = await request.json();
     const authHeader = request.headers.get('authorization');
@@ -29,8 +40,14 @@ export async function POST(request) {
       );
     }
 
+    // El JWT lleva el correo ya normalizado (lo firma /api/auth/verify-token),
+    // así que aquí hay que normalizar igual: si el usuario tecleó una mayúscula
+    // en el formulario, la comparación cruda fallaba y el restablecimiento se
+    // caía con "Token de sesión inválido" en el último paso.
+    const emailNormalizado = String(email || '').trim().toLowerCase();
+
     // Verificar que el token sea temporal, con propósito de recuperación y email correcto.
-    if (!decoded.temp || decoded.purpose !== 'password_reset' || decoded.email !== email) {
+    if (!decoded.temp || decoded.purpose !== 'password_reset' || decoded.email !== emailNormalizado) {
       return NextResponse.json(
         { error: 'Token de sesión inválido para esta operación' },
         { status: 401 }

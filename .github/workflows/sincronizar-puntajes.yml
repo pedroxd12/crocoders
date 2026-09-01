@@ -1,0 +1,77 @@
+# Sincronización periódica de puntajes.
+#
+# POR QUÉ NO BASTA EL CRON DE VERCEL: en el plan Hobby los cron jobs sólo pueden
+# ejecutarse UNA VEZ AL DÍA (una expresión más frecuente falla el despliegue).
+# Y una sola ejecución no alcanza a refrescar todas las cuentas: Codeforces
+# limita a ~1 petición cada 2 s, así que sus ~19 perfiles por sí solos consumen
+# más presupuesto del que cabe en los 60 s de una función. La sincronización
+# rota por las cuentas más antiguas, de modo que necesita ejecutarse varias
+# veces al día para mantener el TTL de 3 h.
+#
+# El cron de Vercel (vercel.json) se queda como red de seguridad diaria; este
+# workflow es el que mantiene los datos al día de verdad.
+#
+# PUESTA EN MARCHA (dos secretos en Settings > Secrets and variables > Actions):
+#   CRON_SECRET  el mismo valor que la variable CRON_SECRET del proyecto en Vercel
+#   SITIO_URL    https://crocoders-page.vercel.app   (sin barra final)
+# Mientras falten, el workflow termina con error visible en la pestaña Actions
+# en lugar de fallar en silencio.
+#
+# OJO: GitHub desactiva los workflows programados en repositorios sin actividad
+# durante 60 días. Si el ranking vuelve a congelarse, revisar primero si Actions
+# lo deshabilitó y reactivarlo desde la pestaña Actions.
+
+name: Sincronizar puntajes
+
+on:
+  schedule:
+    # Cada 30 minutos. GitHub no garantiza la puntualidad exacta (puede
+    # retrasarse en horas de mucha carga), pero con el TTL de 3 h sobra margen.
+    - cron: '*/30 * * * *'
+  # Permite lanzarlo a mano desde la pestaña Actions para comprobar que funciona.
+  workflow_dispatch:
+
+# Si una ejecución se retrasa y se solapa con la siguiente, que no corran dos a
+# la vez: competirían por el límite de peticiones de Codeforces y las respuestas
+# 429 marcarían como fallidas cuentas de miembros reales.
+concurrency:
+  group: sincronizar-puntajes
+  cancel-in-progress: false
+
+jobs:
+  sincronizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Llamar al endpoint de sincronización
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SITIO_URL: ${{ secrets.SITIO_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${CRON_SECRET}" ] || [ -z "${SITIO_URL}" ]; then
+            echo "Faltan los secretos CRON_SECRET y/o SITIO_URL del repositorio."
+            echo "Configúralos en Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          # --max-time cubre el peor caso: la función tiene 60 s de tope y aún
+          # debe poder responder. -sS calla la barra de progreso pero deja pasar
+          # los errores; el cuerpo se imprime para que quede en el registro.
+          codigo=$(curl -sS -o respuesta.json -w '%{http_code}' \
+            --max-time 90 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            "${SITIO_URL}/api/cron/puntajes")
+
+          echo "HTTP ${codigo}"
+          cat respuesta.json
+          echo
+
+          # Un 401 significa que el secreto no coincide con el de Vercel, y un
+          # 503 que allí falta la variable: son fallos de configuración que
+          # deben verse, no reintentarse en silencio cada media hora.
+          if [ "${codigo}" != "200" ]; then
+            echo "La sincronización no se pudo lanzar (HTTP ${codigo})."
+            exit 1
+          fi

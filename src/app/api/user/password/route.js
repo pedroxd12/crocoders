@@ -1,19 +1,32 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server';
-import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { requireAuth } from '@/lib/auth';
+import { rateLimit } from '@/lib/rate-limit';
 
 export async function PUT(request) {
+  const auth = await requireAuth(request);
+  if (!auth.ok) return auth.response;
+  const userId = Number(auth.session.id);
+
+  // Con una sesión válida se podía probar la contraseña actual tantas veces
+  // como se quisiera (bcrypt.compare más abajo). Cinco intentos por cuarto de
+  // hora bastan para un cambio legítimo y cierran ese oráculo.
+  const rl = rateLimit(request, {
+    scope: 'password-change',
+    key: `password-change:${userId}`,
+    limit: 5,
+    windowMs: 15 * 60_000,
+  });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: 'Demasiados intentos. Espera unos minutos e inténtalo de nuevo.' },
+      { status: 429 },
+    );
+  }
+
   try {
-    const token = request.cookies.get('token')?.value;
     const { currentPassword, newPassword } = await request.json();
-    
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: 'No autorizado' },
-        { status: 401 }
-      );
-    }
 
     if (!currentPassword || !newPassword) {
       return NextResponse.json(
@@ -29,16 +42,16 @@ export async function PUT(request) {
       );
     }
 
-    let decoded;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
-    } catch {
-      return NextResponse.json({ success: false, error: 'No autorizado' }, { status: 401 });
+    if (newPassword === currentPassword) {
+      return NextResponse.json(
+        { success: false, error: 'La nueva contraseña debe ser distinta de la actual' },
+        { status: 400 }
+      );
     }
 
     // Obtener contraseña actual
     const user = await sql`
-      SELECT contrasena FROM miembro WHERE id_miembro = ${decoded.id}
+      SELECT contrasena FROM miembro WHERE id_miembro = ${userId}
     `;
 
     if (!user || user.length === 0) {
@@ -62,14 +75,19 @@ export async function PUT(request) {
 
     // Actualizar contraseña
     await sql`
-      UPDATE miembro 
-      SET contrasena = ${hashedPassword} 
-      WHERE id_miembro = ${decoded.id}
+      UPDATE miembro
+      SET contrasena = ${hashedPassword},
+          updated_at = NOW()
+      WHERE id_miembro = ${userId}
     `;
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       success: true,
-      message: 'Contraseña actualizada correctamente'
+      // Aviso honesto: el JWT es autocontenido y dura 7 días, así que cambiar
+      // la contraseña NO expulsa a las sesiones ya abiertas en otros
+      // dispositivos. Hacerlo requiere una columna de versión de token en
+      // `miembro` que hoy no existe.
+      message: 'Contraseña actualizada correctamente. Las sesiones abiertas en otros dispositivos seguirán activas hasta que caduquen.',
     });
   } catch (error) {
     console.error('Error en cambio de contraseña:', error);

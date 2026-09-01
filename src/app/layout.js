@@ -57,7 +57,7 @@ export const metadata = {
 };
 
 export const viewport = {
-  themeColor: '#0f1014',
+  themeColor: '#1a1a1a',
   width: 'device-width',
   initialScale: 1,
 };
@@ -65,7 +65,7 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="es">
-      <body className={`${poppins.className} bg-gray-900 min-h-screen flex flex-col font-sans`}>
+      <body className={`${poppins.className} min-h-screen flex flex-col font-sans`}>
         <AppShell>{children}</AppShell>
       </body>
     </html>

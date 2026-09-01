@@ -1,10 +1,22 @@
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
+import {
+  ROLES_VALIDOS,
+  ESTADOS_VALIDOS,
+  motivoBloqueoUltimoAdmin,
+  normalizarRolConStaff,
+} from '@/lib/admin-guard';
 
 export async function GET(request) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
+
+  // Por defecto la lista NO incluye a los dados de baja. Antes los devolvía
+  // todos, así que tras "Eliminar" el miembro reaparecía intacto al recargar y
+  // el segundo intento respondía 409. `?incluirBajas=1` da la vista de papelera.
+  const { searchParams } = new URL(request.url);
+  const incluirBajas = searchParams.get('incluirBajas') === '1';
 
   let client;
   try {
@@ -33,11 +45,12 @@ export async function GET(request) {
       LEFT JOIN catalogo_carrera cc ON m.id_carrera = cc.id_carrera
       LEFT JOIN cuenta_plataforma cp ON m.id_miembro = cp.id_miembro
       LEFT JOIN catalogo_plataforma p ON cp.id_plataforma = p.id_plataforma
+      WHERE ($1::boolean IS TRUE OR m.deleted_at IS NULL)
       GROUP BY m.id_miembro, cc.nombre
       ORDER BY m.nombre, m.apellido_paterno
     `;
     
-    const result = await client.query(query);
+    const result = await client.query(query, [incluirBajas]);
     
     const miembros = result.rows.map(row => ({
       ...row,
@@ -56,9 +69,6 @@ export async function GET(request) {
   }
 }
 
-
-const ROLES_VALIDOS = new Set(['administrador', 'usuario', 'staff']);
-const ESTADOS_VALIDOS = new Set(['activo', 'inactivo', 'baja']);
 
 // POST: promueve a administrador a un miembro existente, identificado por correo.
 // Lo usa el modal "Añadir Nuevo Administrador" de /admin/admins.
@@ -79,7 +89,7 @@ export async function POST(request) {
 
     const existing = await client.query(
       `SELECT m.id_miembro, m.nombre, m.apellido_paterno, m.apellido_materno,
-              m.correo_electronico, m.rol, cc.nombre AS carrera
+              m.correo_electronico, m.rol, m.estado, cc.nombre AS carrera
          FROM miembro m
          LEFT JOIN catalogo_carrera cc ON m.id_carrera = cc.id_carrera
         WHERE LOWER(m.correo_electronico) = LOWER($1)
@@ -99,6 +109,16 @@ export async function POST(request) {
     if (miembro.rol === 'administrador') {
       return NextResponse.json(
         { error: 'Este miembro ya es administrador' },
+        { status: 409 },
+      );
+    }
+
+    // Un miembro dado de baja no aparece en ningún listado del panel y el login
+    // lo rechaza: promoverlo creaba un administrador invisible que nadie podría
+    // localizar después para degradarlo. Primero se reactiva desde /admin/miembros.
+    if (miembro.estado === 'baja') {
+      return NextResponse.json(
+        { error: 'Este miembro está dado de baja. Reactívalo antes de hacerlo administrador.' },
         { status: 409 },
       );
     }
@@ -135,8 +155,14 @@ export async function PUT(request) {
 
   let client;
   try {
-    client = await connectWithRetry();
-    const { id_miembro, rol, estado } = await request.json();
+    // Cuerpo inválido = error del cliente (400), no un 500: sin el catch, un
+    // JSON malformado reventaba dentro del try y se reportaba como fallo del
+    // servidor, ocultando la causa real en los logs.
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Cuerpo de la petición no es JSON válido' }, { status: 400 });
+    }
+    const { id_miembro, rol, estado } = body;
 
     const idNum = Number(id_miembro);
     if (!Number.isInteger(idNum) || idNum <= 0) {
@@ -149,9 +175,25 @@ export async function PUT(request) {
       return NextResponse.json({ error: 'Estado inválido' }, { status: 400 });
     }
 
-    const checkRes = await client.query('SELECT id_miembro FROM miembro WHERE id_miembro = $1', [idNum]);
+    client = await connectWithRetry();
+    // En transacción con la fila bloqueada: cambiar rol o estado puede dejar al
+    // sistema sin administradores, y esa comprobación no vale nada si se hace
+    // sobre una lectura que otra petición puede invalidar antes del UPDATE.
+    await client.query('BEGIN');
+
+    const checkRes = await client.query(
+      'SELECT rol, estado FROM miembro WHERE id_miembro = $1 FOR UPDATE',
+      [idNum],
+    );
     if (checkRes.rowCount === 0) {
+      await client.query('ROLLBACK');
       return NextResponse.json({ error: 'Miembro no encontrado' }, { status: 404 });
+    }
+
+    const bloqueo = await motivoBloqueoUltimoAdmin(client, checkRes.rows[0], { rol, estado });
+    if (bloqueo) {
+      await client.query('ROLLBACK');
+      return NextResponse.json({ error: bloqueo }, { status: 400 });
     }
 
     const updates = [];
@@ -159,8 +201,11 @@ export async function PUT(request) {
     let queryIdx = 1;
 
     if (rol) {
+      // Un miembro con asignaciones en staff_evento no puede caer a 'usuario'
+      // sin romper el invariante que mantienen los endpoints de staff.
+      const rolEfectivo = await normalizarRolConStaff(client, idNum, rol);
       updates.push(`rol = $${queryIdx++}`);
-      values.push(rol);
+      values.push(rolEfectivo);
     }
 
     if (estado) {
@@ -186,11 +231,16 @@ export async function PUT(request) {
       `;
 
       const updateRes = await client.query(query, values);
+      await client.query('COMMIT');
       return NextResponse.json({ success: true, member: updateRes.rows[0] });
     }
 
+    await client.query('COMMIT');
     return NextResponse.json({ success: true, message: 'No data changed' });
   } catch (error) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch {}
+    }
     console.error('Error en PUT /api/admin/miembros:', error);
     return NextResponse.json({ error: 'Error al actualizar miembro' }, { status: 500 });
   } finally {
@@ -237,18 +287,12 @@ export async function DELETE(request) {
       return NextResponse.json({ error: 'El miembro ya está dado de baja' }, { status: 409 });
     }
 
-    // No permitir dar de baja al último administrador activo.
-    if (userToDelete.rol === 'administrador') {
-      const adminCountRes = await client.query(
-        "SELECT COUNT(*)::int AS count FROM miembro WHERE rol = 'administrador' AND estado = 'activo'",
-      );
-      if (adminCountRes.rows[0].count <= 1) {
-        await client.query('ROLLBACK');
-        return NextResponse.json(
-          { error: 'No se puede eliminar al último administrador del sistema.' },
-          { status: 400 },
-        );
-      }
+    // No permitir dar de baja al último administrador activo (misma regla y
+    // mismo mensaje que los dos endpoints de cambio de rol).
+    const bloqueo = await motivoBloqueoUltimoAdmin(client, userToDelete, { estado: 'baja' });
+    if (bloqueo) {
+      await client.query('ROLLBACK');
+      return NextResponse.json({ error: bloqueo }, { status: 400 });
     }
 
     await client.query(

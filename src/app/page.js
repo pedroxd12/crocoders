@@ -1,5 +1,6 @@
 import styles from './animation.module.css';
 import Image from 'next/image';
+import Link from 'next/link';
 import BongoCatKeyboard from '@/components/BongoCatKeyboard';
 import AnimatedSection from '@/components/AnimatedSection';
 import Footer from '@/components/Footer';
@@ -36,7 +37,7 @@ export default function Home() {
           <AnimatedSection className="w-full">
             <div className="flex flex-col md:flex-row items-center gap-6 md:gap-8 justify-center text-center md:text-left">
               <div className="flex-1">
-                <h1 className={`${styles.noOffset} ${styles.heroText} text-green-500`}>
+                <h1 className={`${styles.noOffset} ${styles.heroText} text-brand`}>
                   Crocoders
                 </h1>
                 <p className={styles.heroDescription}>
@@ -77,6 +78,31 @@ export default function Home() {
                 <h2 className={`${styles.noOffset} text-3xl md:text-6xl font-bold`}>Qué esperas,</h2>
                 <h2 className={`${styles.noOffset} text-3xl md:text-6xl font-bold`}>inicia ahora.</h2>
                 <p className={`${styles.heroDescription} text-base md:text-xl mt-4`}>Únete a nuestra comunidad y crece con nosotros.</p>
+
+                {/* La sección invitaba a "iniciar ahora" sin nada que pulsar: la
+                    única salida de la home era el icono de menú, que ni siquiera
+                    lleva etiqueta. Estos enlaces son la acción evidente para
+                    quien llega por primera vez. */}
+                <div className="mt-6 flex flex-col sm:flex-row items-center md:items-start justify-center md:justify-start gap-3">
+                  <Link
+                    href="/iniciar"
+                    className="inline-flex items-center justify-center rounded-lg bg-brand px-6 py-3 font-semibold text-bg transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                  >
+                    Únete al club
+                  </Link>
+                  <Link
+                    href="/eventos"
+                    className="inline-flex items-center justify-center rounded-lg border border-line-strong px-6 py-3 font-semibold text-fg transition-colors hover:bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                  >
+                    Ver próximos eventos
+                  </Link>
+                  <Link
+                    href="/programas"
+                    className="inline-flex items-center justify-center px-2 py-3 font-medium text-muted underline underline-offset-4 transition-colors hover:text-fg"
+                  >
+                    Talleres y programas
+                  </Link>
+                </div>
               </div>
               <div className="flex-1 w-full flex justify-center">
                 <BongoCatKeyboard />

@@ -7,6 +7,7 @@ import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { useAuth } from '@/context/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
+import { Skeleton } from '@/components/ui/Skeleton';
 import {
   LayoutDashboard,
   Users,
@@ -33,6 +34,21 @@ const NAV = [
   { href: '/admin/evidencias', label: 'Evidencias', icon: ImageIcon },
 ];
 
+// Espera de la verificación de sesión CON la forma del contenido real (título +
+// tabla). Antes esta espera borraba la pantalla entera, sidebar incluido.
+function EsqueletoContenido() {
+  return (
+    <div className="space-y-6" role="status" aria-label="Cargando sección">
+      <div className="flex items-center justify-between gap-4">
+        <Skeleton className="h-7 w-48" />
+        <Skeleton className="h-10 w-40" />
+      </div>
+      <Skeleton className="h-72 w-full rounded-xl" />
+      <span className="sr-only">Cargando sección…</span>
+    </div>
+  );
+}
+
 export default function AdminLayout({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const pathname = usePathname();
@@ -58,122 +74,132 @@ export default function AdminLayout({ children }) {
   const isProfileActive = pathname === '/admin/perfil' || pathname.startsWith('/admin/perfil/');
 
   return (
-    <ProtectedRoute adminOnly>
-      {/* h-screen (alto FIJO de viewport) + overflow-hidden: el scroll queda
-          confinado al <main> interno, así el sidebar permanece estático y no se
-          alarga con el contenido. */}
-      <div className="h-screen bg-[#1a1a1a] text-gray-100 flex relative overflow-hidden">
-        {/* Background Pattern */}
-        <div className="dot-pattern fixed inset-0 z-0 pointer-events-none" />
+    // h-screen (alto FIJO de viewport) + overflow-hidden: el scroll queda
+    // confinado al <main> interno, así el sidebar permanece estático y no se
+    // alarga con el contenido.
+    <div className="h-screen bg-bg text-fg flex relative overflow-hidden">
+      {/* Background Pattern */}
+      <div className="dot-pattern fixed inset-0 z-0 pointer-events-none" />
 
-        {/* Overlay para cerrar el sidebar en móvil */}
-        {isSidebarOpen && (
-          <div
-            className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+      {/* Overlay para cerrar el sidebar en móvil */}
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Sidebar (persistente). Se pinta SIEMPRE, también mientras se verifica
+          la sesión: es el marco de referencia del panel y hacerlo desaparecer
+          en cada navegación era la mitad de la sensación de lentitud. */}
+      <aside
+        className={`
+          fixed lg:static inset-y-0 left-0 z-40 w-64
+          bg-surface border-r border-line
+          flex flex-col
+          transform transition-transform duration-300 ease-in-out
+          ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+        `}
+      >
+        <div className="p-5 border-b border-line flex justify-between items-center gap-2">
+          <div className="min-w-0">
+            <p className="text-base font-semibold tracking-tight text-fg">Panel de administración</p>
+            <p className="text-xs text-muted mt-0.5 truncate">Club Crocoders</p>
+          </div>
+          <button
             onClick={() => setIsSidebarOpen(false)}
-            aria-hidden="true"
-          />
-        )}
+            className="lg:hidden p-2 text-muted hover:text-fg"
+            aria-label="Cerrar menú"
+          >
+            <X size={20} />
+          </button>
+        </div>
 
-        {/* Sidebar (persistente) */}
-        <aside
-          className={`
-            fixed lg:static inset-y-0 left-0 z-40 w-64
-            bg-gray-900/80 backdrop-blur-xl border-r border-white/10
-            flex flex-col
-            transform transition-transform duration-300 ease-in-out
-            ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-          `}
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+          {NAV.map((item) => {
+            const Icon = item.icon;
+            const active = isActive(item);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setIsSidebarOpen(false)}
+                aria-current={active ? 'page' : undefined}
+                className={`
+                  w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors
+                  ${active
+                    ? 'bg-brand-soft text-brand font-medium'
+                    : 'text-muted hover:text-fg hover:bg-surface-2'}
+                `}
+              >
+                <Icon size={18} aria-hidden="true" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="p-3 border-t border-line space-y-1">
+          <Link
+            href="/admin/perfil"
+            onClick={() => setIsSidebarOpen(false)}
+            className={`
+              w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors
+              ${isProfileActive ? 'bg-surface-2 text-fg' : 'text-muted hover:text-fg hover:bg-surface-2'}
+            `}
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-soft text-brand font-semibold text-sm">
+              {user?.nombre_completo?.charAt(0) || user?.email?.charAt(0) || 'A'}
+            </span>
+            <span className="flex-1 text-left overflow-hidden">
+              <span className="block text-sm font-medium truncate">
+                {user?.nombre_completo?.split(' ')[0] || 'Admin'}
+              </span>
+              <span className="block text-xs text-faint truncate">{user?.correo_electronico || user?.email}</span>
+            </span>
+          </Link>
+
+          <button
+            onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-muted hover:bg-danger-soft hover:text-danger transition-colors"
+          >
+            <LogOut size={18} aria-hidden="true" />
+            <span>Cerrar sesión</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Área de contenido (lo único que cambia al navegar) */}
+      <main className="flex-1 relative overflow-hidden z-10 flex flex-col">
+        {/* Header móvil con botón de menú */}
+        <header className="lg:hidden h-16 bg-surface border-b border-line flex items-center px-4 justify-between shrink-0">
+          <button
+            className="p-2 bg-surface-2 rounded-lg border border-line text-fg"
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            aria-label="Abrir menú"
+          >
+            <Menu size={24} />
+          </button>
+          <span className="font-semibold text-fg">Administración</span>
+          <div className="w-10" /> {/* Balance spacer */}
+        </header>
+
+        {/* data-scroll-lock: en /admin el <body> no scrollea nunca (el scroll
+            vive aquí dentro), así que Modal necesita saber cuál es el elemento
+            real que debe congelar al abrirse; si no, el fondo seguía moviéndose
+            bajo el diálogo. */}
+        <div
+          data-scroll-lock
+          className="flex-1 overflow-y-auto p-4 sm:p-6 max-w-7xl mx-auto w-full"
         >
-          <div className="p-6 border-b border-white/10 flex justify-between items-center">
-            <div>
-              <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-green-400 to-emerald-600">
-                Admin Panel
-              </h1>
-              <p className="text-xs text-gray-400 mt-1">Gestión Club Crocoders</p>
-            </div>
-            <button
-              onClick={() => setIsSidebarOpen(false)}
-              className="lg:hidden p-2 text-gray-400 hover:text-white"
-              aria-label="Cerrar menú"
-            >
-              <X size={20} />
-            </button>
-          </div>
-
-          <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-            {NAV.map((item) => {
-              const Icon = item.icon;
-              const active = isActive(item);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setIsSidebarOpen(false)}
-                  className={`
-                    w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200
-                    ${active
-                      ? 'bg-green-500/10 text-green-400 border border-green-500/20 shadow-lg shadow-green-500/10'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'}
-                  `}
-                >
-                  <Icon size={20} />
-                  <span className="font-medium">{item.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
-
-          <div className="p-4 border-t border-white/10 space-y-2">
-            <Link
-              href="/admin/perfil"
-              onClick={() => setIsSidebarOpen(false)}
-              className={`
-                w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200
-                ${isProfileActive
-                  ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                  : 'text-gray-400 hover:text-white hover:bg-white/5'}
-              `}
-            >
-              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-green-400 to-emerald-600 flex items-center justify-center text-black font-bold text-sm">
-                {user?.nombre_completo?.charAt(0) || user?.email?.charAt(0) || 'A'}
-              </div>
-              <div className="flex-1 text-left overflow-hidden">
-                <p className="text-sm font-medium truncate">{user?.nombre_completo?.split(' ')[0] || 'Admin'}</p>
-                <p className="text-xs text-gray-500 truncate">{user?.email}</p>
-              </div>
-            </Link>
-
-            <button
-              onClick={handleLogout}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
-            >
-              <LogOut size={20} />
-              <span className="font-medium">Cerrar Sesión</span>
-            </button>
-          </div>
-        </aside>
-
-        {/* Área de contenido (lo único que cambia al navegar) */}
-        <main className="flex-1 relative overflow-hidden z-10 flex flex-col">
-          {/* Header móvil con botón de menú */}
-          <header className="lg:hidden h-16 bg-gray-900/50 backdrop-blur-md border-b border-white/10 flex items-center px-4 justify-between shrink-0">
-            <button
-              className="p-2 bg-gray-800 rounded-lg border border-white/10 text-white"
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              aria-label="Abrir menú"
-            >
-              <Menu size={24} />
-            </button>
-            <span className="font-bold text-white">Admin Panel</span>
-            <div className="w-10" /> {/* Balance spacer */}
-          </header>
-
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 max-w-7xl mx-auto w-full">
+          {/* La protección envuelve sólo al contenido: el sidebar sigue en pie
+              mientras se verifica la sesión. */}
+          <ProtectedRoute adminOnly fallback={<EsqueletoContenido />}>
             {children}
-          </div>
-        </main>
-      </div>
-    </ProtectedRoute>
+          </ProtectedRoute>
+        </div>
+      </main>
+    </div>
   );
 }

@@ -1,31 +1,41 @@
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { query } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
+// Catálogos: cuatro tablas pequeñas y prácticamente inmutables que casi todas
+// las pantallas del panel piden al montar. Antes se leían en serie sobre un
+// mismo client (el tiempo era la suma de las cuatro) y sin ninguna cabecera de
+// caché, así que cada navegación las volvía a pedir enteras.
 export async function GET(request) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
 
-  let client;
   try {
-    client = await connectWithRetry();
+    const [tiposRes, alcancesRes, plataformasRes, rolesRes] = await Promise.all([
+      query('SELECT id_tipo_evento, nombre, permite_equipos FROM catalogo_tipo_evento ORDER BY nombre'),
+      query('SELECT id_alcance, nombre FROM catalogo_alcance_evento ORDER BY nombre'),
+      query('SELECT id_plataforma, nombre FROM catalogo_plataforma ORDER BY nombre'),
+      query('SELECT id_rol, nombre, puede_administrar, puede_editar, puede_ver FROM catalogo_rol_staff ORDER BY nombre'),
+    ]);
 
-    // Un solo client no admite queries concurrentes reales; se ejecutan en serie.
-    const tiposRes = await client.query('SELECT id_tipo_evento, nombre, permite_equipos FROM catalogo_tipo_evento ORDER BY nombre');
-    const alcancesRes = await client.query('SELECT id_alcance, nombre FROM catalogo_alcance_evento ORDER BY nombre');
-    const plataformasRes = await client.query('SELECT id_plataforma, nombre FROM catalogo_plataforma ORDER BY nombre');
-    const rolesRes = await client.query('SELECT id_rol, nombre, puede_administrar, puede_editar, puede_ver FROM catalogo_rol_staff ORDER BY nombre');
-
-    return NextResponse.json({
-      tipos: tiposRes.rows,
-      alcances: alcancesRes.rows,
-      plataformas: plataformasRes.rows,
-      roles: rolesRes.rows,
-    });
+    return NextResponse.json(
+      {
+        tipos: tiposRes.rows,
+        alcances: alcancesRes.rows,
+        plataformas: plataformasRes.rows,
+        roles: rolesRes.rows,
+      },
+      {
+        headers: {
+          // `private`: la respuesta va detrás de requireAdmin, no debe tocarla
+          // ninguna CDN compartida. Un minuto de caché de navegador convierte
+          // en instantáneo el segundo montaje de cualquier formulario del panel.
+          'Cache-Control': 'private, max-age=60, stale-while-revalidate=300',
+        },
+      },
+    );
   } catch (error) {
     console.error('Error fetching catalogs:', error);
     return NextResponse.json({ error: 'Error al obtener catálogos' }, { status: 500 });
-  } finally {
-    if (client) client.release();
   }
 }

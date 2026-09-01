@@ -19,13 +19,12 @@ const PUBLIC_PATHS = [
   '/favicon.ico',
 ];
 
+// Sólo prefijos de PÁGINA y de recursos estáticos. Aquí había además una lista
+// de prefijos `/api/...` que no hacía nada: el `matcher` de abajo excluye `api`
+// por completo, así que el proxy nunca llega a ver una petición de API. Tenerlos
+// escritos hacía creer que este archivo protegía los endpoints; la autorización
+// de las APIs vive en cada ruta (requireAuth / requireAdmin de src/lib/auth.js).
 const PUBLIC_PATH_PREFIXES = [
-  '/api/auth/',
-  '/api/eventos/',
-  '/api/programas/',
-  '/api/uploadthing/',
-  '/api/evidencias/',
-  '/api/puntajes',
   '/eventos/',
   '/programas/',
   '/evidencia/',
@@ -77,13 +76,27 @@ export async function proxy(request) {
 
   // Manejar rutas públicas
   if (isPublicPath(pathname)) {
-    // Redirigir usuarios autenticados que intentan acceder a login/registro
-    if (token && (pathname === '/iniciar' || pathname === '/')) {
+    // Redirigir a quien ya tiene sesión y abre la pantalla de acceso.
+    //
+    // La home ('/') NO entra aquí: es una página pública como cualquier otra y
+    // expulsar de ella a todo usuario con sesión dejaba el enlace "Inicio" del
+    // menú inalcanzable para los miembros.
+    if (token && pathname === '/iniciar') {
       try {
         const user = await verifyToken(token);
         if (user) {
+          // `?registerEvent=N` viene de pulsar "Participar" en un evento y la
+          // propia pantalla de /iniciar sabe completar el registro cuando ya hay
+          // sesión (iniciar/page.js:172). Redirigir aquí descartaba el
+          // parámetro y el registro al evento se perdía por el camino.
+          if (request.nextUrl.searchParams.has('registerEvent')) {
+            return NextResponse.next();
+          }
+          // El resto de parámetros (p. ej. `from`) se conservan.
           const redirectUrl = user.role === ROLES.ADMIN ? '/admin' : '/dashboard';
-          return NextResponse.redirect(new URL(redirectUrl, request.url));
+          return NextResponse.redirect(
+            new URL(`${redirectUrl}${request.nextUrl.search}`, request.url),
+          );
         }
       } catch (error) {
         console.error('Error verificando token:', error);

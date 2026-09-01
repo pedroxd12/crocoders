@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { connectWithRetry } from '@/lib/db-server';
 import { requireAuth } from '@/lib/auth';
 
 // GET - Obtener detalles de un evento como staff.
@@ -32,8 +32,28 @@ export async function GET(request, { params }) {
 
     // Obtener detalles del evento
     const eventoResult = await client.query(
-      `SELECT 
-        e.*,
+      // Columnas explícitas con los MISMOS alias que el endpoint de lista.
+      // Con `e.*` los campos llegaban como `descripcion_html` e
+      // `imagen_flyer_url`, pero la vista leía `descripcion` e `imagen_url`:
+      // el flyer no se pintaba nunca y bajo el título quedaba un párrafo vacío.
+      `SELECT
+        e.id_evento,
+        e.nombre,
+        e.descripcion_html AS descripcion,
+        to_char(e.fecha_inicio, 'YYYY-MM-DD') AS fecha_inicio,
+        to_char(e.fecha_fin,    'YYYY-MM-DD') AS fecha_fin,
+        -- El tipo time llega del driver ya como texto ("18:00:00"); el recorte
+        -- a "18:00" lo hace formatearHora() en la vista. Ver el comentario
+        -- equivalente en el endpoint de lista.
+        e.hora_inicio,
+        e.hora_fin,
+        e.ubicacion,
+        e.cupos,
+        e.cupos_disponibles,
+        e.estado,
+        e.tiene_costo,
+        e.costo,
+        e.imagen_flyer_url AS imagen_url,
         te.nombre as tipo_evento,
         ae.nombre as alcance,
         COUNT(DISTINCT ie.id_inscripcion) as total_inscritos,
@@ -43,7 +63,7 @@ export async function GET(request, { params }) {
       LEFT JOIN catalogo_tipo_evento te ON e.id_tipo_evento = te.id_tipo_evento
       LEFT JOIN catalogo_alcance_evento ae ON e.id_alcance = ae.id_alcance
       LEFT JOIN inscripcion_evento ie ON e.id_evento = ie.id_evento AND ie.estado <> 'cancelada'
-      WHERE e.id_evento = $1
+      WHERE e.id_evento = $1 AND e.deleted_at IS NULL
       GROUP BY e.id_evento, te.nombre, ae.nombre`,
       [id]
     );

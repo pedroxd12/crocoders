@@ -1,110 +1,121 @@
 // src/app/admin/evidencias/page.jsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
+import Image from 'next/image';
+import useSWR from 'swr';
 import { toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { ImageOff, Plus } from 'lucide-react';
+import { fetcher } from '@/lib/fetcher';
 import Modal from '@/components/ui/Modal';
-import Image from 'next/image';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import LoadingSpinner from '@/components/LoadingSpinner';
-import { UploadButton } from "@/utils/uploadthing";
+import Select from '@/components/ui/Select';
+import Textarea from '@/components/ui/Textarea';
+import Badge from '@/components/ui/Badge';
+import PageHeader from '@/components/ui/PageHeader';
+import EmptyState from '@/components/ui/EmptyState';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { UploadButton } from '@/utils/uploadthing';
+
+const DESTINOS = [
+  { key: 'evento', label: 'Eventos' },
+  { key: 'programa', label: 'Programas y talleres' },
+];
 
 export default function EvidenciasAdmin() {
   // Destino: 'evento' | 'programa'. El admin sube evidencias a uno u otro.
   const [targetType, setTargetType] = useState('evento');
-  const [eventos, setEventos] = useState([]);
-  const [programas, setProgramas] = useState([]);
-  const [evidencias, setEvidencias] = useState([]);
-  const [loading, setLoading] = useState({ targets: true, evidencias: false, upload: false, delete: false });
   // selected = { tipo, id, nombre } o null
   const [selected, setSelected] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [nombreEvidencia, setNombreEvidencia] = useState('');
   const [uploadedFileDetails, setUploadedFileDetails] = useState(null);
+  const [guardandoSubida, setGuardandoSubida] = useState(false);
   const [editing, setEditing] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  // Una evidencia concreta, no un flag global: antes borrar una convertía en
+  // spinner los botones "Eliminar" de TODAS las tarjetas a la vez.
+  const [aEliminar, setAEliminar] = useState(null);
+  const [eliminando, setEliminando] = useState(false);
 
-  useEffect(() => {
-    fetchTargets();
-  }, []);
+  // Eventos y programas por separado: que uno falle o tarde no deja el otro
+  // selector vacío, y ambas listas quedan en la caché compartida con el resto
+  // del panel.
+  const { data: eventosRaw, isLoading: cargandoEventos } = useSWR('/api/admin/eventos', fetcher, {
+    revalidateOnFocus: false,
+    onError: () => toast.error('No se pudieron cargar los eventos.'),
+  });
+  const { data: programasRaw, isLoading: cargandoProgramas } = useSWR('/api/admin/programas', fetcher, {
+    revalidateOnFocus: false,
+    onError: () => toast.error('No se pudieron cargar los programas.'),
+  });
 
-  // Al cambiar de tipo de destino, limpiar la selección actual.
-  useEffect(() => {
-    setSelected(null);
-    setEvidencias([]);
-  }, [targetType]);
-
-  useEffect(() => {
-    if (selected) fetchEvidencias(selected);
-    else setEvidencias([]);
-  }, [selected]);
-
-  const fetchTargets = async () => {
-    setLoading(prev => ({ ...prev, targets: true }));
-    // Cargar eventos y programas de forma INDEPENDIENTE: que uno lento o que
-    // falle no bloquee al otro (antes un Promise.all hacía que cualquier fallo
-    // dejara ambos selectores vacíos).
-    const [evResult, prResult] = await Promise.allSettled([
-      fetch('/api/admin/eventos').then(r => { if (!r.ok) throw new Error('eventos'); return r.json(); }),
-      fetch('/api/admin/programas').then(r => { if (!r.ok) throw new Error('programas'); return r.json(); }),
-    ]);
-
-    if (evResult.status === 'fulfilled') {
-      const evData = evResult.value;
-      setEventos((Array.isArray(evData) ? evData : []).map(ev => ({
+  const eventos = useMemo(
+    () =>
+      (Array.isArray(eventosRaw) ? eventosRaw : []).map((ev) => ({
         id: ev.id_evento,
         nombre: ev.nombre_evento ?? ev.nombre,
         fecha: ev.fecha ?? ev.fecha_inicio,
-      })));
-    } else {
-      toast.error('No se pudieron cargar los eventos.');
-    }
+      })),
+    [eventosRaw],
+  );
 
-    if (prResult.status === 'fulfilled') {
-      const prData = prResult.value;
-      setProgramas((Array.isArray(prData) ? prData : []).map(pr => ({
+  const programas = useMemo(
+    () =>
+      (Array.isArray(programasRaw) ? programasRaw : []).map((pr) => ({
         id: pr.id_programa,
         nombre: pr.nombre,
         fecha: pr.fecha_inicio,
-      })));
-    } else {
-      toast.error('No se pudieron cargar los programas.');
-    }
-
-    setLoading(prev => ({ ...prev, targets: false }));
-  };
-
-  const fetchEvidencias = async (target) => {
-    setLoading(prev => ({ ...prev, evidencias: true }));
-    try {
-      const qs = target.tipo === 'evento' ? `evento=${target.id}` : `programa=${target.id}`;
-      const res = await fetch(`/api/evidencias?${qs}`);
-      if (!res.ok) throw new Error('Error al cargar evidencias');
-      setEvidencias(await res.json());
-    } catch (error) {
-      toast.error(error.message);
-    } finally {
-      setLoading(prev => ({ ...prev, evidencias: false }));
-    }
-  };
+      })),
+    [programasRaw],
+  );
 
   const opciones = targetType === 'evento' ? eventos : programas;
+  const cargandoOpciones = targetType === 'evento' ? cargandoEventos : cargandoProgramas;
+
+  const evidenciasKey = selected
+    ? `/api/evidencias?${selected.tipo === 'evento' ? 'evento' : 'programa'}=${selected.id}`
+    : null;
+  const {
+    data: evidencias = [],
+    isLoading: cargandoEvidencias,
+    mutate: refrescarEvidencias,
+  } = useSWR(evidenciasKey, fetcher, {
+    keepPreviousData: false,
+    revalidateOnFocus: false,
+    onError: (e) => toast.error(e.message || 'Error al cargar evidencias'),
+  });
+
+  const cambiarDestino = (key) => {
+    setTargetType(key);
+    setSelected(null);
+  };
 
   const handleSelectChange = (e) => {
     const id = e.target.value;
-    if (!id) { setSelected(null); return; }
-    const item = opciones.find(o => o.id.toString() === id);
+    if (!id) {
+      setSelected(null);
+      return;
+    }
+    const item = opciones.find((o) => String(o.id) === id);
     if (item) setSelected({ tipo: targetType, id: item.id, nombre: item.nombre });
   };
 
-  const handleSaveEvidenceWithUploadThing = async () => {
+  const resetUploadModal = () => {
+    setShowUploadModal(false);
+    setNombreEvidencia('');
+    setUploadedFileDetails(null);
+  };
+
+  const handleSaveEvidence = async () => {
     if (!selected || !uploadedFileDetails) {
       toast.error('Selecciona un destino y sube una imagen.');
       return;
     }
-    setLoading(prev => ({ ...prev, upload: true }));
+    setGuardandoSubida(true);
     try {
       const payload = {
         // Enviar id_evento o id_programa según el destino (el backend exige XOR).
@@ -123,31 +134,37 @@ export default function EvidenciasAdmin() {
         throw new Error(err.error || 'Error al guardar la evidencia');
       }
       const nueva = await res.json();
-      setEvidencias(prev => [...prev, nueva]);
+      // Se añade la nueva a lo que ya hay en pantalla y se revalida detrás: la
+      // rejilla no parpadea a vacío tras subir.
+      await refrescarEvidencias((actuales = []) => [...actuales, nueva], { revalidate: true });
       toast.success('Evidencia guardada correctamente');
       resetUploadModal();
     } catch (error) {
       toast.error(`Error al guardar evidencia: ${error.message}`);
     } finally {
-      setLoading(prev => ({ ...prev, upload: false }));
+      setGuardandoSubida(false);
     }
   };
 
-  const handleDelete = async (id_evidencia) => {
-    if (!confirm('¿Eliminar esta evidencia? Esta acción no se puede deshacer.')) return;
-    setLoading(prev => ({ ...prev, delete: true }));
+  const confirmarEliminacion = async () => {
+    if (!aEliminar) return;
+    setEliminando(true);
     try {
-      const res = await fetch(`/api/evidencias/${id_evidencia}`, { method: 'DELETE' });
+      const res = await fetch(`/api/evidencias/${aEliminar.id_evidencia}`, { method: 'DELETE' });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Error al eliminar evidencia');
       }
-      setEvidencias(prev => prev.filter(e => e.id_evidencia !== id_evidencia));
+      await refrescarEvidencias(
+        (actuales = []) => actuales.filter((e) => e.id_evidencia !== aEliminar.id_evidencia),
+        { revalidate: true },
+      );
       toast.success('Evidencia eliminada correctamente');
+      setAEliminar(null);
     } catch (error) {
       toast.error(error.message);
     } finally {
-      setLoading(prev => ({ ...prev, delete: false }));
+      setEliminando(false);
     }
   };
 
@@ -163,7 +180,10 @@ export default function EvidenciasAdmin() {
 
   const handleSaveEdit = async () => {
     if (!editing) return;
-    if (!editing.titulo.trim()) { toast.error('El título no puede estar vacío.'); return; }
+    if (!editing.titulo.trim()) {
+      toast.error('El título no puede estar vacío.');
+      return;
+    }
     setSavingEdit(true);
     try {
       const res = await fetch(`/api/evidencias/${editing.id_evidencia}`, {
@@ -181,9 +201,12 @@ export default function EvidenciasAdmin() {
         throw new Error(err.error || 'Error al actualizar evidencia');
       }
       const actualizada = await res.json();
-      setEvidencias(prev =>
-        prev.map(e => (e.id_evidencia === actualizada.id_evidencia ? actualizada : e))
-          .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0))
+      await refrescarEvidencias(
+        (actuales = []) =>
+          actuales
+            .map((e) => (e.id_evidencia === actualizada.id_evidencia ? actualizada : e))
+            .sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0)),
+        { revalidate: true },
       );
       toast.success('Evidencia actualizada');
       setEditing(null);
@@ -194,135 +217,165 @@ export default function EvidenciasAdmin() {
     }
   };
 
-  const resetUploadModal = () => {
-    setShowUploadModal(false);
-    setNombreEvidencia('');
-    setUploadedFileDetails(null);
-  };
+  const opcionesSelect = opciones.map((o) => ({
+    value: String(o.id),
+    label: `${o.nombre}${o.fecha ? ` — ${new Date(o.fecha).toLocaleDateString('es-MX')}` : ''}`,
+  }));
 
   return (
-    <div className="p-4 md:p-6">
-      <h2 className="text-2xl font-bold mb-6 text-green-400">Gestión de Evidencias</h2>
-
-      {/* Selector de tipo de destino: Evento o Programa */}
-      <div className="mb-4 flex gap-2">
-        {[
-          { key: 'evento', label: 'Eventos' },
-          { key: 'programa', label: 'Programas / Talleres' },
-        ].map(t => (
-          <button
-            key={t.key}
-            onClick={() => setTargetType(t.key)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              targetType === t.key
-                ? 'bg-green-600 text-white'
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mb-6">
-        <label className="block text-gray-300 mb-2">
-          {targetType === 'evento' ? 'Seleccionar Evento:' : 'Seleccionar Programa:'}
-        </label>
-        <select
-          className="w-full bg-gray-700 border border-gray-600 rounded p-2.5 text-white focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
-          value={selected?.id || ''}
-          onChange={handleSelectChange}
-          disabled={loading.targets}
-        >
-          <option value="">
-            {targetType === 'evento' ? '-- Selecciona un evento --' : '-- Selecciona un programa --'}
-          </option>
-          {loading.targets ? (
-            <option disabled>Cargando...</option>
-          ) : (
-            opciones.map(o => (
-              <option key={o.id} value={o.id}>
-                {o.nombre}{o.fecha ? ` - ${new Date(o.fecha).toLocaleDateString('es-ES')}` : ''}
-              </option>
-            ))
-          )}
-        </select>
-        {!loading.targets && opciones.length === 0 && (
-          <p className="text-sm text-gray-500 mt-2">
-            No hay {targetType === 'evento' ? 'eventos' : 'programas'} disponibles.
-          </p>
-        )}
-      </div>
-
-      {selected && (
-        <div className="bg-gray-800 rounded-lg p-4 md:p-6 shadow-lg">
-          <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-            <h3 className="text-xl font-semibold">
-              Evidencias para: <span className="text-green-400">{selected.nombre}</span>
-            </h3>
-            <Button onClick={() => setShowUploadModal(true)} variant="primary" disabled={loading.evidencias || loading.targets}>
-              + Añadir Evidencia
+    <div className="space-y-6">
+      <PageHeader
+        title="Evidencias"
+        description="Fotografías publicadas en la galería de cada evento o programa."
+        actions={
+          selected ? (
+            <Button onClick={() => setShowUploadModal(true)}>
+              <Plus size={16} aria-hidden="true" />
+              Añadir evidencia
             </Button>
-          </div>
+          ) : null
+        }
+      />
 
-          {loading.evidencias ? (
-            <div className="text-center py-12"><LoadingSpinner text="Cargando evidencias..." /></div>
-          ) : evidencias.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {evidencias.map(evidencia => (
-                <div key={evidencia.id_evidencia} className="bg-gray-700 rounded-lg overflow-hidden shadow-lg hover:shadow-xl transition-shadow">
-                  <div className="relative h-48 w-full">
-                    <Image
-                      src={evidencia.imagen_url}
-                      alt={evidencia.nombre || 'Evidencia'}
-                      fill
-                      className="object-cover"
-                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                      onError={(e) => e.target.src = '/placeholder-event.jpg'}
-                    />
-                  </div>
-                  <div className="p-4">
-                    <h4 className="font-medium mb-1 truncate" title={evidencia.nombre}>{evidencia.nombre || 'Evidencia sin nombre'}</h4>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs text-gray-500">Orden: {evidencia.orden ?? 0}</span>
-                      {evidencia.publica === false && (
-                        <span className="text-xs bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">Oculta</span>
-                      )}
-                    </div>
-                    <p className="text-gray-400 text-sm mb-3">Subido: {new Date(evidencia.fecha).toLocaleString('es-ES')}</p>
-                    <div className="flex justify-end gap-2">
-                      <Button onClick={() => openEdit(evidencia)} variant="text" size="sm">Editar</Button>
-                      <Button onClick={() => handleDelete(evidencia.id_evidencia)} variant="text" color="red" size="sm" disabled={loading.delete}>
-                        {loading.delete ? <LoadingSpinner size="sm" /> : 'Eliminar'}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="bg-gray-700/50 rounded-lg p-8 text-center border border-gray-600">
-              <p className="text-gray-400 mb-4">No hay evidencias para {selected.tipo === 'evento' ? 'este evento' : 'este programa'}.</p>
-              <Button onClick={() => setShowUploadModal(true)} variant="primary">Subir primera evidencia</Button>
-            </div>
-          )}
+      {/* Selector de tipo de destino */}
+      <div className="flex flex-wrap items-end gap-4">
+        <div
+          className="inline-flex rounded-lg border border-line bg-surface-2 p-1"
+          role="tablist"
+          aria-label="Tipo de destino"
+        >
+          {DESTINOS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={targetType === t.key}
+              onClick={() => cambiarDestino(t.key)}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                targetType === t.key ? 'bg-surface text-fg' : 'text-muted hover:text-fg'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
+
+        <Select
+          label={targetType === 'evento' ? 'Evento' : 'Programa'}
+          value={selected ? String(selected.id) : ''}
+          onChange={handleSelectChange}
+          options={opcionesSelect}
+          placeholder={cargandoOpciones ? 'Cargando…' : `Selecciona un ${targetType}`}
+          disabled={cargandoOpciones}
+          wrapperClassName="w-full sm:w-96"
+          help={
+            !cargandoOpciones && opciones.length === 0
+              ? `No hay ${targetType === 'evento' ? 'eventos' : 'programas'} disponibles.`
+              : undefined
+          }
+        />
+      </div>
+
+      {!selected ? (
+        <EmptyState
+          icon={ImageOff}
+          title="Selecciona un destino"
+          description="Elige un evento o programa para ver y gestionar sus evidencias."
+        />
+      ) : cargandoEvidencias ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-72 rounded-xl" />
+          ))}
+        </div>
+      ) : evidencias.length > 0 ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {evidencias.map((evidencia) => (
+            <article
+              key={evidencia.id_evidencia}
+              className="overflow-hidden rounded-xl border border-line bg-surface"
+            >
+              <div className="relative h-44 w-full bg-surface-2">
+                <Image
+                  src={evidencia.imagen_url}
+                  alt={evidencia.nombre || 'Evidencia'}
+                  fill
+                  className="object-cover"
+                  sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+                />
+              </div>
+              <div className="p-4">
+                <h3 className="truncate text-sm font-medium text-fg" title={evidencia.nombre}>
+                  {evidencia.nombre || 'Evidencia sin nombre'}
+                </h3>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-faint">Orden {evidencia.orden ?? 0}</span>
+                  {evidencia.publica === false && <Badge tone="warning" size="sm">Oculta</Badge>}
+                </div>
+                <p className="mt-1 text-xs text-muted">
+                  Subida el {new Date(evidencia.fecha).toLocaleDateString('es-MX')}
+                </p>
+                <div className="mt-3 flex justify-end gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => openEdit(evidencia)}>
+                    Editar
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    color="red"
+                    size="sm"
+                    onClick={() => setAEliminar(evidencia)}
+                  >
+                    Eliminar
+                  </Button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <EmptyState
+          icon={ImageOff}
+          title={`Sin evidencias para "${selected.nombre}"`}
+          description="Sube la primera fotografía para que aparezca en la galería pública."
+          action={
+            <Button onClick={() => setShowUploadModal(true)}>
+              <Plus size={16} aria-hidden="true" />
+              Subir primera evidencia
+            </Button>
+          }
+        />
       )}
 
-      <Modal isOpen={showUploadModal} onClose={resetUploadModal} title={`Subir Evidencia para ${selected?.nombre || ''}`}>
+      <Modal
+        isOpen={showUploadModal}
+        onClose={resetUploadModal}
+        title="Subir evidencia"
+        description={selected?.nombre}
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={resetUploadModal} disabled={guardandoSubida}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveEvidence} loading={guardandoSubida} disabled={!uploadedFileDetails}>
+              Guardar evidencia
+            </Button>
+          </>
+        }
+      >
         <div className="space-y-4">
           <Input
-            label="Nombre o descripción (opcional):"
+            label="Nombre o descripción"
             type="text"
             value={nombreEvidencia}
             onChange={(e) => setNombreEvidencia(e.target.value)}
             placeholder="Ej: Premiación del concurso"
             maxLength={100}
-            className="bg-gray-700 border-gray-600 focus:border-green-500"
+            help="Opcional. Si lo dejas vacío se usa el nombre del archivo."
           />
 
           <div>
-            <label className="block text-gray-300 mb-2">Archivo de Imagen:</label>
+            <p className="mb-1.5 block text-sm font-medium text-muted">Archivo de imagen</p>
             <UploadButton
               endpoint="evidenciaUploader"
               onClientUploadComplete={(res) => {
@@ -332,26 +385,42 @@ export default function EvidenciasAdmin() {
                 }
               }}
               onUploadError={(error) => toast.error(`Error al subir: ${error.message}`)}
-              className="mt-1 ut-button:bg-green-600 ut-button:ut-hover:bg-green-700 ut-button:text-slate-50 ut-allowed-content:text-gray-400"
+              className="ut-button:bg-brand ut-button:text-bg ut-button:text-sm ut-allowed-content:text-faint"
             />
             {uploadedFileDetails && (
-              <div className="mt-3">
-                <p className="text-sm text-green-400">Imagen lista: {uploadedFileDetails.name}</p>
-                <Image src={uploadedFileDetails.url} alt="Previsualización" width={100} height={100} className="rounded mt-1 border border-gray-600" />
+              <div className="mt-3 flex items-center gap-3">
+                <Image
+                  src={uploadedFileDetails.url}
+                  alt="Previsualización"
+                  width={64}
+                  height={64}
+                  className="rounded-lg border border-line object-cover"
+                />
+                <p className="text-sm text-muted">
+                  Lista para guardar: <span className="text-fg">{uploadedFileDetails.name}</span>
+                </p>
               </div>
             )}
-          </div>
-
-          <div className="flex justify-end gap-3 pt-3">
-            <Button type="button" onClick={resetUploadModal} variant="secondary" disabled={loading.upload}>Cancelar</Button>
-            <Button onClick={handleSaveEvidenceWithUploadThing} variant="primary" disabled={loading.upload || !uploadedFileDetails}>
-              {loading.upload ? <LoadingSpinner size="sm" /> : 'Guardar Evidencia'}
-            </Button>
           </div>
         </div>
       </Modal>
 
-      <Modal isOpen={!!editing} onClose={() => setEditing(null)} title="Editar Evidencia">
+      <Modal
+        isOpen={!!editing}
+        onClose={() => setEditing(null)}
+        title="Editar evidencia"
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setEditing(null)} disabled={savingEdit}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveEdit} loading={savingEdit}>
+              Guardar cambios
+            </Button>
+          </>
+        }
+      >
         {editing && (
           <div className="space-y-4">
             <Input
@@ -360,46 +429,53 @@ export default function EvidenciasAdmin() {
               value={editing.titulo}
               onChange={(e) => setEditing({ ...editing, titulo: e.target.value })}
               maxLength={255}
-              className="bg-gray-700 border-gray-600 focus:border-green-500"
+              required
             />
-            <div>
-              <label className="block text-gray-300 mb-2 text-sm">Descripción (opcional):</label>
-              <textarea
-                value={editing.descripcion}
-                onChange={(e) => setEditing({ ...editing, descripcion: e.target.value })}
-                maxLength={2000}
-                rows={3}
-                className="w-full bg-gray-700 border border-gray-600 rounded p-2.5 text-white focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none"
-              />
-            </div>
-            <div className="flex gap-4">
+            <Textarea
+              label="Descripción"
+              value={editing.descripcion}
+              onChange={(e) => setEditing({ ...editing, descripcion: e.target.value })}
+              maxLength={2000}
+              rows={3}
+              help="Opcional. Se muestra bajo la imagen en la galería pública."
+            />
+            <div className="flex flex-wrap items-end gap-6">
               <Input
                 label="Orden"
                 type="number"
                 min={0}
                 value={editing.orden}
                 onChange={(e) => setEditing({ ...editing, orden: e.target.value })}
-                className="bg-gray-700 border-gray-600 focus:border-green-500 w-28"
+                wrapperClassName="w-28"
+                help="Menor primero"
               />
-              <label className="flex items-center gap-2 text-gray-300 text-sm mt-7">
+              <label className="flex items-center gap-2 pb-2 text-sm text-muted">
                 <input
                   type="checkbox"
                   checked={editing.publica}
                   onChange={(e) => setEditing({ ...editing, publica: e.target.checked })}
-                  className="h-4 w-4 accent-green-500"
+                  className="h-4 w-4 accent-brand"
                 />
                 Visible al público
               </label>
             </div>
-            <div className="flex justify-end gap-3 pt-3">
-              <Button type="button" onClick={() => setEditing(null)} variant="secondary" disabled={savingEdit}>Cancelar</Button>
-              <Button onClick={handleSaveEdit} variant="primary" disabled={savingEdit}>
-                {savingEdit ? <LoadingSpinner size="sm" /> : 'Guardar Cambios'}
-              </Button>
-            </div>
           </div>
         )}
       </Modal>
+
+      <ConfirmDialog
+        isOpen={!!aEliminar}
+        onClose={() => (eliminando ? null : setAEliminar(null))}
+        onConfirm={confirmarEliminacion}
+        loading={eliminando}
+        title={`¿Eliminar "${aEliminar?.nombre || 'esta evidencia'}"?`}
+        message="Se borra la fotografía del sistema y del almacenamiento."
+        consequences={[
+          'Desaparece de la galería pública del evento o programa.',
+          'El archivo de imagen se elimina y el enlace deja de funcionar.',
+        ]}
+        confirmLabel="Eliminar evidencia"
+      />
     </div>
   );
 }

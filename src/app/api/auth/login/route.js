@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { connectWithRetry } from '@/lib/db-server';
 import bcrypt from 'bcryptjs';
-import { createToken } from '@/lib/auth';
+import { createToken, COOKIE_SESION, DURACION_SESION_SEGUNDOS } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 
 // Hash dummy precomputado (cost 12, valor irrelevante) para igualar el costo de
@@ -15,6 +15,15 @@ const DUMMY_HASH = '$2a$12$CwTycUXWue0Thq9StjUM0uJ8U.HRZ8kIfMz9p3FvGz4PIK1H1RXja
 // correo, donde rotar de IP evadiría el primero).
 const LIMITE_POR_IP = { limit: 20, windowMs: 15 * 60 * 1000 };
 const LIMITE_POR_CUENTA = { limit: 10, windowMs: 15 * 60 * 1000 };
+
+// Respuesta única para "no existe" y "contraseña incorrecta": no se debe poder
+// distinguir un correo registrado de uno que no lo está.
+function credencialesInvalidas() {
+  return NextResponse.json(
+    { success: false, error: 'Credenciales inválidas' },
+    { status: 401 },
+  );
+}
 
 function demasiadosIntentos(resetAt) {
   return NextResponse.json(
@@ -36,14 +45,18 @@ export async function POST(request) {
       !correo_electronico || typeof correo_electronico !== 'string' ||
       !contrasena || typeof contrasena !== 'string'
     ) {
-      return NextResponse.json(
-        { success: false, error: 'Credenciales inválidas' },
-        { status: 200 }
-      );
+      return credencialesInvalidas();
     }
 
+    // El registro guarda el correo ya normalizado (zod: .trim().toLowerCase()),
+    // así que buscarlo tal cual lo tecleó el usuario fallaba en cuanto el móvil
+    // autocapitalizaba la primera letra: la cuenta existía y el login decía
+    // "credenciales inválidas". La misma clave normalizada se usa en el rate
+    // limit por cuenta para que cambiar mayúsculas no regale intentos extra.
+    const emailNormalizado = correo_electronico.trim().toLowerCase();
+
     const rlCuenta = rateLimit(request, {
-      key: `login:cuenta:${correo_electronico.trim().toLowerCase()}`,
+      key: `login:cuenta:${emailNormalizado}`,
       ...LIMITE_POR_CUENTA,
     });
     if (!rlCuenta.allowed) return demasiadosIntentos(rlCuenta.resetAt);
@@ -57,30 +70,35 @@ export async function POST(request) {
         { status: 503 }
       );
     }
-    
+
     let userData = null;
 
     try {
-      // Buscar usuario en la nueva tabla miembro
-      // Nota: El rol/tipo ya no existe en la tabla miembro segun el nuevo esquema.
-      // Se asignará 'usuario' por defecto, o se podría implementar una lógica basada en una lista de administradores.
+      // Dar de baja a un miembro desde el panel es un borrado LÓGICO
+      // (estado='baja' + deleted_at). Sin este filtro, "eliminar" a alguien no
+      // le quitaba el acceso y, si era administrador, recuperaba el panel
+      // entero al volver a entrar.
+      // Se filtra por estado <> 'baja' y no por estado = 'activo': 'inactivo' y
+      // 'egresado' son miembros que siguen teniendo cuenta.
       const result = await client.query(`
-        SELECT 
+        SELECT
           id_miembro,
-          nombre, 
+          nombre,
           apellido_paterno,
-          correo_electronico, 
+          correo_electronico,
           contrasena,
           rol
-        FROM miembro 
+        FROM miembro
         WHERE correo_electronico = $1
+          AND deleted_at IS NULL
+          AND estado <> 'baja'
         LIMIT 1
-      `, [correo_electronico]);
+      `, [emailNormalizado]);
 
       userData = result.rows[0] || null;
     } catch (dbError) {
       console.error('💥 Error de base de datos en login:', dbError);
-      
+
       // Manejo específico de errores de conexión
       if (['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(dbError.code)) {
         return NextResponse.json(
@@ -88,7 +106,7 @@ export async function POST(request) {
           { status: 503 }
         );
       }
-      
+
       return NextResponse.json(
         { success: false, error: 'Error al verificar credenciales' },
         { status: 500 }
@@ -103,10 +121,7 @@ export async function POST(request) {
     );
 
     if (!userData || !passwordMatch) {
-      return NextResponse.json(
-        { success: false, error: 'Credenciales inválidas' },
-        { status: 200 },
-      );
+      return credencialesInvalidas();
     }
 
     // Rol viene siempre de la base de datos. No hay fallback por email.
@@ -133,20 +148,18 @@ export async function POST(request) {
       redirectTo: normalizedRole === 'administrador' ? '/admin' : '/dashboard'
     });
 
+    // Los atributos viven en COOKIE_SESION para que login y logout no puedan
+    // divergir (ver src/lib/auth.js).
     response.cookies.set({
-      name: 'token',
+      ...COOKIE_SESION,
       value: token,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7 // 1 semana
+      maxAge: DURACION_SESION_SEGUNDOS,
     });
 
     return response;
   } catch (error) {
     console.error('💥 Error en login:', error);
-    
+
     // Manejo específico de errores de conexión
     if (['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(error.code)) {
       return NextResponse.json(
@@ -154,7 +167,7 @@ export async function POST(request) {
         { status: 503 }
       );
     }
-    
+
     return NextResponse.json(
       { success: false, error: 'Error en el inicio de sesión' },
       { status: 500 }

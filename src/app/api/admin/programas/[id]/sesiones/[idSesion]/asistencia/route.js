@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 // GET - Lista de inscritos al programa con su asistencia a ESTA sesión.
@@ -37,7 +37,11 @@ export async function GET(request, { params }) {
       LEFT JOIN invitado i ON ip.id_invitado = i.id_invitado
       LEFT JOIN asistencia_miembro  am ON am.id_miembro  = ip.id_miembro  AND am.id_sesion = $2
       LEFT JOIN asistencia_invitado ai ON ai.id_invitado = ip.id_invitado AND ai.id_sesion = $2
-      WHERE ip.id_programa = $1
+      -- Los cancelados NO se listan: el PUT de más abajo los rechaza con 409, así
+      -- que aparecer aquí solo servía para que el check no se marcara nunca.
+      -- Para volver a incluir a alguien, el panel tiene "Inscribir usuario",
+      -- que reactiva la inscripción cancelada.
+      WHERE ip.id_programa = $1 AND ip.estado <> 'cancelada'
       ORDER BY nombre_completo`,
       [id, idSesion],
     );

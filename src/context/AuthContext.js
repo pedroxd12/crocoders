@@ -1,7 +1,7 @@
 // context/authContext.js
 'use client';
 
-import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { loginUser, logoutUser, getUserData, registerUser } from '@/lib/db-client';
 import { APP_ROLES, isAdminRole, isMemberRole } from '@/lib/roles';
@@ -44,14 +44,27 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
+  // Páginas desde las que tiene sentido expulsar a quien ya tiene sesión.
+  // '/' NO está en la lista: es la portada pública del sitio, no una pantalla de
+  // acceso. Tenerla aquí hacía imposible ver la home con la sesión iniciada (se
+  // veía un parpadeo y saltaba a /admin o /dashboard). '/registro' tampoco
+  // existe como ruta: el registro es una vista dentro de /iniciar.
   const redirectUser = useCallback((user) => {
     if (!user || !pathname) return;
-    
-    const authPages = ['/iniciar', '/registro', '/'];
-    if (authPages.includes(pathname)) {
-      const redirectPath = user.role === ROLES.ADMIN ? '/admin' : '/dashboard';
-      router.replace(redirectPath);
-    }
+
+    const authPages = ['/iniciar'];
+    if (!authPages.includes(pathname)) return;
+
+    // Si /iniciar lleva parámetros (`?registerEvent=N`, `?from=…`, `?recovery=1`)
+    // la propia pantalla tiene un flujo que terminar y navega ella misma:
+    // inscribir al evento y volver con `?registered=true`, o respetar el `from`.
+    // Redirigir desde aquí desmontaba /iniciar con el POST de inscripción todavía
+    // en vuelo. El proxy hace la misma excepción con `registerEvent`
+    // (src/proxy.js), así que ambas capas se comportan igual.
+    if (typeof window !== 'undefined' && window.location.search) return;
+
+    const redirectPath = user.role === ROLES.ADMIN ? '/admin' : '/dashboard';
+    router.replace(redirectPath);
   }, [pathname, router]);
 
   // Fetch del perfil una sola vez al montar el provider.
@@ -88,17 +101,22 @@ export function AuthProvider({ children }) {
     redirectUser(user);
   }, [pathname, user, loading, redirectUser]);
 
-  const login = async (email, password) => {
+  // login/register NO redirigen: quien llama decide a dónde va (la pantalla de
+  // /iniciar tiene que poder completar antes la inscripción a un evento). Antes
+  // el router.replace de aquí competía con esa redirección y, según el momento,
+  // desmontaba la pantalla con el POST de inscripción todavía en vuelo.
+  const login = useCallback(async (email, password) => {
     try {
-      const response = await loginUser({ 
-        correo_electronico: email, 
-        contrasena: password 
+      const response = await loginUser({
+        // El servidor normaliza igual; se manda ya limpio para que el intento no
+        // se gaste por una mayúscula del autocorrector del móvil.
+        correo_electronico: String(email || '').trim().toLowerCase(),
+        contrasena: password
       });
 
       if (response?.success && response.user) {
         const normalizedUser = normalizeUser(response.user);
         setUser(normalizedUser);
-        redirectUser(normalizedUser);
         return { success: true, user: normalizedUser };
       } else {
         throw new Error(response?.error || 'Error en la autenticación');
@@ -107,9 +125,9 @@ export function AuthProvider({ children }) {
       console.error('Login error:', error);
       return { success: false, error: error.message };
     }
-  };
+  }, [normalizeUser]);
 
-  const register = async (userData) => {
+  const register = useCallback(async (userData) => {
     try {
       const response = await registerUser(userData);
 
@@ -117,7 +135,6 @@ export function AuthProvider({ children }) {
         if (response.user) {
           const normalizedUser = normalizeUser(response.user);
           setUser(normalizedUser);
-          redirectUser(normalizedUser);
           return { success: true, user: normalizedUser };
         }
         // Caso: Registro exitoso pero requiere login manual
@@ -127,14 +144,14 @@ export function AuthProvider({ children }) {
       }
     } catch (error) {
       console.error('Register error:', error);
-      return { 
-        success: false, 
-        error: error.message || 'Ocurrió un error durante el registro' 
+      return {
+        success: false,
+        error: error.message || 'Ocurrió un error durante el registro'
       };
     }
-  };
+  }, [normalizeUser]);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await logoutUser();
       setUser(null);
@@ -146,7 +163,7 @@ export function AuthProvider({ children }) {
       router.replace('/iniciar');
       return { success: false, error: error.message };
     }
-  };
+  }, [router]);
 
   const updateUser = useCallback((updatedData) => {
     setUser(prev => {
@@ -159,21 +176,32 @@ export function AuthProvider({ children }) {
     });
   }, [normalizeUser]);
 
-  const value = {
+  // isAdmin/isMember/hasCompleteProfile se mantienen como FUNCIONES porque así
+  // las llaman sus consumidores (ProtectedRoute hace `isAdmin()`), pero se
+  // memorizan: antes eran funciones nuevas en cada render, y como ProtectedRoute
+  // lista `isAdmin` en las dependencias de su efecto, ese efecto se disparaba
+  // sin parar aunque no hubiera cambiado nada.
+  const isAdmin = useCallback(() => isAdminRole(user?.role), [user]);
+  const isMember = useCallback(() => !!user?.id_miembro && isMemberRole(user?.role), [user]);
+  const hasCompleteProfile = useCallback(() => {
+    if (!user) return false;
+    return !!user.nombre_completo && !!user.correo_electronico && !!user.id_miembro;
+  }, [user]);
+
+  // Sin este useMemo el objeto del contexto cambiaba de identidad en cada render
+  // del provider y arrastraba a re-renderizarse a TODOS los consumidores.
+  const value = useMemo(() => ({
     user,
     loading,
     login,
     register,
     logout,
     updateUser,
-    isAdmin: () => isAdminRole(user?.role),
+    isAdmin,
     isAuthenticated: !!user,
-    isMember: () => !!user?.id_miembro && isMemberRole(user?.role),
-    hasCompleteProfile: () => {
-      if (!user) return false;
-      return !!user.nombre_completo && !!user.correo_electronico && !!user.id_miembro;
-    }
-  };
+    isMember,
+    hasCompleteProfile,
+  }), [user, loading, login, register, logout, updateUser, isAdmin, isMember, hasCompleteProfile]);
 
   return (
     <AuthContext.Provider value={value}>

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { COOKIE_SESION } from '@/lib/auth';
 
 export async function POST() {
   try {
@@ -7,12 +8,14 @@ export async function POST() {
       message: 'Sesión cerrada correctamente'
     });
 
-    // Eliminar la cookie
+    // Se borra con EXACTAMENTE los mismos atributos con los que la fijó el
+    // login (COOKIE_SESION). Antes se reescribía sin httpOnly/secure/sameSite:
+    // funcionaba de milagro y cualquier cambio futuro de atributos en el login
+    // habría dejado de cerrar la sesión en silencio.
     response.cookies.set({
-      name: 'token',
+      ...COOKIE_SESION,
       value: '',
-      expires: new Date(0),
-      path: '/'
+      maxAge: 0,
     });
 
     return response;

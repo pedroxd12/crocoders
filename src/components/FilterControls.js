@@ -1,50 +1,53 @@
 'use client';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { ChevronDown, Filter, X, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const tiposEvento = [
-  { value: 'todos', label: 'Todos los tipos' },
-  { value: 'conferencia', label: 'Conferencia' },
-  { value: 'curso', label: 'Curso' },
-  { value: 'concurso', label: 'Concurso' },
-  { value: 'reunion', label: 'Reunión' }
-];
-
+// El estado (próximos/pasados/todos) sí es un catálogo cerrado: lo calcula la
+// propia página, no la base de datos.
 const estadosEvento = [
   { value: 'proximos', label: 'Próximos' },
   { value: 'pasados', label: 'Pasados' },
   { value: 'todos', label: 'Todos' }
 ];
 
-const hermandades = [
-  { value: 'todos', label: 'Todas las comunidades' },
-  { value: 'club de programación', label: 'Club de Programación' },
-  { value: 'computer society', label: 'Computer Society' }
-];
-
-export default function FilterControls({ filters, onFilterChange }) {
+/**
+ * `tipos` y `hermandades` llegan derivados de los eventos realmente cargados.
+ * Antes eran constantes escritas a mano en minúsculas y comparadas por igualdad
+ * estricta contra el nombre del catálogo de la BD: cualquier tipo nuevo (Taller,
+ * Hackathon) era imposible de filtrar, y bastaba una mayúscula distinta para
+ * que el filtro devolviera la lista vacía.
+ */
+export default function FilterControls({ filters, onFilterChange, tipos = [], hermandades = [] }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  
+  // Ids propios para enlazar cada <label> con su <select>: sin `htmlFor` los
+  // tres desplegables se anunciaban como "lista sin etiqueta" y pulsar el texto
+  // no daba el foco al control.
+  const idBase = useId();
+
+  const opcionesTipo = [{ value: 'todos', label: 'Todos los tipos' }, ...tipos.map(t => ({ value: t, label: t }))];
+  const opcionesHermandad = [
+    { value: 'todos', label: 'Todas las comunidades' },
+    ...hermandades.map(h => ({ value: h, label: h })),
+  ];
+
   // Función para mostrar chips de filtros activos
   const getActiveFilters = () => {
     const active = [];
-    
+
     if (filters.tipo && filters.tipo !== 'todos') {
-      const tipo = tiposEvento.find(t => t.value === filters.tipo);
-      active.push({ type: 'tipo', label: tipo?.label || filters.tipo });
+      active.push({ type: 'tipo', label: filters.tipo });
     }
-    
+
     if (filters.estado && filters.estado !== 'todos') {
       const estado = estadosEvento.find(e => e.value === filters.estado);
       active.push({ type: 'estado', label: estado?.label || filters.estado });
     }
-    
+
     if (filters.hermandad && filters.hermandad !== 'todos') {
-      const hermandad = hermandades.find(h => h.value === filters.hermandad);
-      active.push({ type: 'hermandad', label: hermandad?.label || filters.hermandad });
+      active.push({ type: 'hermandad', label: filters.hermandad });
     }
-    
+
     return active;
   };
   
@@ -166,10 +169,11 @@ export default function FilterControls({ filters, onFilterChange }) {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {/* Tipo de Evento */}
                   <div>
-                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                    <label htmlFor={`${idBase}-tipo`} className="block text-sm font-semibold text-gray-300 mb-2">
                       Tipo de Evento
                     </label>
                     <select
+                      id={`${idBase}-tipo`}
                       value={filters.tipo}
                       onChange={(e) => onFilterChange('tipo', e.target.value)}
                       className="w-full p-3 text-sm rounded-xl bg-gray-800/80 text-white 
@@ -178,7 +182,7 @@ export default function FilterControls({ filters, onFilterChange }) {
                                transition-all duration-200 cursor-pointer backdrop-blur-sm
                                hover:border-green-500/30"
                     >
-                      {tiposEvento.map(tipo => (
+                      {opcionesTipo.map(tipo => (
                         <option key={tipo.value} value={tipo.value}>
                           {tipo.label}
                         </option>
@@ -188,10 +192,11 @@ export default function FilterControls({ filters, onFilterChange }) {
 
                   {/* Estado */}
                   <div>
-                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                    <label htmlFor={`${idBase}-estado`} className="block text-sm font-semibold text-gray-300 mb-2">
                       Estado
                     </label>
                     <select
+                      id={`${idBase}-estado`}
                       value={filters.estado}
                       onChange={(e) => onFilterChange('estado', e.target.value)}
                       className="w-full p-3 text-sm rounded-xl bg-gray-800/80 text-white 
@@ -210,10 +215,11 @@ export default function FilterControls({ filters, onFilterChange }) {
 
                   {/* Comunidades */}
                   <div className="sm:col-span-2 lg:col-span-1">
-                    <label className="block text-sm font-semibold text-gray-300 mb-2">
+                    <label htmlFor={`${idBase}-hermandad`} className="block text-sm font-semibold text-gray-300 mb-2">
                       Comunidades
                     </label>
                     <select
+                      id={`${idBase}-hermandad`}
                       value={filters.hermandad}
                       onChange={(e) => onFilterChange('hermandad', e.target.value)}
                       className="w-full p-3 text-sm rounded-xl bg-gray-800/80 text-white 
@@ -222,7 +228,7 @@ export default function FilterControls({ filters, onFilterChange }) {
                                transition-all duration-200 cursor-pointer backdrop-blur-sm
                                hover:border-green-500/30"
                     >
-                      {hermandades.map(hermandad => (
+                      {opcionesHermandad.map(hermandad => (
                         <option key={hermandad.value} value={hermandad.value}>
                           {hermandad.label}
                         </option>

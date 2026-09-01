@@ -7,6 +7,14 @@ import { Send, CheckCircle, AlertCircle } from 'lucide-react';
 import styles from './page.module.css';
 import BongoCatKeyboard from '@/components/BongoCatKeyboard';
 
+const ERROR_GENERICO = 'Hubo un error al enviar el mensaje. Inténtalo de nuevo.';
+
+// Mismos topes que valida /api/contact: si el navegador no los aplica, el
+// servidor rechaza el mensaje entero después de haberlo escrito.
+const MAX_NOMBRE = 120;
+const MAX_ASUNTO = 200;
+const MAX_MENSAJE = 5000;
+
 export default function ContactPage() {
   const [formState, setFormState] = useState({
     name: '',
@@ -17,7 +25,12 @@ export default function ContactPage() {
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatus, setSubmitStatus] = useState(null); // 'success', 'error', null
-  
+  // El servidor sí explica por qué rechaza (límite de envíos, correo inválido,
+  // campos demasiado largos). Antes se descartaba y todo el mundo veía
+  // "inténtalo de nuevo", así que quien había agotado el límite reintentaba —
+  // y volvía a fallar.
+  const [errorMensaje, setErrorMensaje] = useState('');
+
   const handleChange = (e) => {
     setFormState({
       ...formState,
@@ -29,7 +42,8 @@ export default function ContactPage() {
     e.preventDefault();
     setIsSubmitting(true);
     setSubmitStatus(null);
-    
+    setErrorMensaje('');
+
     try {
       const response = await fetch('/api/contact', {
         method: 'POST',
@@ -39,16 +53,18 @@ export default function ContactPage() {
         body: JSON.stringify(formState),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
 
-      if (data.success) {
+      if (response.ok && data?.success) {
         setSubmitStatus('success');
         setFormState({ name: '', email: '', subject: '', message: '' });
       } else {
         setSubmitStatus('error');
+        setErrorMensaje(data?.error || ERROR_GENERICO);
       }
     } catch (error) {
       setSubmitStatus('error');
+      setErrorMensaje(ERROR_GENERICO);
     } finally {
       setIsSubmitting(false);
     }
@@ -102,7 +118,7 @@ export default function ContactPage() {
                     className={styles.errorMessage}
                 >
                     <AlertCircle size={20} />
-                    <span>Hubo un error al enviar el mensaje. Inténtalo de nuevo.</span>
+                    <span>{errorMensaje || ERROR_GENERICO}</span>
                 </motion.div>
               )}
 
@@ -115,6 +131,7 @@ export default function ContactPage() {
                   value={formState.name}
                   onChange={handleChange}
                   required
+                  maxLength={MAX_NOMBRE}
                   className={styles.input}
                   placeholder="Ej. Juan Pérez"
                 />
@@ -143,6 +160,7 @@ export default function ContactPage() {
                   value={formState.subject}
                   onChange={handleChange}
                   required
+                  maxLength={MAX_ASUNTO}
                   className={styles.input}
                   placeholder="¿Sobre qué quieres hablar?"
                 />
@@ -156,9 +174,15 @@ export default function ContactPage() {
                   value={formState.message}
                   onChange={handleChange}
                   required
+                  maxLength={MAX_MENSAJE}
+                  aria-describedby="message-contador"
                   className={styles.textarea}
                   placeholder="Escribe tu mensaje aquí..."
                 />
+                {/* El tope se ve mientras se escribe, no al recibir el rechazo. */}
+                <p id="message-contador" className={styles.contador}>
+                  {formState.message.length} / {MAX_MENSAJE} caracteres
+                </p>
               </div>
 
               <button 

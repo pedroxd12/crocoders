@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 import { sanitizeHtml } from '@/lib/sanitize';
 
@@ -29,10 +29,24 @@ export async function GET(request) {
         t.nombre as tipo_nombre,
         a.id_alcance,
         a.nombre as alcance_nombre,
+        -- OJO: son dos unidades distintas y no deben compararse entre sí.
+        -- total_inscritos cuenta FILAS de inscripción; lugares_ocupados
+        -- cuenta LUGARES de aforo (un equipo es 1 inscripción y N lugares).
+        -- Mezclarlas es lo que hacía que el panel mostrara "147/150" junto a
+        -- "Inscritos: 1" para un equipo de tres.
         (
           SELECT COUNT(*) FROM inscripcion_evento
           WHERE id_evento = e.id_evento AND estado <> 'cancelada'
         ) as total_inscritos,
+        (
+          SELECT COALESCE(SUM(
+                   CASE WHEN ie.id_equipo IS NOT NULL
+                        THEN (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = ie.id_equipo)
+                        ELSE 1 END
+                 ), 0)::int
+          FROM inscripcion_evento ie
+          WHERE ie.id_evento = e.id_evento AND ie.estado <> 'cancelada'
+        ) as lugares_ocupados,
         -- Datos de concurso si aplica
         c.id_concurso,
         c.modalidad,

@@ -1,79 +1,134 @@
 'use client';
 
 import { useState, useEffect, useRef, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { User, Lock, Mail, Phone, Check, X, Shield, Globe, Info, ArrowLeft, Eye, EyeOff } from 'lucide-react';
-import Image from 'next/image';
+import { useSearchParams } from 'next/navigation';
+import {
+  User,
+  Mail,
+  Phone,
+  Check,
+  X,
+  Shield,
+  ArrowLeft,
+  ArrowRight,
+  Info,
+  Trophy,
+  BadgeCheck,
+} from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'react-toastify';
 import { motion, AnimatePresence } from 'framer-motion';
+import Input from '@/components/ui/Input';
+import Select from '@/components/ui/Select';
+import Button from '@/components/ui/Button';
+import { Skeleton } from '@/components/ui/Skeleton';
+import PasswordField, { fuerzaContrasena, FUERZA_MINIMA } from './components/PasswordField';
 import styles from './page.module.css';
 
+/* ---------------------------------------------------------------------------
+   Datos fijos, fuera del componente para no recrearlos en cada render.
+--------------------------------------------------------------------------- */
+
+const CARRERAS = [
+  'Ingeniería en Sistemas Computacionales',
+  'Ingeniería en Electrónica',
+  'Ingeniería Industrial',
+  'Ingeniería Química',
+  'Ingeniería en Logística',
+  'Ingeniería en Mecatrónica',
+  'Otra',
+];
+
+// La BD acepta 1..14 (miembro_semestre_actual_check) y el servidor valida
+// min(1).max(14). El desplegable ofrecía solo 1..10, así que un alumno de 11º
+// o más tenía que declarar un semestre falso.
+const SEMESTRES = Array.from({ length: 14 }, (_, i) => String(i + 1));
+
+const PASOS = [
+  { numero: 1, etiqueta: 'Afiliación' },
+  { numero: 2, etiqueta: 'Datos personales' },
+  { numero: 3, etiqueta: 'Cuenta y perfiles' },
+];
+
+const PLATAFORMAS = [
+  { campo: 'usuario_codeforces', etiqueta: 'Codeforces', placeholder: 'tu usuario en Codeforces' },
+  { campo: 'usuario_vjudge', etiqueta: 'VJudge', placeholder: 'tu usuario en VJudge' },
+  { campo: 'usuario_omegaup', etiqueta: 'OmegaUp', placeholder: 'tu usuario en omegaUp' },
+];
+
+const DATOS_REGISTRO_INICIALES = {
+  nombre: '',
+  apellido_paterno: '',
+  apellido_materno: '',
+  correo_electronico: '',
+  contrasena: '',
+  confirmar_contrasena: '',
+  numero_telefono: '',
+  usuario_codeforces: '',
+  usuario_vjudge: '',
+  usuario_omegaup: '',
+  semestre: '',
+  carrera: '',
+  // `carreraEsOtra` vive dentro del formulario a propósito: cuando era un
+  // useState aparte, resetForm() no lo tocaba y el desplegable se quedaba
+  // clavado en "Otra" después de un alta correcta.
+  carreraEsOtra: false,
+  es_computer_society: false,
+  es_club_programacion: false,
+  numero_ieee: '',
+};
+
+const validarEmail = (valor) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(valor).toLowerCase());
+const validarTelefono = (valor) => /^[0-9]{10,15}$/.test(valor);
+
+/** Banda de mensaje (error, éxito o información) con el mismo tono en todas las vistas. */
+function Aviso({ tipo = 'error', icono, children }) {
+  const clase =
+    tipo === 'exito' ? styles.avisoExito : tipo === 'info' ? styles.avisoInfo : styles.avisoError;
+  return (
+    <div className={`${styles.aviso} ${clase}`} role={tipo === 'error' ? 'alert' : 'status'}>
+      <span className={styles.avisoIcono}>{icono}</span>
+      <span>{children}</span>
+    </div>
+  );
+}
+
 function AuthContent() {
-  // Estados para login
+  // Login
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  
-  // Estados para registro
-  const [registerData, setRegisterData] = useState({
-    nombre: '',
-    apellido_paterno: '',
-    apellido_materno: '',
-    correo_electronico: '',
-    contrasena: '',
-    confirmar_contrasena: '',
-    numero_telefono: '',
-    usuario_codeforces: '',
-    usuario_vjudge: '',
-    usuario_omegaup: '',
-    semestre: '',
-    carrera: '',
-    es_computer_society: false,
-    es_club_programacion: false,
-    numero_ieee: ''
-  });
-  const [showRegisterPassword, setShowRegisterPassword] = useState(false);
-  const [showRegisterConfirmPassword, setShowRegisterConfirmPassword] = useState(false);
-  const [passwordsMatch, setPasswordsMatch] = useState(true);
-  const [showManualCarrera, setShowManualCarrera] = useState(false);
 
-  // Estados para recuperación
+  // Registro
+  const [registerData, setRegisterData] = useState(DATOS_REGISTRO_INICIALES);
+  const [paso, setPaso] = useState(1);
+  const [pasoMaximo, setPasoMaximo] = useState(1);
+
+  // Recuperación
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [tokenVerified, setTokenVerified] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
   const [sessionToken, setSessionToken] = useState('');
 
-  // Estados para vistas y mensajes
+  // Vistas y mensajes
   const [view, setView] = useState('auth');
   const [errors, setErrors] = useState({});
-  const [passwordStrength, setPasswordStrength] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isLogin, setIsLogin] = useState(true);
   const [successMessage, setSuccessMessage] = useState('');
 
-  const router = useRouter();
   const searchParams = useSearchParams();
   const { user, loading, login, register } = useAuth();
+  const tarjetaRef = useRef(null);
 
-  // Carreras disponibles
-  const carreras = [
-    'Ingeniería en Sistemas Computacionales',
-    'Ingeniería en Electrónica',
-    'Ingeniería Industrial',
-    'Ingeniería Química',
-    'Ingeniería en Logística',
-    'Ingeniería en Mecatrónica',
-    'Otra'
-  ];
+  const registerEvent = searchParams.get('registerEvent');
 
-  // Manejador de registro post-login (no se memoriza para no entrar en
-  // el array de deps del useEffect; usamos un ref para garantizar que se
-  // dispare una sola vez por sesión y evitar bucles).
+  // Inscribe al evento pendiente después de autenticarse. No se memoriza para
+  // no entrar en el array de deps del useEffect; el ref garantiza un solo
+  // disparo por sesión.
+  const postLoginHandledRef = useRef(false);
+
   const handlePostLoginRegistration = async (eventId, currentUser) => {
     try {
       if (!currentUser?.id) {
@@ -86,7 +141,7 @@ function AuthContent() {
         body: JSON.stringify({
           eventoId: eventId,
           userId: currentUser.id,
-          tipo: 'miembro'
+          tipo: 'miembro',
         }),
       });
 
@@ -99,16 +154,14 @@ function AuthContent() {
       window.location.href = `${fromPath}?registered=true&eventId=${eventId}`;
     } catch (error) {
       console.error('Error al registrar en evento:', error);
+      // Sin router.push: competía con el window.location.href del camino
+      // correcto y provocaba dos navegaciones peleándose.
       toast.error(`Error al registrar: ${error.message}`);
-      router.push(searchParams.get('from') || '/eventos');
     }
   };
 
-  const postLoginHandledRef = useRef(false);
-
   useEffect(() => {
     const recoveryParam = searchParams.get('recovery');
-    const registerEvent = searchParams.get('registerEvent');
 
     if (recoveryParam) {
       setView('recovery');
@@ -120,158 +173,220 @@ function AuthContent() {
       postLoginHandledRef.current = true;
       handlePostLoginRegistration(registerEvent, user);
     }
-    // handlePostLoginRegistration y router son estables; el ref evita doble disparo.
+    // handlePostLoginRegistration es estable; el ref evita el doble disparo.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, user, loading]);
+  }, [searchParams, user, loading, registerEvent]);
 
-  useEffect(() => {
-    if (registerData.contrasena && registerData.confirmar_contrasena) {
-      setPasswordsMatch(registerData.contrasena === registerData.confirmar_contrasena);
-    } else {
-      setPasswordsMatch(true);
+  /* -------------------------------------------------------------------------
+     Navegación entre vistas y pasos
+  ------------------------------------------------------------------------- */
+
+  // Cambiar de vista tiene que limpiar los mensajes: si no, el "Credenciales
+  // inválidas" del login seguía visible dentro de "Recuperar contraseña".
+  const goToView = (siguiente) => {
+    setErrors({});
+    setSuccessMessage('');
+    if (siguiente === 'auth' || siguiente === 'recovery') {
+      // Una recuperación abandonada no debe dejar vivo su token de sesión.
+      // Volver a "recovery" es "cambiar de correo": el código y el token del
+      // correo anterior ya no sirven y arrastrarlos solo produce un fallo de
+      // verificación confuso.
+      setVerificationCode('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setSessionToken('');
+      setTokenVerified(false);
     }
-  }, [registerData.contrasena, registerData.confirmar_contrasena]);
-
-  // Validaciones
-  const validateEmail = (email) => {
-    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return re.test(String(email).toLowerCase());
+    setView(siguiente);
   };
 
-  const validatePhone = (phone) => /^[0-9]{10,15}$/.test(phone);
-
-  const checkPasswordStrength = (password) => {
-    let strength = 0;
-    if (password.length >= 8) strength += 1;
-    if (/[A-Z]/.test(password)) strength += 1;
-    if (/[0-9]/.test(password)) strength += 1;
-    if (/[^A-Za-z0-9]/.test(password)) strength += 1;
-    return strength;
+  const cambiarPestana = (aLogin) => {
+    setIsLogin(aLogin);
+    setErrors({});
+    setSuccessMessage('');
   };
 
-  const validateForm = () => {
-    const newErrors = {};
-    const { 
-      nombre,
-      apellido_paterno,
-      correo_electronico, 
-      contrasena, 
-      confirmar_contrasena,
-      numero_telefono,
-      semestre,
-      carrera,
-      usuario_codeforces,
-      usuario_vjudge,
-      usuario_omegaup,
-      es_computer_society,
-      numero_ieee,
-      es_club_programacion
-    } = registerData;
+  const irAlInicioDeLaTarjeta = () => {
+    tarjetaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
-    if (!nombre) newErrors.nombre = 'Nombre es requerido';
-    if (!apellido_paterno) newErrors.apellido_paterno = 'Apellido paterno es requerido';
-    if (!correo_electronico) {
-      newErrors.correo_electronico = 'Email es requerido';
-    } else if (!validateEmail(correo_electronico)) {
-      newErrors.correo_electronico = 'Email no válido';
-    }
-    if (!contrasena) {
-      newErrors.contrasena = 'Contraseña es requerida';
-    }
-    if (!confirmar_contrasena) {
-      newErrors.confirmar_contrasena = 'Confirma tu contraseña';
-    } else if (contrasena !== confirmar_contrasena) {
-      newErrors.confirmar_contrasena = 'Las contraseñas no coinciden';
-    }
-    if (!numero_telefono) {
-        newErrors.numero_telefono = 'Número de teléfono es requerido';
-    } else if (!validatePhone(numero_telefono)) {
-      newErrors.numero_telefono = 'Teléfono no válido (10-15 dígitos)';
-    }
-    if (!semestre) newErrors.semestre = 'Semestre es requerido';
-    if (!carrera) newErrors.carrera = 'Carrera es requerida';
+  const resetForm = () => {
+    setRegisterData(DATOS_REGISTRO_INICIALES);
+    setErrors({});
+    setPaso(1);
+    setPasoMaximo(1);
+  };
 
-    if (!usuario_codeforces) newErrors.usuario_codeforces = 'Usuario de Codeforces es requerido';
-    if (!usuario_vjudge) newErrors.usuario_vjudge = 'Usuario de VJudge es requerido';
-    if (!usuario_omegaup) newErrors.usuario_omegaup = 'Usuario de OmegaUp es requerido';
+  /* -------------------------------------------------------------------------
+     Validación por pasos
+  ------------------------------------------------------------------------- */
 
-    if (es_computer_society) {
-      if (!numero_ieee) {
-        newErrors.numero_ieee = 'Número IEEE es requerido para miembros de Computer Society';
-      } else if (!/^\d+$/.test(numero_ieee)) {
-        newErrors.numero_ieee = 'El número IEEE debe contener solo números';
+  const validarPaso = (numero) => {
+    const e = {};
+    const d = registerData;
+
+    if (numero === 1) {
+      if (!d.es_club_programacion && !d.es_computer_society) {
+        e.afiliacion = 'Elige al menos una opción para continuar.';
       }
     }
 
-    if (!es_club_programacion && !es_computer_society) {
-      newErrors.afiliacion = 'Debes seleccionar una opción: Club, Capítulo o ambos.';
+    if (numero === 2) {
+      if (!d.nombre.trim()) e.nombre = 'Escribe tu nombre';
+      if (!d.apellido_paterno.trim()) e.apellido_paterno = 'Escribe tu apellido paterno';
+      if (!d.correo_electronico.trim()) {
+        e.correo_electronico = 'Escribe tu correo';
+      } else if (!validarEmail(d.correo_electronico)) {
+        e.correo_electronico = 'Ese correo no parece válido';
+      }
+      if (!d.numero_telefono.trim()) {
+        e.numero_telefono = 'Escribe tu teléfono';
+      } else if (!validarTelefono(d.numero_telefono)) {
+        e.numero_telefono = 'Deben ser entre 10 y 15 dígitos, sin espacios';
+      }
+      if (!d.semestre) e.semestre = 'Elige tu semestre';
+      if (!d.carrera.trim()) e.carrera = 'Indica tu carrera';
     }
 
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    if (numero === 3) {
+      if (!d.contrasena) {
+        e.contrasena = 'Escribe una contraseña';
+      } else if (d.contrasena.length < 8) {
+        e.contrasena = 'Debe tener al menos 8 caracteres';
+      } else if (fuerzaContrasena(d.contrasena) < FUERZA_MINIMA) {
+        // Misma regla que el restablecimiento: antes se podía crear una cuenta
+        // con una contraseña que luego el propio sitio rechazaba.
+        e.contrasena = 'Añade mayúsculas, números o símbolos: aún es fácil de adivinar';
+      }
+      if (!d.confirmar_contrasena) {
+        e.confirmar_contrasena = 'Repite la contraseña';
+      } else if (d.contrasena !== d.confirmar_contrasena) {
+        e.confirmar_contrasena = 'Las contraseñas no coinciden';
+      }
+
+      if (d.es_club_programacion) {
+        const algunPerfil = PLATAFORMAS.some(({ campo }) => d[campo].trim());
+        if (!algunPerfil) {
+          e.plataformas = 'Indica al menos un perfil para poder puntuar tu progreso.';
+        }
+      }
+
+      if (d.es_computer_society) {
+        if (!d.numero_ieee.trim()) {
+          e.numero_ieee = 'El número IEEE es obligatorio para el Capítulo';
+        } else if (!/^\d+$/.test(d.numero_ieee)) {
+          e.numero_ieee = 'El número IEEE solo puede contener dígitos';
+        }
+      }
+    }
+
+    return e;
   };
 
-  useEffect(() => {
-    if (registerData.contrasena) {
-      setPasswordStrength(checkPasswordStrength(registerData.contrasena));
-    } else {
-      setPasswordStrength(0);
-    }
-  }, [registerData.contrasena]);
+  const avanzarPaso = () => {
+    const e = validarPaso(paso);
+    setErrors(e);
+    if (Object.keys(e).length > 0) return;
 
-  const resetForm = () => {
-    setRegisterData({
-      nombre: '',
-      apellido_paterno: '',
-      apellido_materno: '',
-      correo_electronico: '',
-      contrasena: '',
-      confirmar_contrasena: '',
-      numero_telefono: '',
-      usuario_codeforces: '',
-      usuario_vjudge: '',
-      usuario_omegaup: '',
-      semestre: '',
-      carrera: '',
-      es_computer_society: false,
-      es_club_programacion: false,
-      numero_ieee: ''
-    });
+    const siguiente = Math.min(paso + 1, PASOS.length);
+    setPaso(siguiente);
+    setPasoMaximo((max) => Math.max(max, siguiente));
+    irAlInicioDeLaTarjeta();
+  };
+
+  const retrocederPaso = () => {
+    // Volver nunca valida ni borra: los datos escritos siguen en el estado.
     setErrors({});
-    setPasswordStrength(0);
-    setPasswordsMatch(true);
+    setPaso((p) => Math.max(1, p - 1));
+    irAlInicioDeLaTarjeta();
   };
+
+  const irAPaso = (numero) => {
+    if (numero > pasoMaximo) return;
+    setErrors({});
+    setPaso(numero);
+  };
+
+  /* -------------------------------------------------------------------------
+     Cambios de campo
+  ------------------------------------------------------------------------- */
+
+  const limpiarError = (...claves) => {
+    setErrors((prev) => {
+      const siguiente = { ...prev };
+      claves.forEach((clave) => delete siguiente[clave]);
+      delete siguiente.general;
+      return siguiente;
+    });
+  };
+
+  const handleRegisterChange = (e) => {
+    const { name, value } = e.target;
+
+    // El número IEEE solo admite dígitos: se filtra al teclear en vez de
+    // esperar al envío.
+    if (name === 'numero_ieee' && !/^\d*$/.test(value)) return;
+
+    setRegisterData((prev) => ({ ...prev, [name]: value }));
+    // Los tres perfiles comparten un único error ("indica al menos uno"), así
+    // que escribir en cualquiera de ellos lo retira.
+    if (name.startsWith('usuario_')) limpiarError(name, 'plataformas');
+    else limpiarError(name);
+  };
+
+  const handleCarreraChange = (e) => {
+    const valor = e.target.value;
+    if (valor === 'Otra') {
+      setRegisterData((prev) => ({ ...prev, carreraEsOtra: true, carrera: '' }));
+    } else {
+      setRegisterData((prev) => ({ ...prev, carreraEsOtra: false, carrera: valor }));
+    }
+    limpiarError('carrera');
+  };
+
+  const toggleAfiliacion = (campo) => {
+    setRegisterData((prev) => ({ ...prev, [campo]: !prev[campo] }));
+    limpiarError('afiliacion');
+  };
+
+  /* -------------------------------------------------------------------------
+     Envíos
+  ------------------------------------------------------------------------- */
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (isLoading) return; // corta el doble envío por doble clic
     setErrors({});
     setIsLoading(true);
-    
+
     try {
       if (!email || !password) {
-        throw new Error('Todos los campos son obligatorios');
+        throw new Error('Escribe tu correo y tu contraseña');
       }
 
-      if (!validateEmail(email)) {
-        throw new Error('Por favor ingresa un email válido');
+      if (!validarEmail(email)) {
+        throw new Error('Ese correo no parece válido');
       }
 
       const result = await login(email, password);
-      
-      setSuccessMessage(''); // Limpiar mensaje de éxito previo
-      
+
+      setSuccessMessage('');
+
       if (!result.success) {
         throw new Error(result.error || 'Contraseña incorrecta o usuario no encontrado');
       }
 
       toast.success('¡Inicio de sesión exitoso! Redirigiendo...');
 
-      const registerEvent = searchParams.get('registerEvent');
       if (registerEvent) {
+        // Marcar ANTES de llamar: login() actualiza el usuario del contexto y
+        // eso vuelve a ejecutar el useEffect de arriba, que disparaba una
+        // segunda inscripción al mismo evento en paralelo.
+        postLoginHandledRef.current = true;
         await handlePostLoginRegistration(registerEvent, result.user);
       } else {
-        const redirectPath = result.redirectTo || 
-                         (result.user?.role === 'administrador' ? '/admin' : '/dashboard');
+        const redirectPath =
+          result.redirectTo || (result.user?.role === 'administrador' ? '/admin' : '/dashboard');
         window.location.href = redirectPath;
       }
     } catch (err) {
@@ -284,13 +399,53 @@ function AuthContent() {
 
   const handleRegister = async (e) => {
     e.preventDefault();
-    if (!validateForm()) return;
-    
+    if (isLoading) return;
+
+    // Enter en un paso intermedio significa "continuar", no "enviar".
+    if (paso < PASOS.length) {
+      avanzarPaso();
+      return;
+    }
+
+    // Revalidación completa: si el usuario retrocedió y vació algo, el envío
+    // lo devuelve al paso culpable en lugar de fallar en el servidor.
+    for (const { numero } of PASOS) {
+      const erroresPaso = validarPaso(numero);
+      if (Object.keys(erroresPaso).length > 0) {
+        setErrors(erroresPaso);
+        setPaso(numero);
+        irAlInicioDeLaTarjeta();
+        return;
+      }
+    }
+
     setIsLoading(true);
     setErrors({});
-    
+
     try {
-      const result = await register(registerData);
+      const d = registerData;
+      // Payload explícito: `carreraEsOtra` es estado de la interfaz y no debe
+      // viajar al servidor. Los perfiles solo se envían si el usuario es del
+      // Club, y el número IEEE solo si es del Capítulo.
+      const payload = {
+        nombre: d.nombre.trim(),
+        apellido_paterno: d.apellido_paterno.trim(),
+        apellido_materno: d.apellido_materno.trim(),
+        correo_electronico: d.correo_electronico.trim(),
+        contrasena: d.contrasena,
+        confirmar_contrasena: d.confirmar_contrasena,
+        numero_telefono: d.numero_telefono.trim(),
+        semestre: d.semestre,
+        carrera: d.carrera.trim(),
+        es_club_programacion: d.es_club_programacion,
+        es_computer_society: d.es_computer_society,
+        numero_ieee: d.es_computer_society ? d.numero_ieee.trim() : null,
+        usuario_codeforces: d.es_club_programacion ? d.usuario_codeforces.trim() : '',
+        usuario_vjudge: d.es_club_programacion ? d.usuario_vjudge.trim() : '',
+        usuario_omegaup: d.es_club_programacion ? d.usuario_omegaup.trim() : '',
+      };
+
+      const result = await register(payload);
 
       if (!result.success) {
         throw new Error(result.error || 'Error al registrarse');
@@ -298,23 +453,21 @@ function AuthContent() {
 
       toast.success(result.message || '¡Registro exitoso! Por favor inicia sesión.');
       resetForm();
-      
-      const registerEvent = searchParams.get('registerEvent');
-      
+
       if (result.user) {
-        // Auto-login exitoso
         if (registerEvent) {
+          postLoginHandledRef.current = true;
           await handlePostLoginRegistration(registerEvent, result.user);
         } else {
           window.location.href = result.redirectTo || '/dashboard';
         }
       } else {
-        // Registro exitoso pero requiere login manual
-        setIsLogin(true); // Cambiar a vista de login
-        setSuccessMessage('¡Cuenta creada exitosamente! Por favor inicia sesión.');
-        
+        // Alta correcta pero hace falta iniciar sesión a mano.
+        setIsLogin(true);
+        setSuccessMessage('¡Cuenta creada! Ya puedes iniciar sesión.');
+
         if (registerEvent) {
-          toast.info('Por favor inicia sesión para completar tu registro al evento');
+          toast.info('Inicia sesión para completar tu registro al evento');
         }
       }
     } catch (err) {
@@ -326,16 +479,17 @@ function AuthContent() {
   };
 
   const handleRecoveryRequest = async (e) => {
-    e.preventDefault();
+    e?.preventDefault?.();
+    if (isLoading) return;
     setErrors({});
-    
+
     if (!recoveryEmail) {
-      setErrors({ recoveryEmail: 'Email es requerido' });
+      setErrors({ recoveryEmail: 'Escribe tu correo' });
       return;
     }
 
-    if (!validateEmail(recoveryEmail)) {
-      setErrors({ recoveryEmail: 'Email no válido' });
+    if (!validarEmail(recoveryEmail)) {
+      setErrors({ recoveryEmail: 'Ese correo no parece válido' });
       return;
     }
 
@@ -343,9 +497,7 @@ function AuthContent() {
     try {
       const response = await fetch('/api/auth/recovery', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: recoveryEmail }),
       });
 
@@ -355,7 +507,11 @@ function AuthContent() {
         throw new Error(data.error || 'Error al solicitar recuperación');
       }
 
-      toast.success('Se ha enviado un correo con instrucciones para restablecer tu contraseña. Por favor revisa tu bandeja de entrada.');
+      // El servidor responde igual exista o no la cuenta (para no filtrar qué
+      // correos están registrados). Por eso el mensaje es condicional: decir
+      // "se ha enviado un correo" era una promesa que el servidor no hace.
+      toast.info(data.message || 'Si la cuenta existe, recibirás un código en unos minutos.');
+      setErrors({});
       setView('verify-code');
     } catch (error) {
       toast.error(error.message || 'Error al solicitar recuperación');
@@ -367,47 +523,36 @@ function AuthContent() {
 
   const handleVerifyCode = async (e) => {
     e.preventDefault();
+    if (isLoading) return;
     setErrors({});
-    
-    // Validar formato del código (6 dígitos)
+
     if (!verificationCode || !/^\d{6}$/.test(verificationCode)) {
-      setErrors({ verificationCode: 'Por favor ingresa un código de 6 dígitos' });
+      setErrors({ verificationCode: 'El código son 6 dígitos' });
       return;
     }
-  
+
     setIsLoading(true);
     try {
       const response = await fetch('/api/auth/verify-token', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          email: recoveryEmail,
-          verificationCode 
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: recoveryEmail, verificationCode }),
       });
-  
+
       const data = await response.json();
-  
-      if (!response.ok) {
-        throw new Error(data.error || 'El código de verificación es inválido o ha expirado');
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'El código es inválido o ha expirado');
       }
-  
-      if (!data.success) {
-        throw new Error(data.error || 'Error al verificar el código');
-      }
-  
+
       setSessionToken(data.sessionToken);
       setTokenVerified(true);
+      setErrors({});
       setView('reset');
-      toast.success('Verificación exitosa. Ahora puedes establecer una nueva contraseña.');
+      toast.success('Código verificado. Ahora crea tu nueva contraseña.');
     } catch (error) {
       toast.error(error.message || 'Error al verificar el código');
-      setErrors({ 
-        general: error.message,
-        verificationCode: error.message.includes('código') ? error.message : undefined
-      });
+      setErrors({ verificationCode: error.message });
     } finally {
       setIsLoading(false);
     }
@@ -415,20 +560,25 @@ function AuthContent() {
 
   const handlePasswordReset = async (e) => {
     e.preventDefault();
+    if (isLoading) return;
     setErrors({});
 
-    if (!newPassword || !confirmNewPassword) {
-      setErrors({ general: 'Todos los campos son requeridos' });
-      return;
+    const erroresReset = {};
+    if (!newPassword) {
+      erroresReset.newPassword = 'Escribe la nueva contraseña';
+    } else if (newPassword.length < 8) {
+      erroresReset.newPassword = 'Debe tener al menos 8 caracteres';
+    } else if (fuerzaContrasena(newPassword) < FUERZA_MINIMA) {
+      erroresReset.newPassword = 'Añade mayúsculas, números o símbolos: aún es fácil de adivinar';
+    }
+    if (!confirmNewPassword) {
+      erroresReset.confirmNewPassword = 'Repite la nueva contraseña';
+    } else if (newPassword !== confirmNewPassword) {
+      erroresReset.confirmNewPassword = 'Las contraseñas no coinciden';
     }
 
-    if (newPassword !== confirmNewPassword) {
-      setErrors({ general: 'Las contraseñas no coinciden' });
-      return;
-    }
-
-    if (checkPasswordStrength(newPassword) < 3) {
-      setErrors({ general: 'La contraseña debe ser al menos moderadamente segura' });
+    if (Object.keys(erroresReset).length > 0) {
+      setErrors(erroresReset);
       return;
     }
 
@@ -438,12 +588,9 @@ function AuthContent() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${sessionToken}`
+          Authorization: `Bearer ${sessionToken}`,
         },
-        body: JSON.stringify({ 
-          newPassword,
-          email: recoveryEmail 
-        }),
+        body: JSON.stringify({ newPassword, email: recoveryEmail }),
       });
 
       const resetData = await resetResponse.json();
@@ -453,15 +600,17 @@ function AuthContent() {
       }
 
       const loginResponse = await login(recoveryEmail, newPassword);
-      
+
       if (!loginResponse.success) {
-        throw new Error(loginResponse.error || 'Contraseña actualizada pero falló el inicio de sesión automático');
+        throw new Error(
+          loginResponse.error || 'Contraseña actualizada pero falló el inicio de sesión automático'
+        );
       }
 
-      toast.success('¡Contraseña actualizada correctamente! Iniciando sesión...');
+      toast.success('¡Contraseña actualizada! Iniciando sesión...');
 
-      const registerEvent = searchParams.get('registerEvent');
       if (registerEvent) {
+        postLoginHandledRef.current = true;
         await handlePostLoginRegistration(registerEvent, loginResponse.user);
       } else {
         window.location.href = searchParams.get('from') || '/dashboard';
@@ -474,559 +623,431 @@ function AuthContent() {
     }
   };
 
-  const handleRegisterChange = (e) => {
-    const { name, value, type, checked } = e.target;
+  /* -------------------------------------------------------------------------
+     Piezas de interfaz
+  ------------------------------------------------------------------------- */
 
-    // Validación inmediata para número IEEE (solo números)
-    if (name === 'numero_ieee' && !/^\d*$/.test(value)) {
-      return;
-    }
-
-    setRegisterData(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value
-    }));
-    if (errors[name] || errors.afiliacion) {
-      setErrors(prev => {
-         const newErrors = { ...prev };
-         delete newErrors[name];
-         delete newErrors.afiliacion;
-         return newErrors;
-      });
-    }
-  };
-
-  const getPasswordStrengthColor = (strength) => {
-    switch(strength) {
-      case 0: return 'bg-gray-500';
-      case 1: return 'bg-red-500';
-      case 2: return 'bg-yellow-500';
-      case 3: return 'bg-blue-500';
-      case 4: return 'bg-green-500';
-      default: return 'bg-gray-500';
-    }
-  };
-
-  const getPasswordStrengthText = (strength) => {
-    switch(strength) {
-      case 0: return 'Muy débil';
-      case 1: return 'Débil';
-      case 2: return 'Moderada';
-      case 3: return 'Fuerte';
-      case 4: return 'Muy fuerte';
-      default: return '';
-    }
-  };
-
-  const renderAuthView = () => (
-    <div className="w-full">
-      <div className="flex justify-center mb-8">
-        <div className="flex space-x-1 bg-white/5 p-1 rounded-full border border-white/10 backdrop-blur-sm">
-          <button 
-            className={`px-6 py-2 rounded-full text-sm font-medium transition-all duration-300 ${isLogin ? 'bg-green-500 text-black shadow-lg shadow-green-500/20' : 'text-gray-400 hover:text-white'}`}
-            onClick={() => { setIsLogin(true); setErrors({}); }}
+  const renderStepper = () => (
+    <nav className={styles.stepper} aria-label="Progreso del registro">
+      {PASOS.map(({ numero, etiqueta }, indice) => {
+        const completado = numero < paso;
+        const actual = numero === paso;
+        const accesible = numero <= pasoMaximo && numero !== paso;
+        return (
+          <div
+            key={numero}
+            className={`${styles.stepItem} ${completado ? styles.stepDone : ''} ${
+              actual ? styles.stepCurrent : ''
+            }`}
           >
-            Iniciar sesión
-          </button>
-          <button 
-            className={`px-6 py-2 rounded-full text-sm font-medium transition-all duration-300 ${!isLogin ? 'bg-green-500 text-black shadow-lg shadow-green-500/20' : 'text-gray-400 hover:text-white'}`}
-            onClick={() => { setIsLogin(false); setErrors({}); }}
-          >
-            Registrarte
-          </button>
-        </div>
-      </div>
+            <button
+              type="button"
+              className={styles.stepButton}
+              data-clickable={accesible ? 'true' : 'false'}
+              onClick={() => accesible && irAPaso(numero)}
+              aria-current={actual ? 'step' : undefined}
+              aria-label={`Paso ${numero} de ${PASOS.length}: ${etiqueta}`}
+            >
+              <span className={styles.stepDot} aria-hidden="true">
+                {completado ? <Check size={14} /> : numero}
+              </span>
+              <span className={styles.stepLabel}>{etiqueta}</span>
+            </button>
+            {indice < PASOS.length - 1 && (
+              <span
+                className={`${styles.stepLine} ${completado ? styles.stepLineDone : ''}`}
+                aria-hidden="true"
+              />
+            )}
+          </div>
+        );
+      })}
+    </nav>
+  );
 
-      <div className="text-center mb-8">
-        <h2 className={styles.title}>
-            {isLogin ? 'Bienvenido' : 'Crear Cuenta'}
-        </h2>
-        <p className={styles.subtitle}>
-          {isLogin ? 'Inicia sesión para continuar' : 'Únete a la comunidad de Crocoders'}
+  const renderPasoAfiliacion = () => (
+    <div className={styles.form}>
+      <div>
+        <h3 className={styles.seccionTitulo}>¿Con quién participas?</h3>
+        <p className={styles.introTexto}>
+          Puedes marcar las dos si perteneces a ambas. Según lo que elijas te
+          pediremos unos datos u otros.
         </p>
       </div>
 
-      {errors.general && (
-        <motion.div 
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-6 p-4 bg-red-500/10 border border-red-500/50 rounded-xl text-red-400 text-sm flex items-center gap-3"
+      {errors.afiliacion && (
+        <Aviso icono={<X size={16} />}>{errors.afiliacion}</Aviso>
+      )}
+
+      <div className={styles.afiliacionGrid} role="group" aria-label="Afiliación">
+        <button
+          type="button"
+          onClick={() => toggleAfiliacion('es_club_programacion')}
+          aria-pressed={registerData.es_club_programacion}
+          className={`${styles.afiliacionCard} ${
+            registerData.es_club_programacion ? styles.afiliacionCardActiva : ''
+          }`}
         >
-          <X size={18} />
-          {errors.general}
-        </motion.div>
+          <span className={styles.afiliacionCheck} aria-hidden="true">
+            <Check size={14} />
+          </span>
+          <Trophy size={22} className={styles.afiliacionIcono} aria-hidden="true" />
+          <span className={styles.afiliacionTitulo}>Club de Programación</span>
+          <span className={styles.afiliacionTexto}>
+            Algoritmia y programación competitiva. Te pediremos tus perfiles en
+            las plataformas de práctica.
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => toggleAfiliacion('es_computer_society')}
+          aria-pressed={registerData.es_computer_society}
+          className={`${styles.afiliacionCard} ${
+            registerData.es_computer_society ? styles.afiliacionCardActiva : ''
+          }`}
+        >
+          <span className={styles.afiliacionCheck} aria-hidden="true">
+            <Check size={14} />
+          </span>
+          <BadgeCheck size={22} className={styles.afiliacionIcono} aria-hidden="true" />
+          <span className={styles.afiliacionTitulo}>Capítulo Computer Society</span>
+          <span className={styles.afiliacionTexto}>
+            Capítulo estudiantil IEEE. Te pediremos tu número de miembro IEEE.
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderPasoDatos = () => (
+    <div className={styles.form}>
+      <Input
+        label="Nombre"
+        name="nombre"
+        value={registerData.nombre}
+        onChange={handleRegisterChange}
+        error={errors.nombre}
+        icon={<User size={16} />}
+        placeholder="Juan"
+        autoComplete="given-name"
+        required
+      />
+
+      <div className={styles.grid}>
+        <Input
+          label="Apellido paterno"
+          name="apellido_paterno"
+          value={registerData.apellido_paterno}
+          onChange={handleRegisterChange}
+          error={errors.apellido_paterno}
+          placeholder="Pérez"
+          autoComplete="family-name"
+          required
+        />
+        <Input
+          label="Apellido materno"
+          name="apellido_materno"
+          value={registerData.apellido_materno}
+          onChange={handleRegisterChange}
+          placeholder="García"
+          help="Opcional"
+        />
+      </div>
+
+      <Input
+        label="Correo electrónico"
+        type="email"
+        name="correo_electronico"
+        value={registerData.correo_electronico}
+        onChange={handleRegisterChange}
+        error={errors.correo_electronico}
+        icon={<Mail size={16} />}
+        placeholder="tu@email.com"
+        autoComplete="email"
+        required
+      />
+
+      <Input
+        label="Número de teléfono"
+        type="tel"
+        name="numero_telefono"
+        value={registerData.numero_telefono}
+        onChange={handleRegisterChange}
+        error={errors.numero_telefono}
+        icon={<Phone size={16} />}
+        placeholder="1234567890"
+        inputMode="numeric"
+        autoComplete="tel"
+        required
+      />
+
+      <div className={styles.grid}>
+        <Select
+          label="Semestre actual"
+          name="semestre"
+          value={registerData.semestre}
+          onChange={handleRegisterChange}
+          options={SEMESTRES}
+          placeholder="Selecciona..."
+          error={errors.semestre}
+          required
+        />
+        <Select
+          label="Carrera"
+          name="carrera"
+          value={registerData.carreraEsOtra ? 'Otra' : registerData.carrera}
+          onChange={handleCarreraChange}
+          options={CARRERAS}
+          placeholder="Selecciona..."
+          error={registerData.carreraEsOtra ? undefined : errors.carrera}
+          required
+        />
+      </div>
+
+      {registerData.carreraEsOtra && (
+        <Input
+          label="¿Cuál es tu carrera?"
+          // `id` explícito: este campo comparte `name` con el <Select> de arriba
+          // (los dos escriben en `carrera`) y las primitivas derivan el id del
+          // name. Sin esto habría dos elementos con id="carrera" y el <label>
+          // "¿Cuál es tu carrera?" enfocaría el desplegable, no este campo.
+          id="carrera_otra"
+          name="carrera"
+          value={registerData.carrera}
+          onChange={handleRegisterChange}
+          error={errors.carrera}
+          placeholder="Escribe el nombre completo de tu carrera"
+          required
+        />
+      )}
+    </div>
+  );
+
+  const renderPasoCuenta = () => (
+    <div className={styles.form}>
+      <PasswordField
+        label="Contraseña"
+        name="contrasena"
+        value={registerData.contrasena}
+        onChange={handleRegisterChange}
+        error={errors.contrasena}
+        placeholder="Mínimo 8 caracteres"
+        showStrength
+        required
+      />
+
+      <PasswordField
+        label="Confirmar contraseña"
+        name="confirmar_contrasena"
+        value={registerData.confirmar_contrasena}
+        onChange={handleRegisterChange}
+        error={errors.confirmar_contrasena}
+        placeholder="Repite la contraseña"
+        required
+      />
+
+      {/* Estas secciones solo existen si la afiliación correspondiente está
+          marcada: nada de campos deshabilitados ni ocultos con CSS. */}
+      {registerData.es_club_programacion && (
+        <section className={styles.seccion}>
+          <h3 className={styles.seccionTitulo}>
+            <Trophy size={16} aria-hidden="true" /> Perfiles en plataformas
+          </h3>
+          <p className={styles.seccionTexto}>
+            Con ellos calculamos tu progreso en la tabla de posiciones. Basta con
+            uno para empezar y puedes añadir los demás más adelante desde tu
+            perfil.
+          </p>
+
+          {errors.plataformas && <Aviso icono={<X size={16} />}>{errors.plataformas}</Aviso>}
+
+          {PLATAFORMAS.map(({ campo, etiqueta, placeholder }) => (
+            <Input
+              key={campo}
+              label={etiqueta}
+              name={campo}
+              value={registerData[campo]}
+              onChange={handleRegisterChange}
+              placeholder={placeholder}
+              autoComplete="off"
+            />
+          ))}
+        </section>
+      )}
+
+      {registerData.es_computer_society && (
+        <section className={styles.seccion}>
+          <h3 className={styles.seccionTitulo}>
+            <BadgeCheck size={16} aria-hidden="true" /> Capítulo Computer Society
+          </h3>
+          <Input
+            label="Número IEEE"
+            name="numero_ieee"
+            value={registerData.numero_ieee}
+            onChange={handleRegisterChange}
+            error={errors.numero_ieee}
+            icon={<Shield size={16} />}
+            placeholder="Ej. 12345678"
+            inputMode="numeric"
+            help="Lo encuentras en tu credencial IEEE o en ieee.org › My Account › Membership."
+            required
+          />
+        </section>
+      )}
+    </div>
+  );
+
+  const renderRegisterForm = () => (
+    <motion.form
+      key="register"
+      initial={{ opacity: 0, x: 20 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -20 }}
+      onSubmit={handleRegister}
+      noValidate
+    >
+      {renderStepper()}
+
+      {errors.general && (
+        <div className="mb-4">
+          <Aviso icono={<X size={16} />}>{errors.general}</Aviso>
+        </div>
       )}
 
       <AnimatePresence mode="wait">
+        <motion.div
+          key={paso}
+          initial={{ opacity: 0, x: 12 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -12 }}
+          transition={{ duration: 0.18 }}
+        >
+          {paso === 1 && renderPasoAfiliacion()}
+          {paso === 2 && renderPasoDatos()}
+          {paso === 3 && renderPasoCuenta()}
+        </motion.div>
+      </AnimatePresence>
+
+      <div className={styles.navRow}>
+        {paso > 1 ? (
+          <Button type="button" variant="ghost" onClick={retrocederPaso}>
+            <ArrowLeft size={16} /> Atrás
+          </Button>
+        ) : (
+          <span />
+        )}
+
+        {/* Las `key` distintas son imprescindibles, no decorativas: sin ellas
+            React reconcilia los dos botones como el MISMO nodo del DOM y se
+            limita a cambiar `type` de "button" a "submit". Como el navegador
+            decide la acción por defecto del clic DESPUÉS de ejecutar los
+            manejadores, al avanzar al último paso el nodo ya era un submit y el
+            formulario se enviaba solo, mostrando los errores del paso 3 nada
+            más abrirlo. Con `key` React monta un botón nuevo y eso no ocurre. */}
+        {paso < PASOS.length ? (
+          <Button key="continuar" type="button" size="lg" onClick={avanzarPaso}>
+            Continuar <ArrowRight size={16} />
+          </Button>
+        ) : (
+          <Button key="crear-cuenta" type="submit" size="lg" loading={isLoading}>
+            Crear cuenta
+          </Button>
+        )}
+      </div>
+    </motion.form>
+  );
+
+  const renderAuthView = () => (
+    <div className="w-full">
+      {/* Control segmentado: son dos botones de alternancia, no pestañas ARIA
+          (unas pestañas exigirían un tabpanel con id, que aquí no existe). */}
+      <div className={styles.tabs} role="group" aria-label="Acceso">
+        <button
+          type="button"
+          aria-pressed={isLogin}
+          className={`${styles.tab} ${isLogin ? styles.tabActive : ''}`}
+          onClick={() => cambiarPestana(true)}
+        >
+          Iniciar sesión
+        </button>
+        <button
+          type="button"
+          aria-pressed={!isLogin}
+          className={`${styles.tab} ${!isLogin ? styles.tabActive : ''}`}
+          onClick={() => cambiarPestana(false)}
+        >
+          Registrarte
+        </button>
+      </div>
+
+      <div className={styles.header}>
+        <h2 className={styles.title}>{isLogin ? 'Bienvenido' : 'Crear cuenta'}</h2>
+        <p className={styles.subtitle}>
+          {isLogin
+            ? 'Inicia sesión para continuar'
+            : 'Tres pasos y formas parte de la comunidad Crocoders'}
+        </p>
+      </div>
+
+      <AnimatePresence mode="wait">
         {isLogin ? (
-          <motion.form 
+          <motion.form
             key="login"
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 20 }}
-            className={styles.form} 
+            className={styles.form}
             onSubmit={handleLogin}
+            noValidate
           >
-          {successMessage && (
-             <motion.div 
-               initial={{ opacity: 0, y: -10 }}
-               animate={{ opacity: 1, y: 0 }}
-               className="mb-6 p-4 bg-green-500/10 border border-green-500/50 rounded-xl text-green-400 text-sm flex items-center gap-3"
-             >
-               <Check size={18} />
-               {successMessage}
-             </motion.div>
-          )}
+            {successMessage && (
+              <Aviso tipo="exito" icono={<Check size={16} />}>
+                {successMessage}
+              </Aviso>
+            )}
 
-          <div className={styles.formGroup}>
-            <label className={styles.label}>
-              <Mail size={16} /> Email
-            </label>
-            <div className={styles.inputWrapper}>
-              <input 
-                type="email" 
-                className={`${styles.input} ${errors.general ? styles.inputError : ''}`}
-                value={email} 
-                onChange={(e) => setEmail(e.target.value)} 
-                required 
-                placeholder="tu@email.com"
-              />
-              <Mail className={styles.inputIcon} size={18} />
-            </div>
-          </div>
+            {errors.general && <Aviso icono={<X size={16} />}>{errors.general}</Aviso>}
 
-          <div className={styles.formGroup}>
-            <label className={styles.label}>
-              <Lock size={16} /> Contraseña
-            </label>
-            <div className={styles.inputWrapper}>
-              <input 
-                type={showPassword ? "text" : "password"} 
-                className={`${styles.input} ${errors.general ? styles.inputError : ''}`}
-                value={password} 
-                onChange={(e) => setPassword(e.target.value)} 
-                required 
-                placeholder="••••••••"
-              />
-              <Lock className={styles.inputIcon} size={18} />
-              <button 
-                type="button"
-                className={styles.passwordToggle}
-                onClick={() => setShowPassword(!showPassword)}
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            <Input
+              label="Correo electrónico"
+              type="email"
+              name="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              icon={<Mail size={16} />}
+              placeholder="tu@email.com"
+              autoComplete="email"
+              required
+            />
+
+            <PasswordField
+              label="Contraseña"
+              name="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+
+            <div className={styles.linkRow}>
+              <button type="button" onClick={() => goToView('recovery')} className={styles.linkButton}>
+                ¿Olvidaste tu contraseña?
               </button>
             </div>
-          </div>
 
-          <div className="flex justify-end">
-            <button 
-              type="button"
-              onClick={() => setView('recovery')}
-              className="text-sm text-green-500 hover:text-green-400 transition hover:underline flex items-center gap-1"
-            >
-              ¿Olvidaste tu contraseña?
-            </button>
-          </div>
-
-          <button 
-            className={styles.submitButton}
-            type="submit"
-            disabled={isLoading}
-          >
-            {isLoading ? 'Procesando...' : 'Iniciar Sesión'}
-          </button>
-        </motion.form>
-      ) : (
-        <motion.form 
-            key="register"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="space-y-4" 
-            onSubmit={handleRegister}
-        >
-          <div className={styles.formGroup}>
-            <label className={styles.label}>Nombre</label>
-            <div className={styles.inputWrapper}>
-              <input 
-                type="text" 
-                name="nombre"
-                className={`${styles.input} ${errors.nombre ? styles.inputError : ''}`}
-                value={registerData.nombre} 
-                onChange={handleRegisterChange}
-                required 
-                placeholder="Juan"
-              />
-              <User className={styles.inputIcon} size={18} />
-            </div>
-            {errors.nombre && (
-              <p className={styles.errorText}>{errors.nombre}</p>
-            )}
-          </div>
-
-          <div className={styles.grid}>
-            <div className={styles.formGroup}>
-              <label className={styles.label}>Apellido Paterno</label>
-              <input 
-                type="text" 
-                name="apellido_paterno"
-                className={`${styles.input} ${errors.apellido_paterno ? styles.inputError : ''}`}
-                style={{ paddingLeft: '1rem' }}
-                value={registerData.apellido_paterno} 
-                onChange={handleRegisterChange}
-                required 
-                placeholder="Pérez"
-              />
-              {errors.apellido_paterno && (
-                <p className={styles.errorText}>{errors.apellido_paterno}</p>
-              )}
-            </div>
-
-            <div className={styles.formGroup}>
-              <label className={styles.label}>Apellido Materno</label>
-              <input 
-                type="text" 
-                name="apellido_materno"
-                className={styles.input}
-                style={{ paddingLeft: '1rem' }}
-                value={registerData.apellido_materno} 
-                onChange={handleRegisterChange}
-                placeholder="García"
-              />
-            </div>
-          </div>
-
-          <div className={styles.formGroup}>
-            <label className={styles.label}>
-              <Mail size={16} /> Email
-            </label>
-            <div className={styles.inputWrapper}>
-              <input 
-                type="email" 
-                name="correo_electronico"
-                className={`${styles.input} ${errors.correo_electronico ? styles.inputError : ''}`}
-                value={registerData.correo_electronico} 
-                onChange={handleRegisterChange}
-                required 
-                placeholder="tu@email.com"
-              />
-              <Mail className={styles.inputIcon} size={18} />
-            </div>
-            {errors.correo_electronico && (
-              <p className={styles.errorText}>{errors.correo_electronico}</p>
-            )}
-          </div>
-
-          <div className={styles.formGroup}>
-            <label className={styles.label}>
-              <Lock size={16} /> Contraseña
-            </label>
-            <div className={styles.inputWrapper}>
-              <input 
-                type={showRegisterPassword ? "text" : "password"} 
-                name="contrasena"
-                className={`${styles.input} ${errors.contrasena ? styles.inputError : ''}`}
-                value={registerData.contrasena} 
-                onChange={handleRegisterChange}
-                required 
-                minLength={8}
-                placeholder="Mínimo 8 caracteres"
-              />
-              <Lock className={styles.inputIcon} size={18} />
-              <button 
-                type="button"
-                className={styles.passwordToggle}
-                onClick={() => setShowRegisterPassword(!showRegisterPassword)}
-              >
-                {showRegisterPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-            <div className={styles.strengthMeter}>
-              <div 
-                className={styles.strengthBar}
-                style={{ 
-                    width: `${(passwordStrength / 4) * 100}%`,
-                    backgroundColor: ['#6b7280', '#ef4444', '#eab308', '#3b82f6', '#22c55e'][passwordStrength] || '#6b7280'
-                }}
-              ></div>
-            </div>
-            <div className={styles.strengthText}>
-                <span>Seguridad:</span>
-                <span style={{ color: ['#6b7280', '#ef4444', '#eab308', '#3b82f6', '#22c55e'][passwordStrength] }}>
-                  {getPasswordStrengthText(passwordStrength)}
-                </span>
-            </div>
-            {errors.contrasena && (
-              <p className={styles.errorText}>{errors.contrasena}</p>
-            )}
-          </div>
-
-          <div className={styles.formGroup}>
-            <label className={styles.label}>
-              <Lock size={16} /> Confirmar contraseña
-            </label>
-            <div className={styles.inputWrapper}>
-              <input 
-                type={showRegisterConfirmPassword ? "text" : "password"} 
-                name="confirmar_contrasena"
-                className={`${styles.input} ${errors.confirmar_contrasena ? styles.inputError : ''}`}
-                value={registerData.confirmar_contrasena} 
-                onChange={handleRegisterChange}
-                required 
-                minLength={8}
-                placeholder="Repite la contraseña"
-              />
-              <Lock className={styles.inputIcon} size={18} />
-              <button 
-                type="button"
-                className={styles.passwordToggle}
-                onClick={() => setShowRegisterConfirmPassword(!showRegisterConfirmPassword)}
-              >
-                {showRegisterConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-            {!passwordsMatch && (
-              <p className={styles.errorText}>Las contraseñas no coinciden</p>
-            )}
-            {errors.confirmar_contrasena && (
-              <p className={styles.errorText}>{errors.confirmar_contrasena}</p>
-            )}
-          </div>
-
-          <div className={styles.formGroup}>
-            <label className={styles.label}>
-              <Phone size={16} /> Número de teléfono
-            </label>
-            <div className={styles.inputWrapper}>
-              <input 
-                type="tel" 
-                name="numero_telefono"
-                className={`${styles.input} ${errors.numero_telefono ? styles.inputError : ''}`}
-                value={registerData.numero_telefono} 
-                onChange={handleRegisterChange}
-                pattern="[0-9]{10,15}"
-                title="Número de teléfono (10-15 dígitos)"
-                required
-                placeholder="1234567890"
-              />
-              <Phone className={styles.inputIcon} size={18} />
-            </div>
-            {errors.numero_telefono && (
-              <p className={styles.errorText}>{errors.numero_telefono}</p>
-            )}
-          </div>
-
-          <div className={styles.grid}>
-            <div className={styles.formGroup}>
-              <label className={styles.label}>Semestre</label>
-              <select
-                name="semestre"
-                className={`${styles.input} ${errors.semestre ? styles.inputError : ''}`}
-                style={{ paddingLeft: '1rem' }}
-                value={registerData.semestre}
-                onChange={handleRegisterChange}
-                required
-              >
-                <option value="" style={{ color: 'black' }}>Selecciona...</option>
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(sem => (
-                  <option key={sem} value={sem} style={{ color: 'black' }}>{sem}</option>
-                ))}
-              </select>
-              {errors.semestre && (
-                <p className={styles.errorText}>{errors.semestre}</p>
-              )}
-            </div>
-
-            <div className={styles.formGroup}>
-              <label className={styles.label}>Carrera</label>
-              <select
-                name="carrera"
-                className={`${styles.input} ${errors.carrera ? styles.inputError : ''}`}
-                style={{ paddingLeft: '1rem' }}
-                value={showManualCarrera ? 'Otra' : registerData.carrera}
-                onChange={(e) => {
-                  if (e.target.value === 'Otra') {
-                    setShowManualCarrera(true);
-                    setRegisterData(prev => ({ ...prev, carrera: '' }));
-                  } else {
-                    setShowManualCarrera(false);
-                    handleRegisterChange(e);
-                  }
-                }}
-                required
-              >
-                <option value="" style={{ color: 'black' }}>Selecciona...</option>
-                {carreras.map(c => (
-                  <option key={c} value={c} style={{ color: 'black' }}>{c}</option>
-                ))}
-              </select>
-
-              {showManualCarrera && (
-                <input 
-                  type="text" 
-                  name="carrera"
-                  className={`${styles.input} mt-2 ${errors.carrera ? styles.inputError : ''}`}
-                  style={{ paddingLeft: '1rem' }}
-                  value={registerData.carrera} 
-                  onChange={handleRegisterChange}
-                  placeholder="Escribe el nombre de tu carrera"
-                  required 
-                />
-              )}
-
-              {errors.carrera && (
-                <p className={styles.errorText}>{errors.carrera}</p>
-              )}
-            </div>
-          </div>
-          
-          {/* MODIFICADO: Campos de plataformas ahora son requeridos */}
-          <div className="border-t border-white/10 pt-4 space-y-4">
-            <h3 className="text-gray-300 text-sm font-medium">Perfiles en plataformas de programación</h3>
-            <p className="text-xs text-gray-400">
-              Crea una cuenta en estas plataformas si no tienes una. <span className="text-red-400">* Requerido</span>
-            </p>
-            
-            <div className={styles.formGroup}>
-              <label className={styles.label}>Codeforces <span className="text-red-400">*</span></label>
-              <input 
-                type="text" 
-                name="usuario_codeforces"
-                className={`${styles.input} ${errors.usuario_codeforces ? styles.inputError : ''}`}
-                style={{ paddingLeft: '1rem' }}
-                value={registerData.usuario_codeforces} 
-                onChange={handleRegisterChange}
-                placeholder="Usuario de Codeforces"
-                required 
-              />
-              {errors.usuario_codeforces && (
-                <p className={styles.errorText}>{errors.usuario_codeforces}</p>
-              )}
-            </div>
-
-            <div className={styles.formGroup}>
-              <label className={styles.label}>VJudge <span className="text-red-400">*</span></label>
-              <input 
-                type="text" 
-                name="usuario_vjudge"
-                className={`${styles.input} ${errors.usuario_vjudge ? styles.inputError : ''}`}
-                style={{ paddingLeft: '1rem' }}
-                value={registerData.usuario_vjudge} 
-                onChange={handleRegisterChange}
-                placeholder="Usuario de VJudge"
-                required 
-              />
-              {errors.usuario_vjudge && (
-                <p className={styles.errorText}>{errors.usuario_vjudge}</p>
-              )}
-            </div>
-
-            <div className={styles.formGroup}>
-              <label className={styles.label}>OmegaUp <span className="text-red-400">*</span></label>
-              <input 
-                type="text" 
-                name="usuario_omegaup"
-                className={`${styles.input} ${errors.usuario_omegaup ? styles.inputError : ''}`}
-                style={{ paddingLeft: '1rem' }}
-                value={registerData.usuario_omegaup} 
-                onChange={handleRegisterChange}
-                placeholder="Usuario de OmegaUp"
-                required 
-              />
-              {errors.usuario_omegaup && (
-                <p className={styles.errorText}>{errors.usuario_omegaup}</p>
-              )}
-            </div>
-          </div>
-
-          <div className="border-t border-white/10 pt-4 mt-4 space-y-4">
-             <h3 className="text-gray-300 text-sm font-medium">Afiliación</h3>
-             {errors.afiliacion && (
-                <div className="p-2 bg-red-500/10 border border-red-500/50 rounded text-red-400 text-xs">
-                    {errors.afiliacion}
-                </div>
-             )}
-
-             <label className={styles.checkboxGroup}>
-                <input
-                    type="checkbox"
-                    id="es_club_programacion"
-                    name="es_club_programacion"
-                    checked={registerData.es_club_programacion}
-                    onChange={handleRegisterChange}
-                    className={styles.checkbox}
-                />
-                <span className="text-gray-300 text-sm select-none">
-                    Soy miembro del Club de Programación
-                </span>
-             </label>
-
-             <div className="flex flex-col space-y-3">
-                <label className={styles.checkboxGroup}>
-                    <input
-                        type="checkbox"
-                        id="es_computer_society"
-                        name="es_computer_society"
-                        checked={registerData.es_computer_society}
-                        onChange={handleRegisterChange}
-                        className={styles.checkbox}
-                    />
-                    <span className="text-gray-300 text-sm select-none">
-                        Soy miembro de Computer Society
-                    </span>
-                </label>
-
-                {registerData.es_computer_society && (
-                    <motion.div 
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        className="ml-6"
-                    >
-                        <div className={styles.formGroup}>
-                            <label className={styles.label}>Número IEEE <span className="text-red-400">*</span></label>
-                            <input
-                                type="text"
-                                inputMode="numeric"
-                                pattern="[0-9]*"
-                                name="numero_ieee"
-                                className={`${styles.input} ${errors.numero_ieee ? styles.inputError : ''}`}
-                                style={{ paddingLeft: '1rem' }}
-                                value={registerData.numero_ieee}
-                                onChange={handleRegisterChange}
-                                placeholder="Ej. 12345678"
-                                required
-                            />
-                             {errors.numero_ieee && (
-                                <p className={styles.errorText}>{errors.numero_ieee}</p>
-                             )}
-                        </div>
-                    </motion.div>
-                )}
-             </div>
-          </div>
-
-          <button 
-            className={styles.submitButton}
-            type="submit"
-            disabled={isLoading || !passwordsMatch}
-            style={{ width: '100%' }}
-          >
-            {isLoading ? 'Procesando...' : 'Registrarse'}
-          </button>
-        </motion.form>
-      )}
+            <Button type="submit" size="lg" loading={isLoading} className="w-full">
+              Iniciar sesión
+            </Button>
+          </motion.form>
+        ) : (
+          renderRegisterForm()
+        )}
       </AnimatePresence>
 
       <div className={styles.toggleText}>
         {isLogin ? '¿No tienes una cuenta?' : '¿Ya tienes una cuenta?'}
-        <button 
-          onClick={() => {
-            setIsLogin(!isLogin);
-            setErrors({});
-          }}
-          className={styles.toggleLink}
-        >
+        <button onClick={() => cambiarPestana(!isLogin)} className={styles.toggleLink} type="button">
           {isLogin ? 'Regístrate' : 'Inicia sesión'}
         </button>
       </div>
@@ -1034,263 +1055,214 @@ function AuthContent() {
   );
 
   const renderRecoveryView = () => (
-    <div className={styles.form}>
-      <button 
-        onClick={() => setView('auth')} 
-        className={styles.backButton}
-      >
+    <form className={styles.form} onSubmit={handleRecoveryRequest} noValidate>
+      <button type="button" onClick={() => goToView('auth')} className={styles.backButton}>
         <ArrowLeft size={16} /> Volver
       </button>
 
       <div className={styles.header}>
-        <h2 className={styles.title} style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>
-          Recuperar Contraseña
-        </h2>
+        <h2 className={`${styles.title} ${styles.stepTitle}`}>Recuperar contraseña</h2>
         <p className={styles.subtitle}>
-          Ingresa tu email para recibir un código.
+          Escribe tu correo y te enviaremos un código de 6 dígitos.
         </p>
       </div>
 
-      {errors.general && (
-        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 text-sm flex items-center gap-2">
-          <X size={16} />
-          {errors.general}
-        </div>
-      )}
+      {errors.general && <Aviso icono={<X size={16} />}>{errors.general}</Aviso>}
 
-      <div className={styles.formGroup}>
-        <label className={styles.label}>
-          <Mail size={16} /> Email registrado
-        </label>
-        <div className={styles.inputWrapper}>
-          <input 
-            type="email" 
-            className={`${styles.input} ${errors.recoveryEmail ? styles.inputError : ''}`}
-            value={recoveryEmail} 
-            onChange={(e) => setRecoveryEmail(e.target.value)} 
-            required 
-            placeholder="tu@email.com"
-          />
-          <Mail className={styles.inputIcon} size={18} />
-        </div>
-        {errors.recoveryEmail && (
-          <p className={styles.errorText}>{errors.recoveryEmail}</p>
-        )}
-      </div>
+      <Input
+        label="Correo registrado"
+        type="email"
+        name="recoveryEmail"
+        value={recoveryEmail}
+        onChange={(e) => {
+          setRecoveryEmail(e.target.value);
+          if (errors.recoveryEmail) setErrors({});
+        }}
+        error={errors.recoveryEmail}
+        icon={<Mail size={16} />}
+        placeholder="tu@email.com"
+        autoComplete="email"
+        required
+      />
 
-      <button 
-        className={styles.submitButton}
-        onClick={handleRecoveryRequest}
-        disabled={isLoading}
-      >
-        {isLoading ? 'Procesando...' : 'Enviar código'}
-      </button>
-    </div>
+      <Button type="submit" size="lg" loading={isLoading} className="w-full">
+        Enviar código
+      </Button>
+    </form>
   );
 
   const renderVerifyCodeView = () => (
-    <div className={styles.form}>
-      <button 
-        onClick={() => setView('recovery')} 
-        className={styles.backButton}
-      >
-        <ArrowLeft size={16} /> Volver
+    <form className={styles.form} onSubmit={handleVerifyCode} noValidate>
+      <button type="button" onClick={() => goToView('recovery')} className={styles.backButton}>
+        <ArrowLeft size={16} /> Cambiar de correo
       </button>
 
       <div className={styles.header}>
-        <h2 className={styles.title} style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Verificar Código</h2>
-        <p className={styles.subtitle}>Ingresa el código enviado a tu correo.</p>
+        <h2 className={`${styles.title} ${styles.stepTitle}`}>Verificar código</h2>
+        <p className={styles.subtitle}>
+          Si <strong>{recoveryEmail}</strong> corresponde a una cuenta, recibirás
+          un código de 6 dígitos. Revisa también la carpeta de spam.
+        </p>
       </div>
 
-      {errors.general && (
-        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 text-sm flex items-center gap-2">
-          <X size={16} />
-          {errors.general}
-        </div>
-      )}
+      {errors.general && <Aviso icono={<X size={16} />}>{errors.general}</Aviso>}
 
-      <div className={styles.formGroup}>
-        <label className={styles.label}>
-          <Shield size={16} /> Código
-        </label>
-        <div className={styles.inputWrapper}>
-          <input 
-            type="text" 
-            inputMode="numeric"
-            pattern="[0-9]{6}"
-            maxLength={6}
-            className={`${styles.input} ${errors.verificationCode ? styles.inputError : ''}`}
-            style={{ paddingLeft: '2.75rem', letterSpacing: '0.2rem', fontSize: '1.2rem' }}
-            value={verificationCode} 
-            onChange={(e) => {
-              const value = e.target.value.replace(/\D/g, '').slice(0, 6);
-              setVerificationCode(value);
-              if (errors.verificationCode) {
-                setErrors(prev => ({ ...prev, verificationCode: '' }));
-              }
-            }}
-            required 
-            placeholder="000000"
-          />
-          <Shield className={styles.inputIcon} size={18} />
-        </div>
-        {errors.verificationCode && (
-          <p className={styles.errorText}>{errors.verificationCode}</p>
-        )}
+      <Input
+        label="Código de verificación"
+        name="verificationCode"
+        value={verificationCode}
+        onChange={(e) => {
+          const valor = e.target.value.replace(/\D/g, '').slice(0, 6);
+          setVerificationCode(valor);
+          if (errors.verificationCode) setErrors({});
+        }}
+        error={errors.verificationCode}
+        icon={<Shield size={16} />}
+        className={styles.codeInput}
+        inputMode="numeric"
+        maxLength={6}
+        placeholder="000000"
+        autoComplete="one-time-code"
+        required
+      />
+
+      <div className={styles.acciones}>
+        <Button type="submit" size="lg" loading={isLoading} className="w-full">
+          Verificar
+        </Button>
+        <button
+          type="button"
+          className={styles.linkButton}
+          onClick={() => handleRecoveryRequest()}
+          disabled={isLoading}
+        >
+          ¿No te llegó? Reenviar código
+        </button>
       </div>
-
-      <button 
-        className={styles.submitButton}
-        onClick={handleVerifyCode}
-        disabled={isLoading}
-      >
-        {isLoading ? 'Verificando...' : 'Verificar'}
-      </button>
-    </div>
+    </form>
   );
 
   const renderResetView = () => (
-    <div className={styles.form}>
-      <button 
-        onClick={() => setView('auth')} 
-        className={styles.backButton}
-      >
+    <form className={styles.form} onSubmit={handlePasswordReset} noValidate>
+      <button type="button" onClick={() => goToView('auth')} className={styles.backButton}>
         <ArrowLeft size={16} /> Volver
       </button>
 
       <div className={styles.header}>
-        <h2 className={styles.title} style={{ fontSize: '1.5rem' }}>Restablecer Contraseña</h2>
+        <h2 className={`${styles.title} ${styles.stepTitle}`}>Restablecer contraseña</h2>
       </div>
 
-      {errors.general && (
-        <div className="mb-4 p-3 bg-red-500/10 border border-red-500/50 rounded-lg text-red-400 text-sm flex items-center gap-2">
-          <X size={16} />
-          {errors.general}
-        </div>
-      )}
+      {errors.general && <Aviso icono={<X size={16} />}>{errors.general}</Aviso>}
 
-      {!tokenVerified && isLoading ? (
-        <div className="flex justify-center items-center py-8">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-green-500"></div>
-        </div>
-      ) : tokenVerified ? (
+      {tokenVerified ? (
         <>
-          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 text-sm text-blue-300 flex items-start mb-4 gap-2">
-            <Info size={16} className="mt-0.5 flex-shrink-0" />
-            <span>Crea una nueva contraseña segura.</span>
-          </div>
+          <Aviso tipo="info" icono={<Info size={16} />}>
+            Crea una contraseña con al menos 8 caracteres e incluye mayúsculas,
+            números o símbolos.
+          </Aviso>
 
-          <div className={styles.formGroup}>
-            <label className={styles.label}>
-              <Lock size={16} /> Nueva contraseña
-            </label>
-            <div className={styles.inputWrapper}>
-              <input 
-                type={showNewPassword ? "text" : "password"} 
-                className={`${styles.input} ${errors.newPassword ? styles.inputError : ''}`}
-                value={newPassword} 
-                onChange={(e) => setNewPassword(e.target.value)} 
-                required 
-                placeholder="Nueva contraseña"
-              />
-              <Lock className={styles.inputIcon} size={18} />
-              <button 
-                type="button"
-                className={styles.passwordToggle}
-                onClick={() => setShowNewPassword(!showNewPassword)}
-              >
-                {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-            
-             <div className={styles.strengthMeter}>
-                <div 
-                  className={styles.strengthBar}
-                  style={{ 
-                    width: `${(checkPasswordStrength(newPassword) / 4) * 100}%`,
-                    backgroundColor: ['#6b7280', '#ef4444', '#eab308', '#3b82f6', '#22c55e'][checkPasswordStrength(newPassword)] || '#6b7280'
-                  }}
-                ></div>
-            </div>
-            <div className={styles.strengthText}>
-                <span>Seguridad:</span>
-                <span style={{ color: ['#6b7280', '#ef4444', '#eab308', '#3b82f6', '#22c55e'][checkPasswordStrength(newPassword)] }}>
-                  {getPasswordStrengthText(checkPasswordStrength(newPassword))}
-                </span>
-            </div>
-          </div>
+          <PasswordField
+            label="Nueva contraseña"
+            name="newPassword"
+            value={newPassword}
+            onChange={(e) => {
+              setNewPassword(e.target.value);
+              if (errors.newPassword) setErrors((prev) => ({ ...prev, newPassword: undefined }));
+            }}
+            error={errors.newPassword}
+            placeholder="Nueva contraseña"
+            showStrength
+            required
+          />
 
-          <div className={styles.formGroup}>
-            <label className={styles.label}>
-              <Lock size={16} /> Confirmar nueva contraseña
-            </label>
-            <div className={styles.inputWrapper}>
-              <input 
-                type={showConfirmNewPassword ? "text" : "password"} 
-                className={`${styles.input} ${errors.confirmNewPassword ? styles.inputError : ''}`}
-                value={confirmNewPassword} 
-                onChange={(e) => setConfirmNewPassword(e.target.value)} 
-                required 
-                placeholder="Repite la contraseña"
-              />
-              <Lock className={styles.inputIcon} size={18} />
-              <button 
-                type="button"
-                className={styles.passwordToggle}
-                onClick={() => setShowConfirmNewPassword(!showConfirmNewPassword)}
-              >
-                {showConfirmNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-          </div>
+          <PasswordField
+            label="Confirmar nueva contraseña"
+            name="confirmNewPassword"
+            value={confirmNewPassword}
+            onChange={(e) => {
+              setConfirmNewPassword(e.target.value);
+              if (errors.confirmNewPassword)
+                setErrors((prev) => ({ ...prev, confirmNewPassword: undefined }));
+            }}
+            error={errors.confirmNewPassword}
+            placeholder="Repite la contraseña"
+            required
+          />
 
-          <button 
-            className={styles.submitButton}
-            onClick={handlePasswordReset}
-            disabled={isLoading}
-          >
-            {isLoading ? 'Procesando...' : 'Restablecer'}
-          </button>
+          <Button type="submit" size="lg" loading={isLoading} className="w-full">
+            Restablecer contraseña
+          </Button>
         </>
       ) : (
-        <div className="text-center py-8">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-green-500 mx-auto mb-4"></div>
-          <p className="text-gray-300">Verificando tu código...</p>
+        // Sin token verificado no hay nada que restablecer: se devuelve al
+        // usuario al paso del código en vez de dejar un spinner infinito.
+        <div className={styles.acciones}>
+          <Aviso icono={<X size={16} />}>
+            Tu código ya no es válido. Vuelve a solicitarlo para continuar.
+          </Aviso>
+          <Button type="button" variant="secondary" onClick={() => goToView('recovery')}>
+            Solicitar un código nuevo
+          </Button>
         </div>
       )}
-    </div>
+    </form>
   );
 
   return (
     <div className={styles.pageWrapper}>
-      <motion.div 
+      <motion.div
+        ref={tarjetaRef}
         className={`${styles.authCard} ${!isLogin && view === 'auth' ? styles.wide : ''}`}
-        initial={{ opacity: 0, scale: 0.95 }}
+        initial={{ opacity: 0, scale: 0.98 }}
         animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.5 }}
+        transition={{ duration: 0.4 }}
       >
         <AnimatePresence mode="wait">
-            <motion.div
-                key={view}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
-            >
-                {view === 'auth' ? renderAuthView() : 
-                view === 'recovery' ? renderRecoveryView() :
-                view === 'verify-code' ? renderVerifyCodeView() : 
-                renderResetView()}
-            </motion.div>
+          <motion.div
+            key={view}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            {view === 'auth'
+              ? renderAuthView()
+              : view === 'recovery'
+                ? renderRecoveryView()
+                : view === 'verify-code'
+                  ? renderVerifyCodeView()
+                  : renderResetView()}
+          </motion.div>
         </AnimatePresence>
       </motion.div>
     </div>
   );
 }
 
+/**
+ * Esqueleto con la forma real de la tarjeta de acceso. Antes el fallback era la
+ * palabra "Cargando…" centrada en una pantalla vacía: al montar el contenido,
+ * la tarjeta aparecía de golpe y la página parecía saltar. Manteniendo el mismo
+ * contenedor y el mismo ancho, la transición es continua.
+ */
+function AuthSkeleton() {
+  return (
+    <div className={styles.pageWrapper}>
+      <div className={styles.authCard} aria-busy="true" aria-label="Cargando el acceso">
+        <Skeleton className="mx-auto h-10 w-56 rounded-full" />
+        <Skeleton className="mx-auto mt-8 h-8 w-44" />
+        <Skeleton className="mx-auto mt-3 h-4 w-64" />
+        <Skeleton className="mt-8 h-11 w-full" />
+        <Skeleton className="mt-5 h-11 w-full" />
+        <Skeleton className="mt-8 h-12 w-full" />
+      </div>
+    </div>
+  );
+}
+
 export default function AuthPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Cargando...</div>}>
+    <Suspense fallback={<AuthSkeleton />}>
       <AuthContent />
     </Suspense>
   );

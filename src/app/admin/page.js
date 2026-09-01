@@ -3,151 +3,188 @@
 // Página índice del panel admin (/admin) = Dashboard.
 // El shell (sidebar persistente, protección de ruta, header móvil) vive en
 // admin/layout.jsx; aquí sólo va el contenido del dashboard.
-import { useState, useEffect } from 'react';
-import {
-  Users,
-  Calendar,
-  DollarSign,
-  Activity,
-  UserCheck,
-  Clock
-} from 'lucide-react';
-import LoadingSpinner from '@/components/LoadingSpinner';
+import useSWR from 'swr';
+import { Users, CalendarDays, DollarSign, Activity, Clock, UserCheck } from 'lucide-react';
+import { fetcher } from '@/lib/fetcher';
+import PageHeader from '@/components/ui/PageHeader';
+import StatCard from '@/components/ui/StatCard';
+import { Card, CardHeader } from '@/components/ui/Card';
+import Badge from '@/components/ui/Badge';
+import EmptyState from '@/components/ui/EmptyState';
+import { Skeleton, CardsSkeleton } from '@/components/ui/Skeleton';
 
-const StatCard = ({ title, value, icon: Icon, color }) => (
-  <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
-    <div className="flex items-center justify-between mb-4">
-      <div className={`p-3 rounded-lg ${color} bg-opacity-20`}>
-        <Icon className={`w-8 h-8 ${color.replace('bg-', 'text-')}`} />
-      </div>
-      <span className="text-2xl font-bold text-white">{value}</span>
-    </div>
-    <h3 className="text-gray-400 font-medium">{title}</h3>
-  </div>
-);
+const MONEDA = new Intl.NumberFormat('es-MX', {
+  style: 'currency',
+  currency: 'MXN',
+  maximumFractionDigits: 0,
+});
+
+// El color de la etiqueta significa algo: confirmada es un cierre en verde,
+// pendiente requiere atención, cancelada es una baja.
+const TONO_INSCRIPCION = {
+  confirmada: 'success',
+  pendiente: 'warning',
+  cancelada: 'danger',
+};
 
 export default function AdminDashboardPage() {
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // SWR con caché: volver al dashboard desde otra sección lo pinta al instante
+  // con los últimos datos y revalida en segundo plano, en vez de dejar la
+  // pantalla vacía mientras se rehace la petición desde cero.
+  const { data: stats, error, isLoading } = useSWR('/api/admin/stats', fetcher, {
+    keepPreviousData: true,
+    revalidateOnFocus: false,
+    dedupingInterval: 30000,
+  });
 
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const res = await fetch('/api/admin/stats');
-        if (res.ok) {
-          const data = await res.json();
-          setStats(data);
-        }
-      } catch (error) {
-        console.error('Error fetching dashboard stats:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchStats();
-  }, []);
-
-  if (loading) return <LoadingSpinner />;
-  if (!stats) return <div className="text-white text-center">No se pudieron cargar las estadísticas.</div>;
+  const cargandoPrimeraVez = isLoading && !stats;
 
   return (
-    <div className="space-y-8">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard
-          title="Miembros Activos"
-          value={stats.activeMembers}
-          icon={Users}
-          color="bg-blue-500 text-blue-500"
-        />
-        <StatCard
-          title="Eventos Realizados"
-          value={stats.totalEvents}
-          icon={Calendar}
-          color="bg-purple-500 text-purple-500"
-        />
-        <StatCard
-          title="Total Recaudado"
-          value={`$${stats.totalRevenue.toFixed(2)}`}
-          icon={DollarSign}
-          color="bg-green-500 text-green-500"
-        />
-        <StatCard
-          title="Inscripciones (Recientes)"
-          value={stats.recentInscriptions.length}
-          icon={Activity}
-          color="bg-orange-500 text-orange-500"
-        />
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Dashboard"
+        description="Resumen del club: miembros, eventos, recaudación e inscripciones."
+      />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Recent Inscriptions */}
-        <div className="bg-gray-800 rounded-xl border border-gray-700 p-6">
-          <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-            <Clock size={20} className="text-gray-400" />
-            Inscripciones Recientes
-          </h3>
-          <div className="space-y-4">
-            {stats.recentInscriptions.length > 0 ? stats.recentInscriptions.map((ins, i) => (
-              <div key={i} className="flex items-center justify-between p-3 bg-gray-700/50 rounded-lg">
-                <div>
-                  <p className="font-medium text-white">{ins.usuario}</p>
-                  <p className="text-sm text-gray-400">{ins.evento}</p>
-                </div>
-                <div className="text-right">
-                  <span className={`text-xs px-2 py-1 rounded-full ${
-                    ins.estado === 'confirmada' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
-                  }`}>
-                    {ins.estado}
-                  </span>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {new Date(ins.fecha_inscripcion).toLocaleDateString()}
-                  </p>
-                </div>
-              </div>
-            )) : (
-              <p className="text-gray-400 text-center py-4">No hay inscripciones recientes</p>
-            )}
-          </div>
-        </div>
+      {error && !stats ? (
+        <Card>
+          <EmptyState
+            icon={Activity}
+            title="No se pudieron cargar las estadísticas"
+            description="Comprueba tu conexión y vuelve a intentarlo en unos segundos."
+          />
+        </Card>
+      ) : null}
 
-        {/* Event Stats */}
-        <div className="bg-gray-800 rounded-xl border border-gray-700 p-6">
-          <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-            <UserCheck size={20} className="text-gray-400" />
-            Resumen de Eventos
-          </h3>
-          <div className="space-y-4">
-            {stats.eventStats.map((evt) => (
-              <div key={evt.id_evento} className="p-4 bg-gray-700/50 rounded-lg">
-                <div className="flex justify-between items-start mb-2">
-                  <h4 className="font-medium text-white">{evt.nombre}</h4>
-                  <span className="text-xs text-gray-400">{new Date(evt.fecha_inicio).toLocaleDateString()}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-4 mt-2">
-                  <div className="bg-gray-800 rounded p-2 text-center">
-                    <span className="block text-xl font-bold text-blue-400">{evt.registrados}</span>
-                    <span className="text-xs text-gray-500">Registrados</span>
-                  </div>
-                  <div className="bg-gray-800 rounded p-2 text-center">
-                    <span className="block text-xl font-bold text-green-400">{evt.asistentes}</span>
-                    <span className="text-xs text-gray-500">Asistieron</span>
-                  </div>
-                </div>
-                <div className="mt-2 w-full bg-gray-600 rounded-full h-1.5">
-                  <div
-                    className="bg-green-500 h-1.5 rounded-full"
-                    style={{ width: `${evt.registrados > 0 ? (evt.asistentes / evt.registrados) * 100 : 0}%` }}
-                  ></div>
-                </div>
-              </div>
-            ))}
-            {stats.eventStats.length === 0 && (
-                <p className="text-gray-400 text-center py-4">No hay eventos recientes</p>
-            )}
-          </div>
+      {/* Métricas */}
+      {cargandoPrimeraVez ? (
+        <CardsSkeleton count={4} className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" />
+      ) : stats ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            label="Miembros activos"
+            value={stats.activeMembers ?? 0}
+            icon={Users}
+            tone="brand"
+          />
+          {/* "Eventos realizados" contaba en realidad los publicados, futuros
+              incluidos. La etiqueta dice ahora lo que el número mide. */}
+          <StatCard
+            label="Eventos publicados"
+            value={stats.eventosPublicados ?? 0}
+            icon={CalendarDays}
+            tone="info"
+          />
+          <StatCard
+            label="Total recaudado"
+            value={MONEDA.format(Number(stats.totalRevenue) || 0)}
+            icon={DollarSign}
+            tone="accent"
+            hint="Inscripciones con pago confirmado"
+          />
+          {/* Antes mostraba `recentInscriptions.length`, es decir el LIMIT 5 de
+              la consulta: siempre decía "5". Ahora es un conteo real. */}
+          <StatCard
+            label="Inscripciones (30 días)"
+            value={stats.inscripcionesUltimos30 ?? 0}
+            icon={Activity}
+            tone="warning"
+          />
         </div>
-      </div>
+      ) : null}
+
+      {/* Paneles */}
+      {cargandoPrimeraVez ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Skeleton className="h-80 rounded-xl" />
+          <Skeleton className="h-80 rounded-xl" />
+        </div>
+      ) : stats ? (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Card className="space-y-4">
+            <CardHeader
+              title="Inscripciones recientes"
+              description="Las últimas 5 altas registradas"
+              actions={<Clock size={16} className="text-faint" aria-hidden="true" />}
+            />
+            {stats.recentInscriptions?.length > 0 ? (
+              <ul className="space-y-2">
+                {stats.recentInscriptions.map((ins, i) => (
+                  <li
+                    key={ins.id_inscripcion ?? i}
+                    className="flex items-center justify-between gap-3 rounded-lg bg-surface-2 px-3 py-2.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-fg">{ins.usuario || 'Sin nombre'}</p>
+                      <p className="truncate text-xs text-muted">{ins.evento}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <Badge tone={TONO_INSCRIPCION[ins.estado] || 'neutral'}>{ins.estado}</Badge>
+                      <p className="mt-1 text-xs text-faint">
+                        {new Date(ins.fecha_inscripcion).toLocaleDateString('es-MX')}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyState
+                icon={Clock}
+                title="Todavía no hay inscripciones"
+                description="Aparecerán aquí en cuanto alguien se registre a un evento."
+              />
+            )}
+          </Card>
+
+          <Card className="space-y-4">
+            <CardHeader
+              title="Resumen de eventos"
+              description="Registrados frente a asistencia real"
+              actions={<UserCheck size={16} className="text-faint" aria-hidden="true" />}
+            />
+            {stats.eventStats?.length > 0 ? (
+              <ul className="space-y-3">
+                {stats.eventStats.map((evt) => {
+                  const registrados = Number(evt.registrados) || 0;
+                  const asistentes = Number(evt.asistentes) || 0;
+                  const porcentaje = registrados > 0 ? Math.round((asistentes / registrados) * 100) : 0;
+                  return (
+                    <li key={evt.id_evento} className="rounded-lg bg-surface-2 p-3">
+                      <div className="mb-2 flex items-start justify-between gap-3">
+                        <h4 className="min-w-0 truncate text-sm font-medium text-fg">{evt.nombre}</h4>
+                        <span className="shrink-0 text-xs text-faint">
+                          {new Date(evt.fecha_inicio).toLocaleDateString('es-MX')}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted">
+                        <span className="tabular-nums text-fg">{asistentes}</span> de{' '}
+                        <span className="tabular-nums text-fg">{registrados}</span> registrados asistieron
+                        {registrados > 0 ? ` (${porcentaje}%)` : ''}
+                      </p>
+                      <div
+                        className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-surface-3"
+                        role="progressbar"
+                        aria-valuenow={porcentaje}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-label={`Asistencia de ${evt.nombre}`}
+                      >
+                        <div className="h-full rounded-full bg-brand" style={{ width: `${porcentaje}%` }} />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <EmptyState
+                icon={CalendarDays}
+                title="No hay eventos registrados"
+                description="Crea un evento para empezar a medir asistencia."
+              />
+            )}
+          </Card>
+        </div>
+      ) : null}
     </div>
   );
 }

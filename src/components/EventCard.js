@@ -4,20 +4,18 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { Calendar, Users, Clock, CheckCircle, XCircle, MapPin, ArrowRight, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { formatearFechaMedia } from '@/lib/fechas';
 
-function EventCard({ evento, isRegistered, index }) {
+function EventCard({ evento, isRegistered, onParticipate, onViewDetails, index }) {
   const router = useRouter();
   const [imageError, setImageError] = useState(false);
 
   const isEventFinished = evento.isPastEvent;
+  const sinCupos = evento.cupos !== null && evento.cupos_disponibles <= 0;
 
-  const fechaFormateada = evento.fecha
-    ? new Date(evento.fecha + 'T00:00:00').toLocaleDateString('es-ES', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric'
-      })
-    : 'Fecha N/A';
+  // El formateo vive en un helper compartido porque la fecha llega como DATE de
+  // Postgres serializado a UTC y, formateada sin más, se imprime el día anterior.
+  const fechaFormateada = formatearFechaMedia(evento.fecha);
 
   const getEventStatusInfo = () => {
     if (isEventFinished) {
@@ -68,10 +66,24 @@ function EventCard({ evento, isRegistered, index }) {
   const statusInfo = getEventStatusInfo();
 
   const handleCardClick = () => {
-    if (evento && evento.id_evento) {
+    if (onViewDetails) {
+      onViewDetails();
+    } else if (evento?.id_evento) {
       router.push(`/eventos/${evento.id_evento}`);
     }
   };
+
+  // Rótulo y estado del botón de inscripción. La tarjeta recibía
+  // `onParticipate` desde /eventos pero no lo declaraba ni lo renderizaba: no
+  // existía botón de inscripción en el listado y toda la maquinaria de registro
+  // de esa página era código muerto.
+  const accionInscripcion = (() => {
+    if (isRegistered) return { texto: 'Ver mi inscripción', deshabilitado: false };
+    if (isEventFinished) return { texto: 'Evento finalizado', deshabilitado: true };
+    if (evento.registroCerrado) return { texto: 'Inscripciones cerradas', deshabilitado: true };
+    if (sinCupos) return { texto: 'Sin cupos', deshabilitado: true };
+    return { texto: 'Participar', deshabilitado: false };
+  })();
 
   const getCuposDisplay = () => {
     if (evento.cupos === null) return 'Cupos ilimitados';
@@ -220,15 +232,39 @@ function EventCard({ evento, isRegistered, index }) {
             </p>
           )}
 
-          {/* Bottom action indicator */}
-          <div className="mt-auto pt-6 flex items-center justify-between">
-            <div className="h-1 w-8 rounded-full bg-gradient-to-r from-green-500/50 to-emerald-500/50
-                          transition-all duration-300 group-hover:w-16" />
-            <div className="flex items-center gap-2 text-green-400 text-sm font-medium
-                          opacity-50 transition-all duration-300 group-hover:opacity-100 group-hover:translate-x-1">
+          {/* Acciones. Son botones reales, no un adorno: antes el único destino
+              posible de la tarjeta era el detalle, aunque /eventos ya tuviera
+              todo el flujo de inscripción implementado. */}
+          <div className="mt-auto flex items-center gap-2 pt-6">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleCardClick();
+              }}
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-line
+                         px-4 py-2.5 text-sm font-medium text-muted transition-colors
+                         hover:border-line-strong hover:text-fg"
+            >
               Ver detalles
-              <ArrowRight size={16} />
-            </div>
+              <ArrowRight size={16} aria-hidden="true" />
+            </button>
+
+            {onParticipate && (
+              <button
+                type="button"
+                disabled={accionInscripcion.deshabilitado}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onParticipate();
+                }}
+                className="inline-flex flex-1 items-center justify-center rounded-lg bg-brand px-4 py-2.5
+                           text-sm font-semibold text-bg transition-colors hover:bg-brand-strong
+                           disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-faint"
+              >
+                {accionInscripcion.texto}
+              </button>
+            )}
           </div>
         </div>
       </div>

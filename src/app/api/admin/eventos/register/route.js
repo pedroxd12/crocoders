@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
+import { recalcularCupos, verificarDisponibilidad } from '@/lib/eventos-cupos';
 
 // POST: un administrador inscribe a un miembro o invitado existente en un evento.
 // (El registro por equipos se realiza desde el flujo público /api/eventos/register.)
@@ -61,15 +62,27 @@ export async function POST(request) {
     }
 
     // 3. Cupos. El admin puede forzar (forzar=true) por encima del aforo.
-    if (!forzar && evento.cupos_disponibles <= 0) {
-      await client.query('ROLLBACK');
-      return NextResponse.json({ error: 'El evento ya no tiene cupos disponibles' }, { status: 400 });
+    //    La disponibilidad se calcula contra las INSCRIPCIONES REALES, no contra
+    //    el contador `cupos_disponibles`: éste podía venir desfasado y, además,
+    //    `null <= 0` daba true, así que los eventos de aforo ilimitado
+    //    (cupos IS NULL) rechazaban cualquier alta.
+    if (!forzar) {
+      const disponibilidad = await verificarDisponibilidad(client, eventoId, evento.cupos, 1);
+      if (!disponibilidad.cabe) {
+        await client.query('ROLLBACK');
+        return NextResponse.json({ error: 'El evento ya no tiene cupos disponibles' }, { status: 400 });
+      }
     }
 
     // 4. Insertar inscripción (el UNIQUE parcial protege duplicados: 23505).
     //    Para eventos con costo, el pago lo marca explícitamente el admin.
     const col = tipo_usuario === 'miembro' ? 'id_miembro' : 'id_invitado';
     const pago = evento.tiene_costo ? Boolean(pago_completado) : false;
+    // Coherencia con el registro público: en un evento con costo la inscripción
+    // sólo nace 'confirmada' si el admin marca el pago; si no, queda 'pendiente'
+    // (el lugar sigue apartado) hasta que registre el cobro.
+    const estadoInicial = evento.tiene_costo && !pago ? 'pendiente' : 'confirmada';
+    const requierePago = Boolean(evento.tiene_costo);
 
     // Buscar inscripción existente (activa o cancelada) para decidir la acción.
     const existing = await client.query(
@@ -80,25 +93,25 @@ export async function POST(request) {
 
     let inscripcionId;
 
-    // NOTA: el trigger `actualizar_cupos_evento` ajusta cupos_disponibles solo
-    // al insertar/reactivar una inscripción 'confirmada'. NO descontamos a mano.
+    // NOTA: los cupos NO se ajustan aquí. Al final de la transacción,
+    // `recalcularCupos` deriva `cupos_disponibles` de las inscripciones reales
+    // y pisa lo que haya hecho el trigger de la base. Ver src/lib/eventos-cupos.js.
     if (existing.rows.length === 0) {
-      // Nueva inscripción (el trigger descuenta 1 cupo).
       const ins = await client.query(
-        `INSERT INTO inscripcion_evento (id_evento, ${col}, fecha_inscripcion, estado, pago_completado)
-         VALUES ($1, $2, NOW(), 'confirmada', $3) RETURNING id_inscripcion`,
-        [eventoId, usuarioId, pago],
+        `INSERT INTO inscripcion_evento (id_evento, ${col}, fecha_inscripcion, estado, requiere_pago, pago_completado)
+         VALUES ($1, $2, NOW(), $3, $4, $5) RETURNING id_inscripcion`,
+        [eventoId, usuarioId, estadoInicial, requierePago, pago],
       );
       inscripcionId = ins.rows[0].id_inscripcion;
     } else if (existing.rows[0].estado === 'cancelada') {
-      // Reactivar cancelada (el trigger vuelve a descontar 1 por el cambio de estado).
+      // Reactivar una inscripción cancelada.
       inscripcionId = existing.rows[0].id_inscripcion;
       await client.query(
         `UPDATE inscripcion_evento
-            SET estado = 'confirmada', fecha_inscripcion = NOW(),
-                pago_completado = $2, updated_at = NOW()
+            SET estado = $3, fecha_inscripcion = NOW(),
+                requiere_pago = $4, pago_completado = $2, updated_at = NOW()
           WHERE id_inscripcion = $1`,
-        [inscripcionId, pago],
+        [inscripcionId, pago, estadoInicial, requierePago],
       );
     } else {
       // Ya está inscrito y activo.
@@ -109,11 +122,24 @@ export async function POST(request) {
       );
     }
 
+    // 5. Reconciliación del aforo. Si el admin forzó por encima del cupo, se
+    //    sube también `cupos` para que el número deje de mentir: antes el
+    //    trigger no descontaba al forzar (sólo lo hacía con cupos_disponibles>0)
+    //    pero sí devolvía +1 sin tope al cancelar, y el evento acababa con cupos
+    //    fantasma que volvían a admitir gente que no cabía.
+    const { lugares_ocupados: ocupados } = await recalcularCupos(client, eventoId);
+    if (forzar && evento.cupos !== null && ocupados > Number(evento.cupos)) {
+      await client.query('UPDATE evento SET cupos = $2, updated_at = NOW() WHERE id_evento = $1', [eventoId, ocupados]);
+      await recalcularCupos(client, eventoId);
+    }
+
     await client.query('COMMIT');
 
     return NextResponse.json({
       message: 'Usuario registrado exitosamente',
       id_inscripcion: inscripcionId,
+      estado_inscripcion: estadoInicial,
+      requiere_pago: requierePago,
     });
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch {}

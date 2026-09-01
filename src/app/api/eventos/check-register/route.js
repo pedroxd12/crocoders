@@ -46,7 +46,8 @@ export async function GET(request) {
          const crypto = await import('crypto');
          const secret = process.env.PAYLOAD_SECRET;
          if (secret) {
-             // El `ts` alimenta la ventana anti-replay de verify-qr (24h). Debe ser
+             // El `ts` alimenta el control anti-replay de verify-qr (que ya no
+             // caduca a las 24 h: el ticket vale hasta que termina el evento). Debe ser
              // el instante de EMISIÓN del token, no `fecha_inscripcion`:
              //  - fecha_inscripcion es `timestamp without time zone`; convertirla con
              //    new Date() la interpreta en hora local y la desfasa ~horas hacia el

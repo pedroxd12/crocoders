@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 import { UTApi } from "uploadthing/server";
 import { sanitizeHtml } from '@/lib/sanitize';
+import { recalcularCupos } from '@/lib/eventos-cupos';
 
 const utapi = new UTApi();
 
@@ -21,17 +22,27 @@ export async function GET(request, context) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
   const { id } = await context.params;
-  const client = await connectWithRetry();
 
+  // La validación va ANTES de pedir conexión: al revés, un id inválido salía por
+  // el return de abajo sin pasar por el `finally`, y esa conexión del pool se
+  // quedaba colgada hasta el timeout (el pool de Railway es pequeño).
   if (!id || isNaN(Number(id))) {
       return NextResponse.json({ error: 'ID de evento inválido' }, { status: 400 });
   }
 
+  const client = await connectWithRetry();
+
   try {
     // Basic event info + counts
     const query = `
-      SELECT 
+      SELECT
         e.*,
+        -- Va DESPUÉS de e.* a propósito: al repetirse el nombre de columna, este
+        -- valor es el que queda en la fila. La columna es 'timestamp without
+        -- time zone' y guarda hora de pared de México, así que se devuelve como
+        -- cadena naive lista para el <input datetime-local> del panel, sin pasar
+        -- por Date (que la reinterpretaba en la zona del servidor).
+        TO_CHAR(e.fecha_limite_registro, 'YYYY-MM-DD"T"HH24:MI') as fecha_limite_registro,
         t.nombre as tipo_nombre,
         a.nombre as alcance_nombre,
         -- Concurso info
@@ -42,7 +53,18 @@ export async function GET(request, context) {
         c.id_plataforma,
         c.requiere_asesor,
         c.url_concurso,
-        (SELECT COUNT(*) FROM inscripcion_evento WHERE id_evento = e.id_evento AND estado <> 'cancelada') as total_inscritos
+        -- Dos cifras distintas y a propósito: filas de inscripción vs. lugares
+        -- ocupados (un equipo es 1 inscripción y N lugares).
+        (SELECT COUNT(*) FROM inscripcion_evento WHERE id_evento = e.id_evento AND estado <> 'cancelada') as total_inscritos,
+        (
+          SELECT COALESCE(SUM(
+                   CASE WHEN ie.id_equipo IS NOT NULL
+                        THEN (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = ie.id_equipo)
+                        ELSE 1 END
+                 ), 0)::int
+          FROM inscripcion_evento ie
+          WHERE ie.id_evento = e.id_evento AND ie.estado <> 'cancelada'
+        ) as lugares_ocupados
       FROM evento e
       LEFT JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
       LEFT JOIN catalogo_alcance_evento a ON e.id_alcance = a.id_alcance
@@ -56,21 +78,9 @@ export async function GET(request, context) {
       return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
     }
 
-    const evento = result.rows[0];
-    
-    // Formatear fecha_limite_registro para datetime-local (sin conversión UTC)
-    if (evento.fecha_limite_registro) {
-      const fecha = new Date(evento.fecha_limite_registro);
-      // Obtener componentes en timezone local del servidor
-      const year = fecha.getFullYear();
-      const month = String(fecha.getMonth() + 1).padStart(2, '0');
-      const day = String(fecha.getDate()).padStart(2, '0');
-      const hours = String(fecha.getHours()).padStart(2, '0');
-      const minutes = String(fecha.getMinutes()).padStart(2, '0');
-      evento.fecha_limite_registro = `${year}-${month}-${day}T${hours}:${minutes}`;
-    }
-
-    return NextResponse.json(evento);
+    // `fecha_limite_registro` ya viene formateada desde SQL: no se reconstruye
+    // en JS con getHours(), que dependía de la zona horaria del servidor.
+    return NextResponse.json(result.rows[0]);
   } catch (error) {
     console.error('Error en GET /api/admin/eventos/[id]:', error);
     return NextResponse.json({ error: 'Error al obtener evento' }, { status: 500 });
@@ -154,27 +164,17 @@ export async function PUT(request, context) {
       finalUrl = imagen_flyer_url ?? null;
     }
 
-    // Recalcular cupos_disponibles si cambian los cupos totales.
-    // Disponibles = cupos_nuevos - lugares_ocupados (clamp a [0, cupos]).
-    // Un equipo ocupa tantos lugares como integrantes tenga.
     const nuevoCupos = parseInt(cupos);
-    let nuevosDisponibles = currentRes.rows[0].cupos_disponibles;
-    if (Number.isInteger(nuevoCupos) && nuevoCupos !== currentRes.rows[0].cupos_actual) {
-      const ocupRes = await client.query(
-        `SELECT COALESCE(SUM(
-                  CASE WHEN ie.id_equipo IS NOT NULL
-                       THEN (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = ie.id_equipo)
-                       ELSE 1 END
-                ), 0)::int AS ocupados
-           FROM inscripcion_evento ie
-          WHERE ie.id_evento = $1 AND ie.estado <> 'cancelada'`,
-        [id],
-      );
-      const ocupados = ocupRes.rows[0].ocupados;
-      nuevosDisponibles = Math.max(0, Math.min(nuevoCupos, nuevoCupos - ocupados));
-    }
 
     // 2. Update Evento
+    // `cupos_disponibles` NO se calcula aquí: se escribe un valor provisional
+    // (el que había) y al final de la transacción `recalcularCupos` lo deriva de
+    // las inscripciones reales. Antes este PUT usaba una regla propia
+    // (estado <> 'cancelada', equipos por integrante) distinta de la del trigger
+    // de la base (sólo 'confirmada', siempre ±1), así que cada edición del aforo
+    // dejaba el contador con un criterio y el trigger seguía moviéndolo con otro.
+    // Además sólo recalculaba si cambiaban los cupos, de modo que un contador ya
+    // desincronizado no había forma de repararlo desde el panel.
     const updateQuery = `
         UPDATE evento SET
             nombre = $1,
@@ -206,10 +206,16 @@ export async function PUT(request, context) {
     await client.query(updateQuery, [
         nombre, sanitizeHtml(descripcion_html || ''), id_tipo_evento, id_alcance,
         fecha_inicio, fechaFinValue, fecha_limite_registro || null, hora_inicio, hora_fin,
-        ubicacion ?? null, cuposValue, nuevosDisponibles, tieneCostoValue, costoValue,
+        ubicacion ?? null, cuposValue, currentRes.rows[0].cupos_disponibles, tieneCostoValue, costoValue,
         finalUrl, finalKey,
         id
     ]);
+
+    // Reconciliación del aforo: fuente de verdad = las inscripciones reales.
+    // Se ejecuta SIEMPRE (cambien o no los cupos), así que guardar el evento
+    // sin tocar nada ya repara un contador desincronizado.
+    // Ver src/lib/eventos-cupos.js.
+    await recalcularCupos(client, id);
 
     // 3. Handle Concurso (Insert, Update, or Delete)
     if (es_concurso) {
@@ -319,35 +325,33 @@ export async function DELETE(request, context) {
   let client;
   try {
     client = await connectWithRetry();
-    // Get image key to delete from storage
-    const imgRes = await client.query('SELECT imagen_flyer_key FROM evento WHERE id_evento = $1', [id]);
 
-    if (imgRes.rows.length === 0) {
-        return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
-    }
-
-    const { imagen_flyer_key } = imgRes.rows[0];
-
-    // Recolectar los storage_key de las evidencias ANTES de borrar el evento:
-    // el FK evidencia.id_evento es ON DELETE CASCADE, así que al borrar el
-    // evento se pierden esas filas y, sin esto, sus archivos quedarían
-    // huérfanos en UploadThing (fuga de almacenamiento/costo).
-    const evidRes = await client.query(
-      'SELECT storage_key FROM evidencia WHERE id_evento = $1 AND storage_key IS NOT NULL',
+    // BAJA LÓGICA, no DELETE físico.
+    //
+    // El DELETE anterior arrastraba por ON DELETE CASCADE mucho más de lo que
+    // el panel insinúa: inscripciones y sus pagos, evidencias, staff y jueces,
+    // el concurso con sus equipos e integrantes y —lo más grave— la SESIÓN del
+    // programa recurrente ligada al evento (sesion_programa.id_evento), que a su
+    // vez se lleva asistencia_miembro y asistencia_invitado. Historial de
+    // asistencia y de cobros perdido, sin vuelta atrás.
+    //
+    // La columna `deleted_at` ya existía y TODAS las lecturas la filtran
+    // (admin/eventos, eventos público, ficha pública, staff), pero nadie la
+    // escribía nunca: el borrado lógico estaba montado y sin usar.
+    //
+    // Tampoco se borran los archivos del CDN: una baja reversible no debe
+    // destruir el flyer ni las evidencias. `listable = FALSE` lo saca además de
+    // cualquier listado aunque alguien reactive la fila a mano.
+    const del = await client.query(
+      `UPDATE evento
+          SET deleted_at = NOW(), estado = 'cancelado', listable = FALSE, updated_at = NOW()
+        WHERE id_evento = $1 AND deleted_at IS NULL
+        RETURNING id_evento`,
       [id],
     );
-    const evidenciaKeys = evidRes.rows.map((r) => r.storage_key);
 
-    // Borrar primero de BD (cascade) y solo si tiene éxito eliminar del CDN.
-    // Si invertimos el orden, un fallo de BD dejaría el archivo eliminado del
-    // CDN pero el evento intacto.
-    await client.query('DELETE FROM evento WHERE id_evento = $1', [id]);
-
-    // Best-effort en el CDN tras el borrado en BD. utapi.deleteFiles acepta un
-    // arreglo, así que limpiamos flyer + evidencias en una sola llamada.
-    const keysToDelete = [imagen_flyer_key, ...evidenciaKeys].filter(Boolean);
-    if (keysToDelete.length > 0) {
-      deleteFromUploadThing(keysToDelete);
+    if (del.rowCount === 0) {
+      return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
     }
 
     return NextResponse.json({ success: true, message: 'Evento eliminado correctamente' });
