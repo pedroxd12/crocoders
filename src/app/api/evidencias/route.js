@@ -8,20 +8,25 @@ import {
 
 export const dynamic = 'force-dynamic'; // Se evalúa dinámicamente en cada solicitud
 
-// Caché de CDN para las respuestas públicas.
-//
-// Son fotos de actividades YA CELEBRADAS: sólo cambian cuando un admin sube o
-// retira material, nunca por acción del visitante. Sin esta cabecera cada
-// petición arrancaba la función y abría conexión a la base de datos — 0.49 s
-// medidos contra producción, y hasta 1.5 s si la función estaba fría — para
-// devolver los mismos 272 bytes.
+// Caché de CDN SÓLO para la línea de tiempo: contenido público de solo
+// lectura, sobre actividades ya celebradas, que únicamente cambia cuando un
+// admin sube o retira material. Sin esta cabecera cada petición arrancaba la
+// función y abría conexión a la base — 0.49 s medidos contra producción, 1.5 s
+// si la función estaba fría — para devolver los mismos 272 bytes.
 //
 // La ventana de `stale-while-revalidate` es larga a propósito, igual que en
 // /api/puntajes: con una corta, cualquier visita tras unos minutos de silencio
-// vuelve a caer en MISS y paga otra vez el arranque en frío. Así ese coste lo
-// paga la revalidación en segundo plano y no la persona que abre la página; a
-// cambio, una foto recién subida puede tardar hasta un minuto en aparecer.
-const CACHE_PUBLICO = 'public, s-maxage=60, stale-while-revalidate=86400';
+// vuelve a caer en MISS y paga otra vez el arranque en frío. A cambio, una foto
+// recién subida puede tardar hasta un minuto en aparecer en la línea de tiempo.
+const CACHE_TIMELINE = 'public, s-maxage=60, stale-while-revalidate=86400';
+
+// Las GALERÍAS de un evento o programa NO se cachean. Las usa también el panel
+// de administración (src/app/admin/evidencias/page.jsx pide
+// `/api/evidencias?evento=<id>` para listar lo que hay que editar o borrar), y
+// con una ventana de caché el admin subía o eliminaba una foto, la lista se
+// refrescaba contra la CDN y volvía la copia anterior: desde el panel parecía
+// que los cambios no se guardaban.
+const SIN_CACHE = 'no-store';
 
 // GET público:
 //  - ?evento=<id>   -> evidencias públicas de ese evento.
@@ -49,7 +54,7 @@ export async function GET(request) {
         return NextResponse.json({ error: 'El ID de evento proporcionado no es un número válido.' }, { status: 400 });
       }
       return NextResponse.json(await listarEvidenciasDeEvento(eventoIdParam), {
-        headers: { 'Cache-Control': CACHE_PUBLICO },
+        headers: { 'Cache-Control': SIN_CACHE },
       });
     }
 
@@ -59,13 +64,13 @@ export async function GET(request) {
         return NextResponse.json({ error: 'El ID de programa proporcionado no es un número válido.' }, { status: 400 });
       }
       return NextResponse.json(await listarEvidenciasDePrograma(programaIdParam), {
-        headers: { 'Cache-Control': CACHE_PUBLICO },
+        headers: { 'Cache-Control': SIN_CACHE },
       });
     }
 
     // --- Línea de tiempo mixta (eventos + programas con evidencias públicas) ---
     return NextResponse.json(await listarTimelineEvidencias(), {
-      headers: { 'Cache-Control': CACHE_PUBLICO },
+      headers: { 'Cache-Control': CACHE_TIMELINE },
     });
   } catch (error) {
     console.error('[API /api/evidencias] Error en GET:', error);
