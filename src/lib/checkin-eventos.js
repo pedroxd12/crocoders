@@ -6,15 +6,24 @@
 import { sqlFinEvento } from '@/lib/eventos-fechas';
 
 /**
- * Autorización por evento: un administrador puede marcar cualquier evento; el
- * staff sólo los eventos donde está asignado Y con un rol que pueda escribir
- * (`catalogo_rol_staff.puede_administrar/puede_editar`). Una asignación sin rol
- * (id_rol NULL) se permite: negarla dejaría fuera al staff ya asignado sin rol.
+ * Autorización por evento: un administrador puede todo en cualquier evento; el
+ * staff sólo en los eventos donde está asignado Y con un rol del nivel
+ * pedido (ver src/lib/roles-staff.js, que define qué significa cada bandera
+ * de `catalogo_rol_staff`):
+ *
+ *   nivel 'operacion' (por defecto)  puede_editar o puede_administrar
+ *                                    → escáner QR, llegadas, playeras, comprobantes
+ *   nivel 'gestion'                  puede_administrar
+ *                                    → marcar asistencia y pago a mano desde la lista
+ *
+ * Una asignación cuyo rol ya no existe en el catálogo (LEFT JOIN sin fila) se
+ * trata como operación: negarla dejaría fuera al staff ya asignado. Para
+ * gestión se exige la bandera explícita.
  *
  * Devuelve `{ ok: true }` o `{ ok: false, error, status }`. NO abre ni cierra
  * transacción: el que llama decide.
  */
-export async function autorizarStaffEvento(client, session, eventoId) {
+export async function autorizarStaffEvento(client, session, eventoId, { nivel = 'operacion' } = {}) {
   const role = (session.role || '').toLowerCase();
   if (role === 'administrador') return { ok: true };
 
@@ -29,17 +38,23 @@ export async function autorizarStaffEvento(client, session, eventoId) {
     return {
       ok: false,
       status: 403,
-      error: 'No tienes permiso para registrar asistencia en este evento.',
+      error: 'No estás asignado como staff de este evento.',
     };
   }
-  const puedeEscribir = staffRes.rows.some(
-    (r) => r.puede_administrar === null || r.puede_administrar || r.puede_editar,
+
+  const exigeGestion = nivel === 'gestion';
+  const autorizado = staffRes.rows.some((r) =>
+    exigeGestion
+      ? r.puede_administrar === true
+      : r.puede_administrar === null || r.puede_administrar || r.puede_editar,
   );
-  if (!puedeEscribir) {
+  if (!autorizado) {
     return {
       ok: false,
       status: 403,
-      error: 'Tu rol en este evento es de solo consulta; no puedes registrar asistencia.',
+      error: exigeGestion
+        ? 'Tu rol en este evento no permite modificar la lista a mano; usa el escáner QR o pide a un administrador.'
+        : 'Tu rol en este evento es de solo consulta; no puedes registrar asistencia ni validar pagos.',
     };
   }
   return { ok: true };

@@ -1,20 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { toast } from 'react-toastify';
 import {
-  ArrowLeft,
-  CalendarDays,
-  Check,
-  Clock,
-  CreditCard,
-  MapPin,
-  QrCode,
-  Search,
-  Users,
-  X,
+  ArrowLeft, Download, Eye, QrCode, Receipt, Search, Shirt, UserRoundCheck, Users, X,
 } from 'lucide-react';
 
 import { fetcher } from '@/lib/fetcher';
@@ -24,42 +15,50 @@ import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import Select from '@/components/ui/Select';
 import Table from '@/components/ui/Table';
 import StatCard from '@/components/ui/StatCard';
 import EmptyState from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import QRScannerModal from '@/components/QRScannerModal';
 import ComprobanteRevisionModal from '@/components/eventos/ComprobanteRevisionModal';
-import { TONO_COMPROBANTE, ETIQUETA_COMPROBANTE } from '@/lib/comprobante-estado';
-import { formatearFechaHora, formatearFechaLarga, formatearHora } from '@/lib/fechas';
+import FichaEvento, { esPorEquipos } from '@/components/asistentes/FichaEvento';
+import ResumenTallas from '@/components/asistentes/ResumenTallas';
+import ResumenRetos from '@/components/asistentes/ResumenRetos';
+import EquipoModal from '@/components/asistentes/EquipoModal';
+import { useMarcasInscripcion, ModalConfirmarPago } from '@/components/asistentes/MarcasInscripcion';
+import {
+  colNombre, colCorreo, colTipo, colDesafio, colPerfil, colTalla, colPlayera,
+  colAsistencia, colPago, colComprobante,
+} from '@/components/asistentes/columnas';
+import {
+  resumenAsistentes, filtrosDisponibles, aplicarFiltro, coincideBusqueda,
+  filasCsvAsistentes, descargarCsv, nombreArchivoCsv,
+} from '@/lib/asistentes-resumen';
+import { permisosDeRol, nivelDeRol, ETIQUETA_NIVEL, TONO_NIVEL, DESCRIPCION_NIVEL } from '@/lib/roles-staff';
 import { estadoTemporal } from '../../fechas';
 
-/** Dato de cabecera del evento: etiqueta pequeña + valor legible. */
-function Meta({ icon: Icon, etiqueta, valor }) {
-  return (
-    <div>
-      <p className="flex items-center gap-1.5 text-xs text-faint">
-        <Icon size={13} aria-hidden="true" />
-        {etiqueta}
-      </p>
-      <p className="mt-1 text-sm text-fg">{valor}</p>
-    </div>
-  );
-}
-
-const TONO_TIPO = {
-  miembro: 'info',
-  invitado: 'neutral',
-  equipo: 'warning',
-};
-
+/**
+ * Detalle de un evento para el staff asignado.
+ *
+ * Muestra lo MISMO que el panel de administración (ficha del evento, resumen
+ * de tallas, lista con roster de equipos, exportación) con las mismas piezas
+ * (src/components/asistentes). Lo que cambia por rol es qué se puede tocar
+ * (src/lib/roles-staff.js):
+ *   - solo consulta: ve y exporta, sin botones de acción;
+ *   - operación: además escanea el QR y valida comprobantes;
+ *   - gestión: además marca asistencia y pago a mano desde la lista.
+ * Antes todos veían los mismos botones y el servidor contestaba 403 al usarlos.
+ */
 export default function StaffEventoDetalle() {
   const { id } = useParams();
   const router = useRouter();
+
   const [busqueda, setBusqueda] = useState('');
+  const [filtro, setFiltro] = useState('');
   const [escanerAbierto, setEscanerAbierto] = useState(false);
-  // Fila cuyo comprobante de pago se está revisando (null = modal cerrado).
   const [comprobanteAbierto, setComprobanteAbierto] = useState(null);
+  const [equipoAbierto, setEquipoAbierto] = useState(null);
 
   const {
     data: detalle,
@@ -77,37 +76,42 @@ export default function StaffEventoDetalle() {
 
   const evento = detalle?.evento || null;
   const miRol = detalle?.mi_rol || null;
-  const asistentes = useMemo(
-    () => (Array.isArray(asistentesData) ? asistentesData : []),
-    [asistentesData],
+  const permisos = permisosDeRol(miRol);
+  const nivel = nivelDeRol(miRol);
+
+  const lista = useMemo(() => (Array.isArray(asistentesData) ? asistentesData : []), [asistentesData]);
+  const resumen = useMemo(() => resumenAsistentes(lista), [lista]);
+  const porEquipos = esPorEquipos(evento);
+  const hayRetos = useMemo(
+    () => Number(evento?.total_retos) > 0 || lista.some((a) => a.id_reto != null),
+    [evento, lista],
   );
 
-  const filtrados = useMemo(() => {
-    const q = busqueda.trim().toLowerCase();
-    if (!q) return asistentes;
-    return asistentes.filter(
-      (a) =>
-        a.nombre_completo?.toLowerCase().includes(q) ||
-        a.correo?.toLowerCase().includes(q) ||
-        a.numero_ieee?.includes(q),
-    );
-  }, [asistentes, busqueda]);
+  const parchear = useCallback(
+    (idInscripcion, cambios) => {
+      refrescarAsistentes(
+        (actual = []) => actual.map((a) => (a.id_inscripcion === idInscripcion ? { ...a, ...cambios } : a)),
+        { revalidate: false },
+      );
+    },
+    [refrescarAsistentes],
+  );
+  const marcas = useMarcasInscripcion({ parchear });
 
-  // Parche local de una fila tras validar un pago: el servidor ya devolvió el
-  // resultado, no hace falta volver a pedir la lista entera.
-  const parchearAsistente = (idInscripcion, cambios) => {
-    refrescarAsistentes(
-      (actual = []) => actual.map((a) => (a.id_inscripcion === idInscripcion ? { ...a, ...cambios } : a)),
-      { revalidate: false },
-    );
+  const filtros = useMemo(() => filtrosDisponibles(evento), [evento]);
+  const visibles = useMemo(
+    () => aplicarFiltro(lista, filtro).filter((a) => coincideBusqueda(a, busqueda)),
+    [lista, filtro, busqueda],
+  );
+
+  const exportar = () => {
+    const { cabeceras, filas } = filasCsvAsistentes(lista, {
+      conTalla: Boolean(evento?.solicitar_talla),
+      conCosto: Boolean(evento?.tiene_costo),
+      conRetos: hayRetos,
+    });
+    descargarCsv(nombreArchivoCsv(evento?.nombre), cabeceras, filas);
   };
-
-  const comprobantesPendientes = asistentes.filter((a) => a.comprobante_estado === 'pendiente').length;
-
-  const totalAsistieron = asistentes.filter((a) => a.asistio).length;
-  const porcentaje = asistentes.length > 0
-    ? Math.round((totalAsistieron / asistentes.length) * 100)
-    : 0;
 
   // 403: el usuario no es staff de este evento.
   if (errorDetalle?.status === 403) {
@@ -116,7 +120,7 @@ export default function StaffEventoDetalle() {
         <EmptyState
           icon={X}
           title="No tienes permisos para este evento"
-          description="Solo el staff asignado puede ver la lista de asistentes."
+          description="Solo el staff asignado puede ver la lista de inscritos."
           action={<Button size="sm" onClick={() => router.push('/staff')}>Volver al panel</Button>}
         />
       </div>
@@ -124,9 +128,23 @@ export default function StaffEventoDetalle() {
   }
 
   const estado = evento ? estadoTemporal(evento) : null;
-  const horario = evento?.hora_inicio
-    ? `${formatearHora(evento.hora_inicio)} – ${formatearHora(evento.hora_fin)}`
-    : '';
+  const pctLlegadas = resumen.personas ? Math.round((resumen.asistieron / resumen.personas) * 100) : 0;
+
+  const columnas = [
+    colNombre({ onVerEquipo: setEquipoAbierto }),
+    colCorreo,
+    colTipo,
+    ...(hayRetos ? [colDesafio] : []),
+    colPerfil,
+    ...(evento?.solicitar_talla ? [colTalla, colPlayera] : []),
+    ...(evento?.tiene_costo
+      ? [
+          colComprobante({ puedeRevisar: permisos.operar, onAbrir: setComprobanteAbierto }),
+          colPago({ puedeMarcar: permisos.gestionar, onCambiar: marcas.setPagoAConfirmar }),
+        ]
+      : []),
+    colAsistencia({ puedeMarcar: permisos.gestionar, onToggle: marcas.toggleAsistencia }),
+  ];
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pt-28 pb-16">
@@ -147,9 +165,10 @@ export default function StaffEventoDetalle() {
             title={evento.nombre}
             description={evento.tipo_evento || undefined}
             actions={
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {estado && <Badge tone={estado.tone}>{estado.label}</Badge>}
                 {miRol && <Badge tone="info">Mi rol: {miRol.rol}</Badge>}
+                {miRol && <Badge tone={TONO_NIVEL[nivel]}>{ETIQUETA_NIVEL[nivel]}</Badge>}
               </div>
             }
           />
@@ -164,9 +183,6 @@ export default function StaffEventoDetalle() {
 
           {evento.descripcion && (
             <Card className="mb-6">
-              {/* La columna es descripcion_html: antes se imprimía como texto
-                  plano leyendo un campo `descripcion` que la API de detalle no
-                  devolvía, así que el párrafo salía siempre vacío. */}
               <div
                 className="prose-sm max-w-none text-sm leading-relaxed text-muted [&_a]:text-brand [&_strong]:text-fg"
                 dangerouslySetInnerHTML={{ __html: sanitizeHtml(evento.descripcion) }}
@@ -174,43 +190,55 @@ export default function StaffEventoDetalle() {
             </Card>
           )}
 
-          <Card className="mb-4">
-            <div className="grid gap-5 sm:grid-cols-3">
-              <Meta icon={CalendarDays} etiqueta="Fecha" valor={formatearFechaLarga(evento.fecha_inicio)} />
-              {/* Antes se imprimía la hora cruda de Postgres: "18:00:00 - 21:00:00". */}
-              <Meta icon={Clock} etiqueta="Horario" valor={horario || 'Por definir'} />
-              <Meta icon={MapPin} etiqueta="Ubicación" valor={evento.ubicacion || 'Por definir'} />
-            </div>
-          </Card>
+          <FichaEvento evento={evento} resumen={resumen} className="mb-6" />
 
-          <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <StatCard
-              icon={Check}
-              label="Asistencia"
-              value={`${porcentaje}%`}
-              hint={`${totalAsistieron} de ${asistentes.length} inscritos`}
-              tone="brand"
-            />
+          <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
             <StatCard
               icon={Users}
-              label="Inscritos"
-              value={evento.total_inscritos ?? asistentes.length}
+              label="Inscripciones"
+              value={resumen.inscripciones}
               tone="info"
-            />
-            <StatCard
-              icon={CreditCard}
-              label="Pagos validados"
-              value={evento.pagos_completados || 0}
-              tone="neutral"
               hint={
-                evento.tiene_costo
-                  ? comprobantesPendientes > 0
-                    ? `${comprobantesPendientes} comprobante(s) por revisar`
-                    : 'Sin comprobantes pendientes'
-                  : 'Evento gratuito'
+                porEquipos
+                  ? `${resumen.equipos} ${resumen.equipos === 1 ? 'equipo' : 'equipos'} · ${resumen.personas} personas${
+                      resumen.asesores ? ` · ${resumen.asesores} ${resumen.asesores === 1 ? 'asesor' : 'asesores'}` : ''
+                    }`
+                  : `${resumen.porTipo.miembro} miembros · ${resumen.porTipo.invitado} invitados`
               }
             />
+            <StatCard
+              icon={UserRoundCheck}
+              label="Llegaron"
+              value={resumen.asistieron}
+              tone="brand"
+              hint={resumen.personas ? `${pctLlegadas}% de ${resumen.personas} personas` : undefined}
+            />
+            {evento.solicitar_talla && (
+              <StatCard
+                icon={Shirt}
+                label="Playeras entregadas"
+                value={`${resumen.playerasEntregadas}/${resumen.playerasTotal}`}
+                tone="accent"
+                hint={resumen.sinTalla ? `${resumen.sinTalla} sin talla registrada` : 'Todas las tallas registradas'}
+              />
+            )}
+            {evento.tiene_costo && (
+              <StatCard
+                icon={Receipt}
+                label="Pagos por validar"
+                value={resumen.comprobantesPendientes}
+                tone="warning"
+                hint={
+                  resumen.sinComprobante > 0
+                    ? `${resumen.sinComprobante} ${resumen.sinComprobante === 1 ? 'inscripción' : 'inscripciones'} sin comprobante`
+                    : 'Todos subieron su comprobante'
+                }
+              />
+            )}
           </div>
+
+          {evento.solicitar_talla && <ResumenTallas resumen={resumen} className="mb-6" />}
+          {hayRetos && <ResumenRetos resumen={resumen} porEquipos={porEquipos} className="mb-6" />}
         </>
       ) : (
         <Card className="mb-6 border-danger/30 bg-danger-soft">
@@ -218,146 +246,120 @@ export default function StaffEventoDetalle() {
         </Card>
       )}
 
+      {miRol && !permisos.operar && (
+        // Rol de solo consulta: se dice de frente en vez de mostrar un botón
+        // de escáner que iba a responder 403.
+        <Card className="mb-6 border-line bg-surface-2">
+          <p className="flex items-start gap-2 text-sm text-muted">
+            <Eye size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span>
+              Tu rol <span className="font-medium text-fg">{miRol.rol}</span> es de solo consulta: {DESCRIPCION_NIVEL.consulta}{' '}
+              Las llegadas y las playeras las marca el staff de operación con el escáner QR.
+            </span>
+          </p>
+        </Card>
+      )}
+
       <Card className="mb-6">
         <div className="flex flex-col gap-3 md:flex-row md:items-end">
-          <Button className="md:w-auto" onClick={() => setEscanerAbierto(true)}>
-            <QrCode size={16} aria-hidden="true" />
-            Escanear QR de asistencia
-          </Button>
+          {permisos.operar && (
+            <Button className="md:w-auto" onClick={() => setEscanerAbierto(true)}>
+              <QrCode size={16} aria-hidden="true" />
+              Escanear QR de asistencia
+            </Button>
+          )}
           <Input
-            label="Buscar asistente"
+            label="Buscar inscrito"
             wrapperClassName="flex-1"
-            placeholder="Nombre, correo o número IEEE"
+            placeholder={porEquipos ? 'Equipo, integrante, correo o desafío' : 'Nombre, correo o número IEEE'}
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
             icon={<Search size={15} aria-hidden="true" />}
           />
+          <Select
+            label="Mostrar"
+            value={filtro}
+            onChange={(e) => setFiltro(e.target.value)}
+            options={filtros}
+            placeholder="Todas las inscripciones"
+            wrapperClassName="w-full md:w-60"
+          />
+          <Button variant="secondary" onClick={exportar} disabled={lista.length === 0} title="Una fila por persona, con talla y estado">
+            <Download size={16} aria-hidden="true" />
+            Exportar CSV
+          </Button>
         </div>
       </Card>
 
       <div className="mb-3 flex items-center justify-between gap-4">
-        <h2 className="text-sm font-semibold text-fg">Asistentes</h2>
-        {asistentes.length > 0 && (
+        <h2 className="text-sm font-semibold text-fg">Inscritos</h2>
+        {lista.length > 0 && (
           <p className="text-xs text-muted tabular-nums">
-            {filtrados.length} de {asistentes.length}
+            {visibles.length} de {lista.length}
           </p>
         )}
       </div>
 
       <Table
-        loading={cargandoAsistentes && asistentes.length === 0}
+        loading={cargandoAsistentes && lista.length === 0}
         getRowKey={(row) => row.id_inscripcion}
-        columns={[
-          { key: 'nombre_completo', label: 'Nombre' },
-          { key: 'correo', label: 'Correo' },
-          {
-            key: 'tipo',
-            label: 'Tipo',
-            render: (row) => <Badge tone={TONO_TIPO[row.tipo] || 'neutral'}>{row.tipo}</Badge>,
-          },
-          {
-            key: 'asistio',
-            label: 'Asistencia',
-            align: 'center',
-            render: (row) =>
-              row.asistio ? (
-                <span className="inline-flex items-center gap-1.5 text-xs text-brand">
-                  <Check size={14} aria-hidden="true" />
-                  Asistió
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 text-xs text-faint">
-                  <X size={14} aria-hidden="true" />
-                  Sin registrar
-                </span>
-              ),
-          },
-          // Pago: en un evento con costo el staff necesita ver quién ya pagó y
-          // poder validar el comprobante sin pasar por un administrador.
-          ...(evento?.tiene_costo
-            ? [
-                {
-                  key: 'pago',
-                  label: 'Pago',
-                  render: (row) => (
-                    <Badge tone={row.pago_completado ? 'success' : 'warning'}>
-                      {row.pago_completado ? 'Pagado' : 'Pendiente'}
-                    </Badge>
-                  ),
-                },
-                {
-                  key: 'comprobante',
-                  label: 'Comprobante',
-                  render: (row) =>
-                    row.id_comprobante ? (
-                      <button
-                        type="button"
-                        onClick={() => setComprobanteAbierto(row)}
-                        title="Ver el comprobante y validar el pago"
-                      >
-                        <Badge tone={TONO_COMPROBANTE[row.comprobante_estado] || 'neutral'}>
-                          {ETIQUETA_COMPROBANTE[row.comprobante_estado] || row.comprobante_estado}
-                        </Badge>
-                      </button>
-                    ) : (
-                      <span className="text-xs text-faint">Sin subir</span>
-                    ),
-                },
-              ]
-            : []),
-          {
-            key: 'fecha_inscripcion',
-            label: 'Se inscribió',
-            // fecha_inscripcion SÍ es un timestamp real, no un día suelto.
-            render: (row) => formatearFechaHora(row.fecha_inscripcion),
-          },
-        ]}
-        data={filtrados}
+        columns={columnas}
+        data={visibles}
         emptyMessage={
           <EmptyState
             icon={Search}
-            title={busqueda ? 'Ningún asistente coincide' : 'Todavía no hay inscritos'}
+            title={busqueda || filtro ? 'Ningún inscrito coincide' : 'Todavía no hay inscritos'}
             description={
-              busqueda
-                ? 'Prueba con otro nombre, correo o número IEEE.'
+              busqueda || filtro
+                ? 'Prueba con otro nombre, correo o filtro.'
                 : 'Cuando alguien se inscriba al evento aparecerá en esta lista.'
             }
           />
         }
       />
 
-      {/* Misma pantalla de validación que usa el panel de administración. */}
-      <ComprobanteRevisionModal
-        key={comprobanteAbierto?.id_comprobante ?? 'ninguno'}
-        fila={comprobanteAbierto}
-        onClose={() => setComprobanteAbierto(null)}
-        onRevisado={({ fila, comprobante, inscripcion }) => {
-          parchearAsistente(fila.id_inscripcion, {
-            comprobante_estado: comprobante.estado,
-            comprobante_motivo_rechazo: comprobante.motivo_rechazo,
-            comprobante_revisado_en: comprobante.revisado_en,
-            pago_completado: inscripcion.pago_completado,
-            estado: inscripcion.estado,
-          });
-        }}
+      <EquipoModal
+        fila={equipoAbierto}
+        conTalla={Boolean(evento?.solicitar_talla)}
+        onClose={() => setEquipoAbierto(null)}
       />
 
-      <QRScannerModal
-        isOpen={escanerAbierto}
-        onClose={() => setEscanerAbierto(false)}
-        // Se pasa el evento que se está viendo para que el escáner pueda
-        // rechazar un ticket de OTRO evento. Hoy el modal y /api/eventos/verify-qr
-        // sacan el evento del propio token, así que escanear por error el
-        // ticket de otro evento responde "Asistencia registrada" y la marca allí.
-        eventoId={id}
-        onSuccess={(data) => {
-          toast.success(`Asistencia registrada: ${data?.nombre || 'asistente'}`);
-          refrescarAsistentes();
-        }}
-        // Marcar llegada/playera desde el roster del escáner también mueve la
-        // lista (el agregado del equipo se recalcula en el servidor).
-        onUpdate={() => refrescarAsistentes()}
-      />
+      {permisos.gestionar && <ModalConfirmarPago marcas={marcas} />}
+
+      {permisos.operar && (
+        <>
+          {/* Misma pantalla de validación que usa el panel de administración. */}
+          <ComprobanteRevisionModal
+            key={comprobanteAbierto?.id_comprobante ?? 'ninguno'}
+            fila={comprobanteAbierto}
+            onClose={() => setComprobanteAbierto(null)}
+            onRevisado={({ fila, comprobante, inscripcion }) => {
+              parchear(fila.id_inscripcion, {
+                comprobante_estado: comprobante.estado,
+                comprobante_motivo_rechazo: comprobante.motivo_rechazo,
+                comprobante_revisado_en: comprobante.revisado_en,
+                pago_completado: inscripcion.pago_completado,
+                estado: inscripcion.estado,
+              });
+            }}
+          />
+
+          <QRScannerModal
+            isOpen={escanerAbierto}
+            onClose={() => setEscanerAbierto(false)}
+            // El evento que se está viendo, para que el escáner rechace un
+            // ticket de OTRO evento en vez de marcar asistencia allí.
+            eventoId={id}
+            onSuccess={(data) => {
+              toast.success(`Asistencia registrada: ${data?.nombre || 'asistente'}`);
+              refrescarAsistentes();
+            }}
+            // Marcar llegada/playera desde el roster del escáner también mueve
+            // la lista (el agregado del equipo se recalcula en el servidor).
+            onUpdate={() => refrescarAsistentes()}
+          />
+        </>
+      )}
     </div>
   );
 }

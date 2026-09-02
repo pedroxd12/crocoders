@@ -1,72 +1,41 @@
 import { NextResponse } from 'next/server';
 import { connectWithRetry } from '@/lib/db-server';
 import { requireAuth } from '@/lib/auth';
-import { SQL_COLUMNAS_COMPROBANTE, SQL_JOIN_COMPROBANTE } from '@/lib/comprobantes-pago';
+import { listarAsistentesEvento } from '@/lib/eventos-asistentes';
 
-// GET - Obtener asistentes del evento (para staff).
-// Gate: autenticado; abajo se exige pertenencia a staff_evento de ESTE evento (403).
+// GET - Inscritos del evento para el panel de staff.
+// Gate: autenticado; abajo se exige pertenencia a staff_evento de ESTE evento
+// (403). Cualquier rol asignado puede VER la lista (src/lib/roles-staff.js);
+// lo que cambia por rol es qué puede marcar, y eso lo deciden los endpoints
+// de escritura.
+//
+// La consulta es la MISMA del panel de administración
+// (src/lib/eventos-asistentes.js): antes el staff no veía talla, playera ni
+// quiénes integran cada equipo.
 export async function GET(request, { params }) {
   const guard = await requireAuth(request);
   if (!guard.ok) return guard.response;
 
   const { id } = await params;
-  const client = await connectWithRetry();
+  if (!id || isNaN(Number(id))) {
+    return NextResponse.json({ error: 'ID de evento inválido' }, { status: 400 });
+  }
 
+  const client = await connectWithRetry();
   try {
-    // Verificar que el usuario es staff del evento
     const staffCheck = await client.query(
       'SELECT id_staff FROM staff_evento WHERE id_evento = $1 AND id_miembro = $2',
-      [id, guard.session.id]
+      [id, guard.session.id],
     );
-
     if (staffCheck.rows.length === 0) {
-      return NextResponse.json(
-        { error: 'No tienes permisos para este evento' },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: 'No tienes permisos para este evento' }, { status: 403 });
     }
 
-    // Obtener lista de asistentes
-    const result = await client.query(
-      `SELECT 
-        ie.id_inscripcion,
-        ie.asistio,
-        ie.fecha_inscripcion,
-        COALESCE(
-          m.nombre || ' ' || m.apellido_paterno || ' ' || COALESCE(m.apellido_materno, ''),
-          i.nombre_completo,
-          eq.nombre_equipo
-        ) as nombre_completo,
-        COALESCE(m.correo_electronico, i.correo_electronico) as correo,
-        COALESCE(m.numero_ieee, '') as numero_ieee,
-        CASE 
-          WHEN ie.id_miembro IS NOT NULL THEN 'miembro'
-          WHEN ie.id_invitado IS NOT NULL THEN 'invitado'
-          WHEN ie.id_equipo IS NOT NULL THEN 'equipo'
-        END as tipo,
-        -- Pago: el staff del evento valida los comprobantes igual que un
-        -- administrador, así que necesita las mismas columnas.
-        ie.estado,
-        ie.pago_completado,
-        e.tiene_costo AS requiere_pago,
-        ${SQL_COLUMNAS_COMPROBANTE}
-      FROM inscripcion_evento ie
-      JOIN evento e ON e.id_evento = ie.id_evento
-      LEFT JOIN miembro m ON ie.id_miembro = m.id_miembro
-      LEFT JOIN invitado i ON ie.id_invitado = i.id_invitado
-      LEFT JOIN equipo_concurso eq ON ie.id_equipo = eq.id_equipo${SQL_JOIN_COMPROBANTE}
-      WHERE ie.id_evento = $1 AND ie.estado <> 'cancelada'
-      ORDER BY ie.fecha_inscripcion DESC`,
-      [id]
-    );
-
-    return NextResponse.json(result.rows);
+    const filas = await listarAsistentesEvento(client, id);
+    return NextResponse.json(filas);
   } catch (error) {
     console.error('Error fetching asistentes:', error);
-    return NextResponse.json(
-      { error: 'Error al obtener asistentes' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Error al obtener asistentes' }, { status: 500 });
   } finally {
     client.release();
   }

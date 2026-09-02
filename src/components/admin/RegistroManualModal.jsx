@@ -57,6 +57,9 @@ export default function RegistroManualModal({ isOpen, onClose, evento, eventoId,
 
   const [enviando, setEnviando] = useState(false);
   const [forzar, setForzar] = useState(false);
+  // Desafío elegido (eventos con retos). El servidor lo exige cuando el evento
+  // tiene retos activos; aquí se pide igual que en el formulario público.
+  const [idReto, setIdReto] = useState('');
 
   // Individual: usuario existente o invitado nuevo.
   const [modo, setModo] = useState('existente');
@@ -78,6 +81,20 @@ export default function RegistroManualModal({ isOpen, onClose, evento, eventoId,
     fetcher,
     { revalidateOnFocus: false },
   );
+
+  // Desafíos del evento con su ocupación. Se pide el listado del PANEL (no el
+  // público) para que el cupo que se ve aquí sea el mismo que comprobará el
+  // servidor al guardar.
+  const { data: retos } = useSWR(
+    isOpen && eventoId ? `/api/admin/eventos/${eventoId}/retos` : null,
+    fetcher,
+    { revalidateOnFocus: false },
+  );
+  const retosActivos = useMemo(
+    () => (Array.isArray(retos) ? retos.filter((r) => r.activo) : []),
+    [retos],
+  );
+  const unidadReto = esEquipos ? 'equipos' : 'inscripciones';
 
   // El formulario de equipo arranca ya con el mínimo de filas exigido, igual
   // que el público (abrir con una sola y fallar al enviar confundía). Se DERIVA
@@ -101,6 +118,7 @@ export default function RegistroManualModal({ isOpen, onClose, evento, eventoId,
     setIntegrantes([{ ...INTEGRANTE_EQUIPO_VACIO, es_capitan: true }]);
     setAsesores([{ ...ASESOR_VACIO }]);
     setForzar(false);
+    setIdReto('');
     onClose();
   };
 
@@ -198,6 +216,14 @@ export default function RegistroManualModal({ isOpen, onClose, evento, eventoId,
   const handleSubmit = (e) => {
     e.preventDefault();
 
+    // Con retos activos elegir uno es obligatorio (regla "un equipo, un
+    // desafío"); el servidor lo rechaza igual, pero el aviso aquí es inmediato.
+    if (retosActivos.length > 0 && !idReto) {
+      toast.warning('Elige el desafío en el que se inscribe.');
+      return;
+    }
+    const campoReto = idReto ? { id_reto: Number(idReto) } : {};
+
     if (esEquipos) {
       // Validaciones espejo del formulario público de equipos.
       if (filasIntegrantes.length < minEq) {
@@ -232,6 +258,7 @@ export default function RegistroManualModal({ isOpen, onClose, evento, eventoId,
           integrantes: integrantesEquipoPayload(filasIntegrantes),
           asesores: asesoresLlenos,
           forzar,
+          ...campoReto,
         },
         `Equipo “${nombreEquipo}” registrado con ${filasIntegrantes.length} integrante(s).`,
       );
@@ -251,6 +278,7 @@ export default function RegistroManualModal({ isOpen, onClose, evento, eventoId,
           tipo_usuario: 'invitado_nuevo',
           invitado: limpiarInvitadoPayload(invitado),
           forzar,
+          ...campoReto,
         },
         `${invitado.nombre_completo} quedó registrado.`,
       );
@@ -268,6 +296,7 @@ export default function RegistroManualModal({ isOpen, onClose, evento, eventoId,
         id_usuario: seleccionado.id,
         talla_playera: talla || undefined,
         forzar,
+        ...campoReto,
       },
       `${seleccionado.nombre_completo} quedó registrado.`,
     );
@@ -296,6 +325,29 @@ export default function RegistroManualModal({ isOpen, onClose, evento, eventoId,
       }
     >
       <form id="formulario-registro-manual" onSubmit={handleSubmit}>
+        {retosActivos.length > 0 && (
+          <div className="mb-5 rounded-xl border border-line bg-surface-2 p-4">
+            <Select
+              label="Desafío"
+              value={idReto}
+              onChange={(e) => setIdReto(e.target.value)}
+              required
+              placeholder="Selecciona el desafío"
+              options={retosActivos.map((r) => ({
+                value: r.id_reto,
+                label: r.cupo_equipos === null
+                  ? r.titulo
+                  : `${r.titulo} — ${r.equipos_disponibles} de ${r.cupo_equipos} ${unidadReto} libres${r.lleno ? ' (lleno)' : ''}`,
+              }))}
+              help={
+                forzar
+                  ? 'Con «Forzar registro» también se puede pasar del cupo del desafío.'
+                  : `Cada desafío admite un número limitado de ${unidadReto}.`
+              }
+            />
+          </div>
+        )}
+
         {esEquipos ? (
           <div className="space-y-5">
             <Input

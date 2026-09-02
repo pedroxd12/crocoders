@@ -24,7 +24,10 @@ export async function GET(request, { params }) {
         s.id_rol,
         m.nombre || ' ' || m.apellido_paterno || ' ' || COALESCE(m.apellido_materno, '') as nombre_completo,
         m.correo_electronico,
-        r.nombre as rol_nombre
+        r.nombre as rol_nombre,
+        r.puede_administrar,
+        r.puede_editar,
+        r.puede_ver
       FROM staff_evento s
       JOIN miembro m ON s.id_miembro = m.id_miembro
       JOIN catalogo_rol_staff r ON s.id_rol = r.id_rol

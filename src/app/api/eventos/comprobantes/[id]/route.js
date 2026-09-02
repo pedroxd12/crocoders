@@ -101,7 +101,7 @@ export async function PATCH(request, { params }) {
     // El estado de pago que consulta el RESTO del sistema (correos, listados,
     // check-in) sigue siendo el de la inscripción: aprobar el comprobante es lo
     // que lo mueve. Al aprobar se confirma la inscripción, igual que hace el
-    // toggle manual de /api/admin/inscripciones/[id]; al retirar la aprobación
+    // toggle manual de /api/eventos/inscripciones/[id]; al retirar la aprobación
     // vuelve a 'pendiente' porque en un evento con costo eso es lo que era.
     const { rows: inscripcion } = await client.query(
       `UPDATE inscripcion_evento

@@ -58,6 +58,12 @@ export const equipoSchema = z.object({
   nombre: z.string().trim().min(1).max(150),
 });
 
+// Reto (desafío) elegido al inscribirse. Opcional en el esquema porque la
+// mayoría de los eventos no tiene retos; que sea OBLIGATORIO cuando el evento
+// sí los tiene lo decide el servidor contra la base (src/lib/retos.js), que es
+// el único sitio que sabe si quedan plazas en ese reto.
+const idRetoSchema = z.coerce.number().int().positive().optional().nullable();
+
 export const eventoRegisterSchema = z.discriminatedUnion('tipo', [
   z.object({
     tipo: z.literal('miembro'),
@@ -65,16 +71,19 @@ export const eventoRegisterSchema = z.discriminatedUnion('tipo', [
     // La pide el flujo cuando el evento tiene `solicitar_talla`; se guarda en
     // la ficha del miembro.
     talla_playera: tallaSchema.optional(),
+    id_reto: idRetoSchema,
   }),
   z.object({
     tipo: z.literal('invitado'),
     eventoId: z.coerce.number().int().positive(),
     // id_invitado creado previamente vía POST /api/invitados.
     userId: z.coerce.number().int().positive(),
+    id_reto: idRetoSchema,
   }),
   z.object({
     tipo: z.literal('equipo'),
     eventoId: z.coerce.number().int().positive(),
+    id_reto: idRetoSchema,
     equipo: equipoSchema,
     integrantes: z.array(integranteSchema).min(1).max(10),
     // `asesores` es la forma actual (hasta concurso.max_asesores); `asesor`
@@ -83,6 +92,39 @@ export const eventoRegisterSchema = z.discriminatedUnion('tipo', [
     asesores: z.array(asesorSchema).max(5).optional(),
   }),
 ]);
+
+// Retos (desafíos) de un evento — panel admin.
+//
+// `slug` NO se acepta del cliente: lo deriva el servidor del título
+// (src/lib/retos.js) para que dos administradores que escriben el mismo título
+// obtengan el mismo identificador y no haya slugs a medio teclear en la URL de
+// la landing.
+const listaTextoSchema = z.array(z.string().trim().min(1).max(300)).max(20).optional();
+
+export const retoCreateSchema = z.object({
+  titulo: z.string().trim().min(1, 'El título es obligatorio').max(160, 'Máximo 160 caracteres'),
+  lede: optionalString(300),
+  resumen: optionalString(600),
+  descripcion: z.string().trim().max(5000, 'Máximo 5000 caracteres').optional().or(z.literal('')),
+  entregable: z.string().trim().max(2000, 'Máximo 2000 caracteres').optional().or(z.literal('')),
+  patrocinador: optionalString(160),
+  premio: optionalString(120),
+  tags: listaTextoSchema,
+  criterios: listaTextoSchema,
+  // Tope de equipos del reto. `null` = sin tope propio (sigue mandando el
+  // aforo del evento).
+  cupo_equipos: z.coerce.number().int().min(1, 'El cupo debe ser al menos 1').max(10000).optional().nullable(),
+  imagen_url: z.union([z.string().trim().url('La URL de la imagen no es válida').max(500), z.literal(''), z.null()]).optional(),
+  imagen_key: z.union([z.string().trim().max(255), z.literal(''), z.null()]).optional(),
+  tono: z.coerce.number().int().min(1).max(5).optional(),
+  orden: z.coerce.number().int().min(0).max(999).optional(),
+  activo: z.boolean().optional(),
+});
+
+// Edición: mismos campos, todos opcionales, y al menos uno presente.
+export const retoUpdateSchema = retoCreateSchema
+  .partial()
+  .refine((d) => Object.keys(d).length > 0, { message: 'No hay campos para actualizar' });
 
 // Alta de invitado (registro de externos sin cuenta).
 export const invitadoSchema = z.object({
@@ -294,6 +336,8 @@ const ETIQUETAS_CAMPO = {
   edad: 'Edad',
   talla_playera: 'Talla de playera',
   titulo: 'Título',
+  cupo_equipos: 'Cupo de equipos',
+  id_reto: 'Desafío',
   descripcion: 'Descripción',
   imagen_url: 'Imagen',
   qrToken: 'Credencial de la inscripción',

@@ -4,6 +4,7 @@ import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 import { recalcularCupos, verificarDisponibilidad } from '@/lib/eventos-cupos';
 import { ValidationError, resolverEquipo, insertarEquipo } from '@/lib/eventos-equipo';
+import { resolverRetoDeInscripcion } from '@/lib/retos';
 import {
   invitadoSchema, equipoSchema, integranteSchema, asesorSchema, parseOrError,
 } from '@/lib/validation';
@@ -38,7 +39,7 @@ export async function POST(request) {
     return NextResponse.json({ error: 'Cuerpo de la petición no es JSON válido' }, { status: 400 });
   }
 
-  const { id_evento, id_usuario, tipo_usuario, forzar, pago_completado } = body;
+  const { id_evento, id_usuario, tipo_usuario, forzar, pago_completado, id_reto } = body;
 
   const eventoId = Number(id_evento);
   if (!Number.isInteger(eventoId) || eventoId <= 0) {
@@ -94,6 +95,15 @@ export async function POST(request) {
     const pago = requierePago ? Boolean(pago_completado) : false;
     const estadoInicial = requierePago && !pago ? 'pendiente' : 'confirmada';
 
+    // Desafío elegido. Mismas reglas que el registro público, salvo que
+    // `forzar` también salta el cupo del reto: si el admin puede inscribir por
+    // encima del aforo del evento, puede hacerlo por encima del de un reto.
+    const reto = await resolverRetoDeInscripcion(client, eventoId, id_reto, { forzar: Boolean(forzar) });
+    if (!reto.ok) {
+      await client.query('ROLLBACK');
+      return NextResponse.json({ error: reto.error }, { status: 400 });
+    }
+
     let inscripcionId;
 
     if (tipo_usuario === 'equipo') {
@@ -131,6 +141,7 @@ export async function POST(request) {
         integrantesResueltos: resuelto.integrantesResueltos,
         estadoInicial,
         requierePago,
+        idReto: reto.idReto,
       });
 
       // La inserción compartida no conoce el pago (el flujo público siempre
@@ -302,9 +313,9 @@ export async function POST(request) {
       // y pisa lo que haya hecho el trigger de la base. Ver src/lib/eventos-cupos.js.
       if (existing.rows.length === 0) {
         const ins = await client.query(
-          `INSERT INTO inscripcion_evento (id_evento, ${col}, fecha_inscripcion, estado, requiere_pago, pago_completado)
-           VALUES ($1, $2, NOW(), $3, $4, $5) RETURNING id_inscripcion`,
-          [eventoId, usuarioId, estadoInicial, requierePago, pago],
+          `INSERT INTO inscripcion_evento (id_evento, ${col}, id_reto, fecha_inscripcion, estado, requiere_pago, pago_completado)
+           VALUES ($1, $2, $6, NOW(), $3, $4, $5) RETURNING id_inscripcion`,
+          [eventoId, usuarioId, estadoInicial, requierePago, pago, reto.idReto],
         );
         inscripcionId = ins.rows[0].id_inscripcion;
       } else if (existing.rows[0].estado === 'cancelada') {
@@ -313,9 +324,9 @@ export async function POST(request) {
         await client.query(
           `UPDATE inscripcion_evento
               SET estado = $3, fecha_inscripcion = NOW(),
-                  requiere_pago = $4, pago_completado = $2, updated_at = NOW()
+                  requiere_pago = $4, pago_completado = $2, id_reto = $5, updated_at = NOW()
             WHERE id_inscripcion = $1`,
-          [inscripcionId, pago, estadoInicial, requierePago],
+          [inscripcionId, pago, estadoInicial, requierePago, reto.idReto],
         );
       } else {
         // Ya está inscrito y activo.
@@ -345,6 +356,7 @@ export async function POST(request) {
       id_inscripcion: inscripcionId,
       estado_inscripcion: estadoInicial,
       requiere_pago: requierePago,
+      id_reto: reto.idReto,
     });
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch {}

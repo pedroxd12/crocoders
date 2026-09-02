@@ -13,6 +13,7 @@ import Button from '@/components/ui/Button';
 import EmptyState from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { formatearFechaMedia, formatearHora } from '@/lib/fechas';
+import { nivelDeRol, ETIQUETA_NIVEL, TONO_NIVEL } from '@/lib/roles-staff';
 import { estadoTemporal, esProximo, estaEnCurso } from './fechas';
 
 export default function StaffDashboard() {
@@ -133,9 +134,14 @@ function TarjetaEvento({ evento, router }) {
               {evento.ubicacion}
             </p>
           )}
-          <p className="flex items-center gap-1.5">
+          {/* Rol y nivel de permisos: lo que esta persona podrá hacer al
+              entrar (solo consulta / operación / gestión, ver roles-staff.js). */}
+          <p className="flex flex-wrap items-center gap-1.5">
             <ShieldCheck size={13} aria-hidden="true" />
             Mi rol: <span className="text-fg">{evento.mi_rol}</span>
+            <Badge tone={TONO_NIVEL[nivelDeRol(evento)]} className="ml-0.5">
+              {ETIQUETA_NIVEL[nivelDeRol(evento)]}
+            </Badge>
           </p>
           <p className="flex items-center gap-1.5">
             <Users size={13} aria-hidden="true" />

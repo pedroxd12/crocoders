@@ -17,6 +17,7 @@
 // recorriendo 1, 2, 3…
 
 import { verificarQrToken } from '@/lib/qr-token';
+import { autorizarStaffEvento } from '@/lib/checkin-eventos';
 
 /**
  * Columnas del comprobante para los listados de asistentes. Se escriben una
@@ -94,18 +95,14 @@ export async function resolverInscripcionDeToken(client, qrToken) {
  * ¿Puede esta sesión validar pagos del evento?
  *
  * Administrador siempre; el resto sólo si está asignado como staff de ESE
- * evento. Es la misma regla que el panel de staff (ver la nota de
- * staff-evento en /api/staff/eventos): no basta con tener rol 'staff', hay
- * que pertenecer al evento.
+ * evento con un rol de operación (`puede_editar` o `puede_administrar`). Es
+ * exactamente la misma regla que el escáner QR: antes bastaba con estar
+ * asignado, así que un rol de "solo consulta" (Apoyo, Juez) no podía marcar
+ * una llegada pero sí aprobar un pago.
  */
 export async function puedeValidarPagos(client, session, idEvento) {
-  if ((session?.role || '').toLowerCase() === 'administrador') return true;
-
-  const { rows } = await client.query(
-    'SELECT 1 FROM staff_evento WHERE id_evento = $1 AND id_miembro = $2 LIMIT 1',
-    [idEvento, session?.id],
-  );
-  return rows.length > 0;
+  const permiso = await autorizarStaffEvento(client, session, idEvento);
+  return permiso.ok;
 }
 
 /** Forma que consume la UI pública (no expone claves de almacenamiento). */

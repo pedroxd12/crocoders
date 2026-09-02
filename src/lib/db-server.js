@@ -58,7 +58,7 @@ const pool = new Pool({
 const TRANSIENT_NET_CODES = ['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE'];
 const TRANSIENT_PG_CODES = ['57P03', '57P02', '57P01'];
 
-function isTransientDbError(error) {
+export function isTransientDbError(error) {
   return (
     TRANSIENT_NET_CODES.includes(error?.code) ||
     TRANSIENT_PG_CODES.includes(error?.code) ||
@@ -66,16 +66,56 @@ function isTransientDbError(error) {
   );
 }
 
-// Un socket muerto (ECONNRESET/EPIPE en una conexión que el pool creía viva) se
-// resuelve al instante con otra conexión: no tiene sentido esperar un segundo.
-// En cambio 57P03 significa que Postgres todavía está arrancando y ahí sí hay
-// que darle tiempo real. Distinguirlos baja el peor caso de ~7s a ~2.5s y el
-// caso común (un solo socket rancio) de 1000ms a 150ms.
-function retryDelayFor(error, attempt) {
-  const dbIsBooting =
+// ¿El fallo es «Postgres todavía no acepta conexiones» en vez de un socket
+// caído? Se atienden de forma muy distinta (ver `crearPoliticaReintentos`).
+function baseArrancando(error) {
+  return (
     TRANSIENT_PG_CODES.includes(error?.code) ||
-    /database system is starting up|shutting down/i.test(error?.message || '');
-  return dbIsBooting ? 1000 * attempt : 150 * attempt;
+    /database system is starting up|shutting down/i.test(error?.message || '')
+  );
+}
+
+// Cuánto se espera COMO MÁXIMO a que la base termine de arrancar. Railway duerme
+// la instancia: la primera visita tras un rato de silencio la despierta, y
+// Postgres tarda desde unos segundos hasta bastante más en aceptar conexiones.
+// El esquema anterior (4 intentos con esperas de 1s+2s+3s) se rendía a los 6 s,
+// así que un arranque perfectamente normal acababa en 503 y la página salía
+// vacía con «the database system is starting up» en el log.
+const PRESUPUESTO_ARRANQUE_MS = Number(process.env.DB_ARRANQUE_MS || 20000);
+const ESPERA_ARRANQUE_MAX_MS = 3000;
+
+/**
+ * Política de reintentos de UNA operación. Devuelve cuántos ms esperar antes del
+ * siguiente intento, o `null` si hay que rendirse y propagar el error.
+ *
+ * Son dos fallos con la misma pinta pero de naturaleza opuesta:
+ *  - Socket muerto (ECONNRESET/EPIPE en una conexión que el pool creía viva): se
+ *    arregla al instante con otra conexión, así que se reintenta rápido y pocas
+ *    veces (150 ms · intento). Esperar un segundo aquí sólo alarga la respuesta.
+ *  - Base arrancando (57P03): no hay nada que hacer salvo esperar, y el número
+ *    de intentos es la medida equivocada. Aquí manda un PRESUPUESTO de tiempo,
+ *    con espera creciente (0.5s, 1s, 2s, 3s, 3s…) hasta agotarlo.
+ */
+function crearPoliticaReintentos(intentosRapidosMax) {
+  const inicio = Date.now();
+  let intentosRapidos = 0;
+  let esperaArranque = 500;
+
+  return function siguienteEspera(error) {
+    if (!isTransientDbError(error)) return null;
+
+    if (baseArrancando(error)) {
+      const restante = PRESUPUESTO_ARRANQUE_MS - (Date.now() - inicio);
+      if (restante <= 0) return null;
+      const espera = Math.min(esperaArranque, restante);
+      esperaArranque = Math.min(esperaArranque * 2, ESPERA_ARRANQUE_MAX_MS);
+      return espera;
+    }
+
+    intentosRapidos += 1;
+    if (intentosRapidos >= intentosRapidosMax) return null;
+    return 150 * intentosRapidos;
+  };
 }
 
 // Manejo de errores de conexión.
@@ -129,8 +169,11 @@ pool.on('error', (err) => {
  * Devuelve un client del pool — el caller DEBE hacer `client.release()`.
  */
 export async function connectWithRetry(maxRetries = 3) {
-  let lastError;
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  const siguienteEspera = crearPoliticaReintentos(maxRetries);
+  let intento = 0;
+
+  for (;;) {
+    intento++;
     let client;
     try {
       client = await pool.connect();
@@ -140,23 +183,19 @@ export async function connectWithRetry(maxRetries = 3) {
       await client.query('SELECT 1');
       return client;
     } catch (error) {
-      lastError = error;
       // Si el SELECT 1 falló, el client ya está tomado del pool: hay que
       // devolverlo DESTRUYÉNDOLO (release(true)), o el pool se queda sin slots
       // tras unos pocos fallos y además reparte otra vez el mismo socket muerto.
       if (client) {
         try { client.release(true); } catch { /* ya liberado */ }
       }
-      if (isTransientDbError(error) && attempt < maxRetries) {
-        const delay = retryDelayFor(error, attempt);
-        console.warn(`⚠️ connectWithRetry intento ${attempt}/${maxRetries} falló (${error.code || 'transient'}). Reintentando en ${delay}ms...`);
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        continue;
-      }
-      throw error;
+      // `null` = no es transitorio, o se acabó el presupuesto de espera.
+      const espera = siguienteEspera(error);
+      if (espera === null) throw error;
+      console.warn(`⚠️ connectWithRetry intento ${intento} falló (${error.code || 'transient'}). Reintentando en ${espera}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, espera));
     }
   }
-  throw lastError;
 }
 
 // Construye el texto parametrizado a partir del template literal.
@@ -204,42 +243,37 @@ function buildQuery(strings, values) {
  */
 export async function query(text, values = []) {
   const consulta = typeof text === 'string' ? { text, values } : text;
-  let lastError;
-  const maxRetries = 4;
+  const siguienteEspera = crearPoliticaReintentos(4);
+  let intento = 0;
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  for (;;) {
+    intento++;
     let client;
     let socketIsDead = false;
     try {
       client = await pool.connect();
       return await client.query(consulta);
     } catch (error) {
-      lastError = error;
       // Un ECONNRESET/EPIPE significa que ESTE socket está muerto. Devolverlo
       // al pool con release() normal lo deja disponible para el siguiente
       // request, que vuelve a fallar igual — era la causa de que el error se
       // repitiera entre intentos y entre endpoints. release(true) lo destruye.
       socketIsDead = TRANSIENT_NET_CODES.includes(error?.code);
 
-      if (isTransientDbError(error) && attempt < maxRetries) {
-        const delay = retryDelayFor(error, attempt);
-        console.warn(`⚠️ Intento ${attempt}/${maxRetries} falló (${error.code || 'transient'}). Reintentando en ${delay}ms...`);
-        if (client) {
-          try { client.release(socketIsDead); } catch { /* ya liberado */ }
-          client = null;
-        }
-        await new Promise(resolve => setTimeout(resolve, delay));
-        continue;
-      }
+      // `null` = no es transitorio, o se acabó el presupuesto de espera.
+      const espera = siguienteEspera(error);
+      if (espera === null) throw error;
 
-      // Si no es error de conexión o es el último intento, lanzar error
-      throw error;
+      console.warn(`⚠️ Intento ${intento} falló (${error.code || 'transient'}). Reintentando en ${espera}ms...`);
+      if (client) {
+        try { client.release(socketIsDead); } catch { /* ya liberado */ }
+        client = null;
+      }
+      await new Promise(resolve => setTimeout(resolve, espera));
     } finally {
       if (client) client.release(socketIsDead);
     }
   }
-
-  throw lastError;
 }
 
 // Consultas como template literal. Mismo reintento que `query`; devuelve filas.

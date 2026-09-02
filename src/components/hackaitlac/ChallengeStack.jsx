@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import styles from './hackaitlac.module.css';
 import ChallengeArt from './ChallengeArt';
 import ChallengeModal from './ChallengeModal';
@@ -21,7 +22,18 @@ function stackPose(index) {
   return { y: index * PEEK, scale: 1 - index * SCALE_STEP };
 }
 
-export default function ChallengeStack({ challenges }) {
+/**
+ * Texto de cupo de un desafío. Los desafíos los publica un administrador con su
+ * propio tope de equipos (migración 014); sin tope, la tarjeta no dice nada de
+ * cupos en lugar de inventarse un número.
+ */
+function textoCupo(ch) {
+  if (ch.cupo == null) return null;
+  if (ch.lleno) return 'Cupo lleno';
+  return `Quedan ${ch.disponibles} de ${ch.cupo} equipos`;
+}
+
+export default function ChallengeStack({ challenges, evento = null, titulo = 'Desafíos' }) {
   const sectionRef = useRef(null);
   const deckRef = useRef(null);
   const cardsRef = useRef([]);
@@ -194,7 +206,7 @@ export default function ChallengeStack({ challenges }) {
       >
         <div className={styles.challengesHead}>
           <h2 className={styles.challengesTitle}>
-            Cinco desafíos <em>reales</em>
+            {titulo} <em>reales</em>
           </h2>
           <p className={styles.challengesHint}>
             {pinned ? 'Desplázate para recorrerlos · toca una tarjeta para ver el detalle' : 'Toca una tarjeta para ver el detalle'}
@@ -246,12 +258,18 @@ export default function ChallengeStack({ challenges }) {
                   <p className={styles.cardBody}>{ch.resumen}</p>
 
                   <div className={styles.cardTags}>
-                    {ch.tags.map((tag) => (
+                    {(ch.tags || []).map((tag) => (
                       <span className={styles.cardTag} key={tag}>
                         {tag}
                       </span>
                     ))}
                   </div>
+
+                  {textoCupo(ch) && (
+                    <p className={`${styles.cardCupo} ${ch.lleno ? styles.cardCupoLleno : ''}`}>
+                      {textoCupo(ch)}
+                    </p>
+                  )}
 
                   <span className={styles.cardCta}>
                     <span>Ver detalles</span>
@@ -262,8 +280,21 @@ export default function ChallengeStack({ challenges }) {
                 </div>
 
                 <div className={styles.cardMedia}>
+                  {/* Con imagen propia manda la imagen; sin ella, la
+                      ilustración vectorial (que hereda el color de la tarjeta y
+                      nunca se ve rota). */}
                   <div className={styles.cardArt}>
-                    <ChallengeArt id={ch.id} />
+                    {ch.imagen ? (
+                      <Image
+                        src={ch.imagen}
+                        alt=""
+                        fill
+                        sizes="(max-width: 860px) 90vw, 380px"
+                        className={styles.cardArtImg}
+                      />
+                    ) : (
+                      <ChallengeArt id={ch.id} />
+                    )}
                   </div>
                 </div>
               </article>
@@ -272,7 +303,7 @@ export default function ChallengeStack({ challenges }) {
         </div>
       </section>
 
-      <ChallengeModal challenge={selected} onClose={() => setSelected(null)} />
+      <ChallengeModal challenge={selected} evento={evento} onClose={() => setSelected(null)} />
     </>
   );
 }

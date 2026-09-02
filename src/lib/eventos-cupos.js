@@ -30,6 +30,22 @@
 const ESTADOS_QUE_OCUPAN = "ie.estado <> 'cancelada'";
 
 /**
+ * La misma cuenta que `contarLugaresOcupados`, como subconsulta escalar para
+ * incrustar en un SELECT de eventos (`alias` es el de la tabla `evento`). La
+ * usan los detalles de evento del panel admin y del panel de staff para que
+ * los dos digan el mismo número.
+ */
+export const sqlLugaresOcupados = (alias = 'e') => `(
+          SELECT COALESCE(SUM(
+                   CASE WHEN ie.id_equipo IS NOT NULL
+                        THEN (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = ie.id_equipo)
+                        ELSE 1 END
+                 ), 0)::int
+            FROM inscripcion_evento ie
+           WHERE ie.id_evento = ${alias}.id_evento AND ${ESTADOS_QUE_OCUPAN}
+        )`;
+
+/**
  * Lugares realmente ocupados en un evento, contando los integrantes de cada
  * equipo. Es el número que manda: cualquier otra cifra se deriva de éste.
  * @param {import('pg').PoolClient} client

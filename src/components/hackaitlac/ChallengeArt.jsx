@@ -124,6 +124,26 @@ function Urbana() {
   );
 }
 
+/* Genérica — la que ve cualquier desafío creado desde el panel que no haya
+   subido imagen propia. Antes este componente devolvía `null` cuando el
+   identificador no estaba en la lista, así que un desafío nuevo salía con la
+   mitad de la tarjeta vacía. */
+function Generico() {
+  return (
+    <Art label="Desafío">
+      <circle cx="100" cy="100" r="16" fill={GOLD} stroke="none" />
+      <circle cx="100" cy="100" r="34" opacity="0.55" />
+      <circle cx="100" cy="100" r="58" opacity="0.3" />
+      <path d="M100 42V18M100 158v24M42 100H18M158 100h24" opacity="0.5" />
+      <path d="M59 59 42 42M141 59l17-17M59 141l-17 17M141 141l17 17" opacity="0.35" />
+      <circle cx="42" cy="42" r="5" fill={GOLD} stroke="none" />
+      <circle cx="158" cy="158" r="5" fill={GOLD} stroke="none" />
+      <circle cx="158" cy="42" r="4" stroke="currentColor" />
+      <circle cx="42" cy="158" r="4" stroke="currentColor" />
+    </Art>
+  );
+}
+
 const ART = {
   arancelaria: Arancelaria,
   'alerta-ciudadana': Alerta,
@@ -133,6 +153,6 @@ const ART = {
 };
 
 export default function ChallengeArt({ id }) {
-  const Component = ART[id];
-  return Component ? <Component /> : null;
+  const Component = ART[id] || Generico;
+  return <Component />;
 }

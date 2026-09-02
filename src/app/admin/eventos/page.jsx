@@ -6,7 +6,7 @@ import useSWR from 'swr';
 import Image from 'next/image';
 import { toast } from 'react-toastify';
 import {
-  Plus, Pencil, Trash2, Users, Search, ShieldUser, CalendarX2, ImageOff,
+  Plus, Pencil, Trash2, Users, Search, ShieldUser, CalendarX2, ImageOff, Target,
 } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
@@ -64,6 +64,7 @@ const FORM_VACIO = {
   imagen_flyer_url: null,
   imagen_flyer_key: undefined,
   solicitar_talla: false,
+  slug: '',
   es_concurso: false,
   modalidad: 'individual',
   max_integrantes_equipo: 3,
@@ -330,6 +331,7 @@ export default function EventosAdmin() {
       // admin sube otro flyer o lo quita.
       imagen_flyer_key: evento.imagen_flyer_key ?? undefined,
       solicitar_talla: Boolean(evento.solicitar_talla),
+      slug: evento.slug || '',
       es_concurso: evento.id_concurso != null,
       modalidad: evento.modalidad || 'individual',
       max_integrantes_equipo: evento.max_integrantes_equipo || 3,
@@ -375,7 +377,10 @@ export default function EventosAdmin() {
           )}
           <div className="min-w-0">
             <div className="truncate font-medium text-fg">{evento.nombre}</div>
-            <div className="text-xs text-muted">{evento.tipo_nombre}</div>
+            <div className="text-xs text-muted">
+              {evento.tipo_nombre}
+              {evento.total_retos > 0 && ` · ${evento.total_retos} desafío${evento.total_retos === 1 ? '' : 's'}`}
+            </div>
           </div>
         </div>
       ),
@@ -419,6 +424,12 @@ export default function EventosAdmin() {
       align: 'right',
       render: (evento) => (
         <div className="flex justify-end gap-1">
+          <IconButton
+            icon={Target}
+            label="Desafíos del evento"
+            tone="neutral"
+            onClick={() => router.push(`/admin/eventos/${evento.id_evento}/retos`)}
+          />
           <IconButton
             icon={ShieldUser}
             label="Gestionar staff"
@@ -574,6 +585,14 @@ export default function EventosAdmin() {
               value={formData.ubicacion}
               onChange={handleInputChange}
               placeholder="Aula, laboratorio o enlace de la sesión"
+            />
+            <Input
+              label="Identificador de página propia"
+              name="slug"
+              value={formData.slug}
+              onChange={handleInputChange}
+              placeholder="hackaitlac"
+              help="Sólo para eventos con landing propia. Escribe «hackaitlac» aquí y /hackaitlac publicará los desafíos y el registro de ESTE evento. Déjalo vacío en el resto."
             />
           </Seccion>
 

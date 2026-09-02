@@ -4,6 +4,7 @@ import { requireAdmin } from '@/lib/auth';
 import { UTApi } from "uploadthing/server";
 import { sanitizeHtml } from '@/lib/sanitize';
 import { recalcularCupos } from '@/lib/eventos-cupos';
+import { slugificar } from '@/lib/retos';
 
 const utapi = new UTApi();
 
@@ -49,6 +50,8 @@ export async function GET(request, context) {
         -- (permite_equipos && id_concurso && modalidad = 'equipos').
         t.permite_equipos,
         a.nombre as alcance_nombre,
+        -- Desafíos del evento (migración 014): la ficha del panel los muestra.
+        (SELECT COUNT(*)::int FROM reto_evento r WHERE r.id_evento = e.id_evento) as total_retos,
         -- Concurso info
         c.id_concurso,
         c.modalidad,
@@ -112,7 +115,7 @@ export async function PUT(request, context) {
         nombre, descripcion_html, id_tipo_evento, id_alcance,
         fecha_inicio, fecha_fin, fecha_limite_registro, hora_inicio, hora_fin,
         ubicacion, cupos, tiene_costo, costo, instrucciones_pago,
-        imagen_flyer_url, imagen_flyer_key, solicitar_talla,
+        imagen_flyer_url, imagen_flyer_key, solicitar_talla, slug,
         // Concurso
         es_concurso, modalidad, max_integrantes_equipo, min_integrantes_equipo, id_plataforma,
         requiere_asesor, asesor_participa, max_asesores, url_concurso
@@ -138,7 +141,7 @@ export async function PUT(request, context) {
 
     // 1. Bloquear el evento y leer estado actual (imagen + cupos).
     const currentRes = await client.query(
-      'SELECT imagen_flyer_url, imagen_flyer_key, cupos AS cupos_actual, cupos_disponibles FROM evento WHERE id_evento = $1 FOR UPDATE',
+      'SELECT imagen_flyer_url, imagen_flyer_key, cupos AS cupos_actual, cupos_disponibles, slug AS slug_actual FROM evento WHERE id_evento = $1 FOR UPDATE',
       [id],
     );
     if (currentRes.rows.length === 0) {
@@ -201,8 +204,12 @@ export async function PUT(request, context) {
             imagen_flyer_key = $16,
             solicitar_talla = $17,
             instrucciones_pago = $18,
+            -- Igual que la imagen: sólo se toca si el cliente manda la clave.
+            -- Así un PUT de un formulario que no conoce el campo no borra el
+            -- identificador de la landing.
+            slug = $19,
             updated_at = NOW()
-        WHERE id_evento = $19
+        WHERE id_evento = $20
         RETURNING *
     `;
 
@@ -210,6 +217,9 @@ export async function PUT(request, context) {
     const costoValue = parseFloat(costo) || 0;
     const tieneCostoValue = Boolean(tiene_costo) || costoValue > 0;
     const cuposValue = Number.isInteger(nuevoCupos) ? nuevoCupos : currentRes.rows[0].cupos_actual;
+    const slugValue = Object.prototype.hasOwnProperty.call(body, 'slug')
+      ? (slugificar(slug, 60) || null)
+      : currentRes.rows[0].slug_actual;
 
     await client.query(updateQuery, [
         nombre, sanitizeHtml(descripcion_html || ''), id_tipo_evento, id_alcance,
@@ -219,6 +229,7 @@ export async function PUT(request, context) {
         // Igual que en el alta: las instrucciones sólo viven mientras el
         // evento cobre. Al desmarcar el costo se limpian.
         tieneCostoValue ? (instrucciones_pago?.trim() || null) : null,
+        slugValue,
         id
     ]);
 
@@ -327,6 +338,12 @@ export async function PUT(request, context) {
     }
     if (error.code === '23503') {
       return NextResponse.json({ error: 'Tipo de evento, alcance o plataforma inválidos.' }, { status: 400 });
+    }
+    if (error.code === '23505' && String(error.constraint || '').includes('slug')) {
+      return NextResponse.json(
+        { error: 'Ya hay otro evento usando ese identificador de página. Elige uno distinto.' },
+        { status: 409 },
+      );
     }
     return NextResponse.json({ error: 'Error al actualizar evento' }, { status: 500 });
   } finally {

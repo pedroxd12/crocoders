@@ -1,7 +1,7 @@
 ﻿// src/app/eventos/[id]/page.jsx
 'use client';
 import { useEffect, useMemo, useState, useCallback, Suspense } from 'react';
-import { useRouter, useParams, usePathname } from 'next/navigation';
+import { useRouter, useParams, usePathname, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'react-toastify';
@@ -28,12 +28,12 @@ import {
 } from '@/components/eventos/RegistroInvitado';
 import ComprobantePagoModal, { EstadoPago } from '@/components/eventos/ComprobantePago';
 import { TALLAS_PLAYERA, CARRERAS_ITLAC } from '@/lib/registro-campos';
-import { postFetcher } from '@/lib/fetcher';
+import { fetcher, postFetcher } from '@/lib/fetcher';
 import { formatearFechaLarga, formatearHora, aDiaISO, combinarFechaHora } from '@/lib/fechas';
 import {
   Calendar, Clock, ArrowLeft, UserPlus,
   LogIn, AlertTriangle, Loader, PartyPopper, QrCode, Trash2, Plus,
-  Eye as EyeIcon, MapPin, Receipt
+  Eye as EyeIcon, MapPin, Receipt, Target
 } from 'lucide-react';
 
 async function sendEventRegistrationEmail(email, name, eventDetails, qrToken) {
@@ -52,6 +52,7 @@ function EventoDetalleContent() {
   const { id } = useParams();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   
   const [evento, setEvento] = useState(null);
@@ -79,6 +80,10 @@ function EventoDetalleContent() {
   // apartado— de abrirlo más tarde desde la ficha para corregirlo.
   const [showComprobanteModal, setShowComprobanteModal] = useState(false);
   const [comprobanteRecien, setComprobanteRecien] = useState(false);
+  // Desafío elegido (eventos con retos). El registro de un miembro es de un
+  // clic, así que igual que con la talla se le pregunta en un mini-modal.
+  const [retoSeleccionado, setRetoSeleccionado] = useState('');
+  const [showRetoModal, setShowRetoModal] = useState(false);
 
   // Status & Actions
   const [actionLoading, setActionLoading] = useState(false);
@@ -121,6 +126,54 @@ function EventoDetalleContent() {
   const maxEq = Number(evento?.max_integrantes_equipo) || null;
   // Tope de asesores del concurso (1 si el evento no lo configura).
   const maxAsesores = Math.min(5, Math.max(1, Number(evento?.max_asesores) || 1));
+
+  // Desafíos del evento. Van por su propio endpoint (y no dentro de
+  // /api/eventos/[id]) porque su ocupación cambia con cada registro: así basta
+  // revalidar esta clave tras inscribirse para que los cupos por desafío se
+  // actualicen sin recargar la ficha entera.
+  const { data: retosData, mutate: mutarRetos } = useSWR(
+    id ? `/api/eventos/${id}/retos` : null,
+    fetcher,
+    { revalidateOnFocus: false },
+  );
+  const retos = useMemo(() => (Array.isArray(retosData) ? retosData : []), [retosData]);
+  const hayRetos = retos.length > 0;
+  // Con todos los desafíos llenos ya no cabe nadie, aunque el aforo global del
+  // evento diga lo contrario.
+  const retosLlenos = hayRetos && retos.every((r) => r.lleno);
+  const unidadReto = esRegistroPorEquipos ? 'equipos' : 'inscripciones';
+
+  // Etiqueta del desafío para los selectores: título + plazas restantes.
+  const opcionesReto = useMemo(
+    () =>
+      retos.map((r) => ({
+        value: String(r.id_reto),
+        label:
+          r.cupo_equipos === null
+            ? r.titulo
+            : r.lleno
+              ? `${r.titulo} — sin plazas`
+              : `${r.titulo} — quedan ${r.equipos_disponibles} de ${r.cupo_equipos} ${unidadReto}`,
+      })),
+    [retos, unidadReto],
+  );
+
+  // Preselección desde la URL (?reto=slug): es como llega quien pulsa
+  // «Registrar equipo en este desafío» desde la landing del evento.
+  //
+  // Se DERIVA en render en vez de copiarse al estado desde un efecto: así no
+  // hay un render intermedio con el desafío sin elegir (que además dispara la
+  // regla de React contra los setState dentro de efectos) y, en cuanto la
+  // persona toca el selector, su elección manda sobre la de la URL.
+  const retoParam = searchParams.get('reto');
+  const retoPorUrl = useMemo(() => {
+    if (!retoParam) return '';
+    const encontrado = retos.find(
+      (r) => r.slug === retoParam || String(r.id_reto) === String(retoParam),
+    );
+    return encontrado && !encontrado.lleno ? String(encontrado.id_reto) : '';
+  }, [retoParam, retos]);
+  const retoElegido = retoSeleccionado || retoPorUrl;
 
   const sanitizedDescripcion = useMemo(() => {
     const html = evento?.descripcion || '<p>Sin descripción disponible.</p>';
@@ -255,11 +308,17 @@ function EventoDetalleContent() {
     setActionLoading(true);
     const endpoint = type === 'unregister' ? '/api/eventos/unregister' : '/api/eventos/register';
 
+    // El desafío puede venir en el payload (lo acaba de elegir un mini-modal,
+    // cuyo setState todavía no ha llegado al estado) o del estado. Se manda
+    // sólo si el evento tiene retos; el servidor lo exige en ese caso.
+    const idRetoElegido = payload.idReto ?? retoElegido;
+
     try {
       let requestBody = {
         eventoId: evento.id_evento,
         tipo: isAuthenticated ? 'miembro' : 'invitado',
         userId: user?.id_miembro,
+        ...(hayRetos && idRetoElegido ? { id_reto: Number(idRetoElegido) } : {}),
       };
 
       // Talla del miembro (eventos con `solicitar_talla`): la eligió en el
@@ -275,7 +334,8 @@ function EventoDetalleContent() {
               tipo: 'equipo',
               equipo: payload.equipo,
               integrantes: payload.integrantes,
-              asesores: payload.asesores
+              asesores: payload.asesores,
+              ...(hayRetos && idRetoElegido ? { id_reto: Number(idRetoElegido) } : {})
           };
       } else if (type === 'register' && !isAuthenticated) {
          // Registro Invitado Individual.
@@ -340,12 +400,17 @@ function EventoDetalleContent() {
       }
 
       
+      // Las plazas por desafío las lleva su propio endpoint: se revalidan aquí
+      // para que el contador de la ficha refleje el registro recién hecho.
+      if (hayRetos) mutarRetos();
+
       // Cerrar modales
       setShowRegistrationTypeModal(false);
       setShowGuestFormModal(false);
       setShowTeamFormModal(false);
       setShowUnregisterModal(false);
       setShowTallaModal(false);
+      setShowRetoModal(false);
 
       // Enviar correo (no bloquea la UI; si falla, avisa al usuario)
       if (!isCancellation) {
@@ -417,7 +482,12 @@ function EventoDetalleContent() {
       setTeamData({ ...teamData, integrantes: nuevosIntegrantes });
       setShowTeamFormModal(true);
     } else if (isAuthenticated) {
-      if (evento.solicitar_talla) {
+      // Evento repartido por desafíos: hay que elegir uno antes de nada. El
+      // registro de un miembro es de un clic y éste es el único punto donde
+      // preguntárselo (igual que la talla).
+      if (hayRetos && !retoElegido) {
+        setShowRetoModal(true);
+      } else if (evento.solicitar_talla) {
         // El evento entrega playera/kit: pedir la talla antes de confirmar.
         setShowTallaModal(true);
       } else {
@@ -425,6 +495,17 @@ function EventoDetalleContent() {
       }
     } else {
       setShowRegistrationTypeModal(true);
+    }
+  };
+
+  // Continuación del flujo de miembro tras elegir desafío en el mini-modal.
+  const continuarTrasReto = (idReto) => {
+    setRetoSeleccionado(idReto);
+    setShowRetoModal(false);
+    if (evento.solicitar_talla) {
+      setShowTallaModal(true);
+    } else {
+      handleApiRegistration('register', { idReto });
     }
   };
 
@@ -486,6 +567,11 @@ function EventoDetalleContent() {
   // Validaciones extra antes de enviar
   const handleTeamSubmit = (e) => {
     e.preventDefault();
+    // Un equipo, un desafío: sin elegirlo el servidor rechaza el registro.
+    if (hayRetos && !retoElegido) {
+        toast.error('Elige el desafío en el que participa tu equipo.');
+        return;
+    }
     if (teamData.integrantes.length < minEq) {
         toast.warning(`Debes registrar al menos ${minEq} integrantes.`);
         return;
@@ -537,7 +623,12 @@ function EventoDetalleContent() {
   // badge "Finalizado" y el botón seguía activo, así que se podía uno inscribir
   // a un evento terminado y recibir por correo el QR de acceso.
   const canParticipate =
-    !evento.isPastEvent && !evento.registroCerrado && (evento.cupos === null || evento.cupos_disponibles > 0);
+    !evento.isPastEvent
+    && !evento.registroCerrado
+    && (evento.cupos === null || evento.cupos_disponibles > 0)
+    // Los cupos por desafío son un tope independiente del aforo: si no queda
+    // plaza en ninguno, no hay dónde inscribirse.
+    && !retosLlenos;
 
   return (
     <motion.main
@@ -678,6 +769,93 @@ function EventoDetalleContent() {
                         </div>
                    </div>
               )}
+
+              {/* Desafíos del evento (migración 014). Cada uno lleva su propio
+                  cupo de equipos, así que aquí se ve dónde queda sitio ANTES de
+                  abrir el formulario. */}
+              {hayRetos && (
+                  <div className="mt-8 rounded-2xl border border-line bg-surface p-6 md:p-8">
+                      <div className="mb-5 flex items-center gap-3">
+                          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                              <Target size={17} aria-hidden="true" />
+                          </span>
+                          <div>
+                              <h2 className="text-2xl font-bold text-fg">Desafíos</h2>
+                              <p className="text-sm text-muted">
+                                  Cada inscripción elige uno y cada desafío tiene su propio cupo.
+                              </p>
+                          </div>
+                      </div>
+
+                      <ul className="space-y-3">
+                          {retos.map((reto, i) => {
+                              const seleccionado = String(reto.id_reto) === retoElegido;
+                              return (
+                                  <li
+                                      key={reto.id_reto}
+                                      className={`rounded-xl border p-4 transition-colors ${
+                                          seleccionado
+                                            ? 'border-brand/50 bg-brand-soft'
+                                            : 'border-line bg-surface-2'
+                                      }`}
+                                  >
+                                      <div className="flex items-start gap-4">
+                                          {reto.imagen_url && (
+                                              <Image
+                                                  src={reto.imagen_url}
+                                                  alt=""
+                                                  width={72}
+                                                  height={72}
+                                                  className="h-16 w-16 shrink-0 rounded-lg object-cover"
+                                              />
+                                          )}
+                                          <div className="min-w-0 flex-1">
+                                              <div className="flex flex-wrap items-baseline gap-x-2">
+                                                  <span className="text-xs font-bold tabular-nums text-faint">
+                                                      {String(i + 1).padStart(2, '0')}
+                                                  </span>
+                                                  <h3 className="font-semibold text-fg">{reto.titulo}</h3>
+                                              </div>
+                                              {reto.lede && <p className="mt-1 text-sm text-muted">{reto.lede}</p>}
+                                              {reto.resumen && (
+                                                  <p className="mt-1.5 text-sm text-faint">{reto.resumen}</p>
+                                              )}
+                                              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                                                  {reto.cupo_equipos === null ? (
+                                                      <span className="text-faint">Sin límite de {unidadReto}</span>
+                                                  ) : reto.lleno ? (
+                                                      <span className="font-medium text-danger">Cupo lleno</span>
+                                                  ) : (
+                                                      <span className="text-muted">
+                                                          Quedan{' '}
+                                                          <span className="font-semibold text-fg">
+                                                              {reto.equipos_disponibles}
+                                                          </span>{' '}
+                                                          de {reto.cupo_equipos} {unidadReto}
+                                                      </span>
+                                                  )}
+                                                  {reto.patrocinador && (
+                                                      <span className="text-faint">· {reto.patrocinador}</span>
+                                                  )}
+                                              </div>
+                                          </div>
+                                          {!isRegistered && canParticipate && !reto.lleno && (
+                                              <Button
+                                                  size="sm"
+                                                  variant={seleccionado ? 'primary' : 'secondary'}
+                                                  onClick={() => setRetoSeleccionado(String(reto.id_reto))}
+                                                  className="shrink-0"
+                                              >
+                                                  {seleccionado ? 'Elegido' : 'Elegir'}
+                                              </Button>
+                                          )}
+                                      </div>
+                                  </li>
+                              );
+                          })}
+                      </ul>
+                  </div>
+              )}
           </div>
 
           {/* Sidebar / Actions */}
@@ -789,6 +967,8 @@ function EventoDetalleContent() {
                             ? 'Evento finalizado'
                             : evento.registroCerrado
                               ? 'Inscripciones Cerradas'
+                              : retosLlenos
+                                ? 'Desafíos llenos'
                               : !canParticipate
                                 ? 'Cupos Agotados'
                                 : esRegistroPorEquipos
@@ -833,6 +1013,19 @@ function EventoDetalleContent() {
          <form id="form-equipo" onSubmit={handleTeamSubmit} className="space-y-6">
             <div className="space-y-4">
                 <h3 className="text-brand font-bold border-b border-line pb-2">Datos del Equipo</h3>
+                {/* Un equipo, un desafío: el cupo de cada uno lo comprueba el
+                    servidor al guardar, así que la lista sólo orienta. */}
+                {hayRetos && (
+                  <Select
+                    label="Desafío"
+                    value={retoElegido}
+                    onChange={(e) => setRetoSeleccionado(e.target.value)}
+                    options={opcionesReto}
+                    placeholder="Selecciona el desafío"
+                    required
+                    help={`Cada desafío admite un número limitado de ${unidadReto}.`}
+                  />
+                )}
                 <Input label="Nombre del equipo" value={teamData.nombre} onChange={e => setTeamData({...teamData, nombre: e.target.value})} required/>
 
                 <div className="space-y-3 bg-surface-2 p-4 rounded-xl border border-line">
@@ -1000,6 +1193,10 @@ function EventoDetalleContent() {
             <Button
               loading={actionLoading}
               onClick={() => {
+                if (hayRetos && !retoElegido) {
+                  toast.error('Elige el desafío en el que quieres participar.', { theme: 'dark' });
+                  return;
+                }
                 const errors = validarInvitado(guestData, { requiereTalla: Boolean(evento.solicitar_talla) });
                 setGuestErrors(errors);
                 if (Object.keys(errors).length > 0) {
@@ -1014,12 +1211,60 @@ function EventoDetalleContent() {
           </>
         }
       >
+          {hayRetos && (
+            <div className="mb-5">
+              <Select
+                label="Desafío"
+                value={retoElegido}
+                onChange={(e) => setRetoSeleccionado(e.target.value)}
+                options={opcionesReto}
+                placeholder="Selecciona el desafío"
+                required
+                help={`Cada desafío admite un número limitado de ${unidadReto}.`}
+              />
+            </div>
+          )}
           <CamposInvitado
             data={guestData}
             errors={guestErrors}
             onChange={setGuestData}
             requiereTalla={Boolean(evento.solicitar_talla)}
           />
+      </Modal>
+
+      {/* Desafío del miembro: mismo patrón que la talla. El registro de un
+          miembro es de un clic, así que el desafío se pregunta aquí y el flujo
+          continúa con la talla (si el evento la pide) o con el registro. */}
+      <Modal
+        isOpen={showRetoModal}
+        onClose={() => setShowRetoModal(false)}
+        title="Elige tu desafío"
+        description={evento.nombre_evento}
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowRetoModal(false)} disabled={actionLoading}>
+              Cancelar
+            </Button>
+            <Button
+              loading={actionLoading}
+              disabled={!retoElegido}
+              onClick={() => continuarTrasReto(retoElegido)}
+            >
+              Continuar
+            </Button>
+          </>
+        }
+      >
+        <Select
+          label="Desafío"
+          value={retoElegido}
+          onChange={(e) => setRetoSeleccionado(e.target.value)}
+          options={opcionesReto}
+          placeholder="Selecciona el desafío"
+          required
+          help={`Cada desafío admite un número limitado de ${unidadReto}.`}
+        />
       </Modal>
 
       {/* Talla del miembro (eventos con solicitar_talla): el registro de
@@ -1029,7 +1274,7 @@ function EventoDetalleContent() {
         onClose={() => setShowTallaModal(false)}
         titulo={evento.nombre_evento}
         loading={actionLoading}
-        onConfirm={(talla) => handleApiRegistration('register', { tallaPlayera: talla })}
+        onConfirm={(talla) => handleApiRegistration('register', { tallaPlayera: talla, idReto: retoElegido })}
       />
 
       {/* Comprobante de pago: paso siguiente al registro en eventos con costo,

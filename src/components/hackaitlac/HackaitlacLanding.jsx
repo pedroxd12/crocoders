@@ -11,93 +11,6 @@ import ScheduleSection from './ScheduleSection';
 import ClosingSection from './ClosingSection';
 import { acquireScroll, releaseScroll, refreshScroll } from './scroll-engine';
 
-/* ── Desafíos (convocatoria HackaItlac 2026) ─────────────────────────────── */
-const CRITERIOS = [
-  'Propuesta de valor: pertinencia, relevancia, beneficios y distinción',
-  'Grado de solución al desafío planteado',
-  'Innovación por el uso de tecnología: datos abiertos, ciencia de datos, IA',
-  'Potencial de escalabilidad',
-  'Y lo que consideren los especialistas del desafío',
-];
-
-const challenges = [
-  {
-    id: 'arancelaria',
-    tone: 1,
-    index: '01',
-    title: 'Clasificación arancelaria',
-    lede: 'Un algoritmo que determine la fracción arancelaria de un producto.',
-    resumen:
-      'Una fracción mal asignada cuesta multas y mercancía detenida en aduana. Automatizar esa decisión es el reto.',
-    body: 'Diseña y prueba un algoritmo capaz de determinar automáticamente la clasificación arancelaria de un producto a partir de sus características. Es un problema real del comercio exterior: una fracción mal asignada cuesta tiempo, multas y mercancía detenida en aduana.',
-    entregable:
-      'Prototipo funcional que reciba la descripción de un producto y devuelva su clasificación, con evidencia de las pruebas realizadas sobre casos reales.',
-    patrocinador: 'Sector aduanal',
-    tags: ['IA', 'Ciencia de datos', 'Comercio exterior'],
-    criteria: CRITERIOS,
-  },
-  {
-    id: 'alerta-ciudadana',
-    tone: 2,
-    index: '02',
-    title: 'Alerta ciudadana',
-    lede: 'Un sistema inteligente de alerta para la seguridad de la ciudad.',
-    resumen:
-      'Reportar y avisar en segundos, desde la calle y con mala señal. Tiene que servirle a cualquiera, no sólo a quien sabe usarlo.',
-    body: 'Diseña un sistema inteligente de alerta ciudadana: que la gente pueda reportar incidentes y recibir avisos de forma rápida y confiable. Piensa en quién lo va a usar en la calle, con prisa y con mala señal.',
-    entregable:
-      'Prototipo funcional del sistema de reporte y notificación, probado durante el evento con casos de uso concretos.',
-    patrocinador: 'Seguridad pública municipal',
-    tags: ['Móvil', 'Tiempo real', 'Geolocalización'],
-    criteria: CRITERIOS,
-  },
-  {
-    id: 'resguardo-industrial',
-    tone: 3,
-    index: '03',
-    title: 'Resguardo de equipo industrial',
-    lede: 'Una plataforma web para registrar, rastrear y controlar equipo.',
-    resumen:
-      'Alta y baja de activos, asignación, ubicación e historial. Que nadie tenga que perseguir una herramienta por radio.',
-    body: 'Desarrolla una plataforma web para el resguardo de equipo industrial: alta y baja de activos, asignación a personal, ubicación, historial de movimientos y reportes de estado. El objetivo es que nadie tenga que perseguir una herramienta por radio.',
-    entregable:
-      'Plataforma web funcional con el flujo completo de resguardo y devolución, más los reportes básicos de inventario.',
-    patrocinador: 'Industria del puerto',
-    tags: ['Web', 'Inventario', 'Trazabilidad'],
-    criteria: CRITERIOS,
-  },
-  {
-    id: 'despacho-agua',
-    tone: 4,
-    index: '04',
-    title: 'Despacho automático de agua',
-    lede: 'Automatizar el despacho de agua cruda en CAPALAC.',
-    resumen:
-      'Sensado, control del flujo y registro de cada despacho de agua cruda, con monitoreo de lo que pasa en la toma.',
-    body: 'Crea un sistema para el despacho automático de agua cruda en la Comisión de Agua Potable y Alcantarillado de Lázaro Cárdenas. Sensado, control del flujo, registro de cada despacho y monitoreo de lo que está pasando en la toma.',
-    entregable:
-      'Prototipo funcional —software y, si aplica, hardware— que ejecute y registre un ciclo completo de despacho.',
-    patrocinador: 'CAPALAC',
-    tags: ['IoT', 'Automatización', 'Sensores'],
-    criteria: CRITERIOS,
-  },
-  {
-    id: 'imagen-urbana',
-    tone: 5,
-    index: '05',
-    title: 'Imagen urbana',
-    lede: 'Una propuesta de imagen urbana para Lázaro Cárdenas.',
-    resumen:
-      'Diseño urbano apoyado en tecnología: visualización, participación ciudadana y una propuesta ejecutable por etapas.',
-    body: 'Desarrolla una propuesta para el diseño de la imagen urbana de la Ciudad de Lázaro Cárdenas, Michoacán. Aquí la tecnología acompaña al diseño: visualización, participación ciudadana y una propuesta que se pueda ejecutar por etapas.',
-    entregable:
-      'Propuesta de diseño acompañada de un prototipo que la comunique: maqueta digital, visualización interactiva o herramienta de consulta.',
-    patrocinador: 'Gobierno municipal',
-    tags: ['Diseño', 'Visualización', 'Ciudad'],
-    criteria: CRITERIOS,
-  },
-];
-
 /* ── Bases de participación ─────────────────────────────────────────────── */
 const rules = [
   {
@@ -191,7 +104,36 @@ const scheduleStops = [
   },
 ];
 
-export default function HackaitlacLanding() {
+/** Números en palabra para el titular de la sección de desafíos. */
+const NUMERALES = ['Cero', 'Un', 'Dos', 'Tres', 'Cuatro', 'Cinco', 'Seis', 'Siete', 'Ocho', 'Nueve', 'Diez'];
+
+/**
+ * Landing del HackaItlac.
+ *
+ * `challenges` y `evento` los sirve el Server Component (src/app/hackaitlac/page.js)
+ * desde el evento que el panel marcó con `slug = 'hackaitlac'`. Cuando no hay
+ * ninguno, llegan los desafíos de respaldo y `evento` es null: la página se ve
+ * igual, pero sin cupos ni registro en línea.
+ */
+export default function HackaitlacLanding({ challenges = [], evento = null }) {
+  const totalDesafios = challenges.length;
+
+  // Personas por equipo que se anuncian: integrantes del concurso más el asesor
+  // cuando no compite. Sin evento configurado se mantiene la cifra de la
+  // convocatoria impresa.
+  const maxIntegrantes = Number(evento?.max_integrantes_equipo) || null;
+  const personasPorEquipo = maxIntegrantes
+    ? maxIntegrantes + (evento?.requiere_asesor && !evento?.asesor_participa ? 1 : 0)
+    : 6;
+
+  // El premio lo escribe el administrador en cada desafío; se muestra el del
+  // primero que lo tenga (en la práctica es el mismo para todos).
+  const premio = challenges.find((c) => c.premio)?.premio || null;
+
+  const tituloDesafios = totalDesafios === 1
+    ? 'Un desafío'
+    : `${NUMERALES[totalDesafios] || totalDesafios} desafíos`;
+
   // El orquestador también reserva el motor: así el scroll suave sigue vivo
   // mientras la página esté montada, aunque una sección se desmonte.
   useEffect(() => {
@@ -216,7 +158,7 @@ export default function HackaitlacLanding() {
 
   return (
     <div className={styles.page} data-hackaitlac="">
-      <HackNav />
+      <HackNav mostrarDesafios={totalDesafios > 0} />
 
       <HeroSection />
 
@@ -236,7 +178,7 @@ export default function HackaitlacLanding() {
               la segunda edición del HackaItlac.
             </p>
             <p>
-              No son ejercicios de clase: los cinco desafíos los ponen empresas, dependencias e
+              No son ejercicios de clase: los desafíos los ponen empresas, dependencias e
               instituciones de la región, y cada equipo tiene que entregar un prototipo funcional,
               desarrollado y probado durante el evento.
             </p>
@@ -258,15 +200,15 @@ export default function HackaitlacLanding() {
             <span className={styles.figureLabel}>Edición</span>
           </div>
           <div className={styles.figure}>
-            <span className={styles.figureValue}>5</span>
-            <span className={styles.figureLabel}>Desafíos</span>
+            <span className={styles.figureValue}>{totalDesafios}</span>
+            <span className={styles.figureLabel}>{totalDesafios === 1 ? 'Desafío' : 'Desafíos'}</span>
           </div>
           <div className={styles.figure}>
             <span className={styles.figureValue}>24 h</span>
             <span className={styles.figureLabel}>De desarrollo</span>
           </div>
           <div className={styles.figure}>
-            <span className={styles.figureValue}>6</span>
+            <span className={styles.figureValue}>{personasPorEquipo}</span>
             <span className={styles.figureLabel}>Personas por equipo</span>
           </div>
         </div>
@@ -294,10 +236,12 @@ export default function HackaitlacLanding() {
             </p>
           </div>
           <div className={styles.figures} style={{ borderTop: 'none', paddingTop: 0 }}>
-            <div className={styles.figure}>
-              <span className={styles.figureValue}>$15k</span>
-              <span className={styles.figureLabel}>MXN por desafío</span>
-            </div>
+            {premio && (
+              <div className={styles.figure}>
+                <span className={styles.figureValue}>{premio}</span>
+                <span className={styles.figureLabel}>Al primer lugar de cada desafío</span>
+              </div>
+            )}
             <div className={styles.figure}>
               <span className={styles.figureValue}>5 + 5</span>
               <span className={styles.figureLabel}>Min. de exposición y preguntas</span>
@@ -329,14 +273,18 @@ export default function HackaitlacLanding() {
         </div>
       </ScrollSection>
 
-      {/* 5 — Desafíos */}
-      <ChallengeStack challenges={challenges} />
+      {/* 5 — Desafíos (los publica un administrador desde el panel). Sin
+          ninguno activo la sección no se pinta: una baraja vacía rompería el
+          pin del scroll y no diría nada. */}
+      {totalDesafios > 0 && (
+        <ChallengeStack challenges={challenges} evento={evento} titulo={tituloDesafios} />
+      )}
 
       {/* 6 — Cronograma */}
       <ScheduleSection stops={scheduleStops} zIndex={6} />
 
       {/* 7 — Premio, registro y pie */}
-      <ClosingSection zIndex={7} />
+      <ClosingSection zIndex={7} evento={evento} premio={premio} />
     </div>
   );
 }

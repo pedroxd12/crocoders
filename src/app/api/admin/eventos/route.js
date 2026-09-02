@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 import { sanitizeHtml } from '@/lib/sanitize';
+import { slugificar } from '@/lib/retos';
 
 export async function GET(request) {
   const guard = await requireAdmin(request);
@@ -27,6 +28,10 @@ export async function GET(request) {
         e.imagen_flyer_url,
         e.estado,
         e.solicitar_talla,
+        e.slug,
+        -- Retos del evento: el panel necesita saber si tiene y cuántos para
+        -- llevar al gestor de desafíos sin abrir la pantalla en vacío.
+        (SELECT COUNT(*)::int FROM reto_evento r WHERE r.id_evento = e.id_evento) as total_retos,
         t.id_tipo_evento,
         t.nombre as tipo_nombre,
         a.id_alcance,
@@ -105,6 +110,8 @@ export async function POST(request) {
       imagen_flyer_url,
       imagen_flyer_key,
       solicitar_talla,
+      // Identificador para la landing propia del evento (p. ej. 'hackaitlac').
+      slug,
       // Datos de concurso
       es_concurso,
       modalidad, // 'individual' | 'equipos'
@@ -157,6 +164,7 @@ export async function POST(request) {
         imagen_flyer_url, imagen_flyer_key,
         solicitar_talla,
         instrucciones_pago,
+        slug,
         estado
       ) VALUES (
         $1, $2, $3, $4,
@@ -164,7 +172,7 @@ export async function POST(request) {
         $10, $11, $11, -- cupos_disponibles inicial = cupos
         $12, $13,
         $14, $15,
-        $16, $17,
+        $16, $17, $18,
         'publicado'
       )
       RETURNING id_evento;
@@ -193,7 +201,11 @@ export async function POST(request) {
       Boolean(solicitar_talla),
       // Sin costo no hay nada que pagar: guardar instrucciones ahí sólo
       // serviría para que reaparecieran si algún día se marca el cobro.
-      tieneCostoValue ? (instrucciones_pago?.trim() || null) : null
+      tieneCostoValue ? (instrucciones_pago?.trim() || null) : null,
+      // El slug se normaliza aquí (no en el navegador) para que sea siempre el
+      // mismo texto que buscan las landings.
+      // varchar(60) en `evento.slug`: el recorte lo hace el helper.
+      slugificar(slug, 60) || null
     ]);
 
     const idEvento = eventoRes.rows[0].id_evento;
@@ -249,6 +261,12 @@ export async function POST(request) {
     }
     if (error.code === '23503') {
       return NextResponse.json({ error: 'Tipo de evento, alcance o plataforma inválidos.' }, { status: 400 });
+    }
+    if (error.code === '23505' && String(error.constraint || '').includes('slug')) {
+      return NextResponse.json(
+        { error: 'Ya hay otro evento usando ese identificador de página. Elige uno distinto.' },
+        { status: 409 },
+      );
     }
     return NextResponse.json(
       { error: 'Error al crear evento' },

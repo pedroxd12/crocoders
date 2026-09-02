@@ -9,6 +9,7 @@ import {
 } from '@/lib/puntajes-sync';
 import { requireAuth, requireAdmin } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
+import { isTransientDbError } from '@/lib/db-server';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -81,6 +82,19 @@ function respuesta({ resultados, actualizadoEn }, pendientes, cacheControl, meta
   );
 }
 
+// La base (Railway) se duerme: el primer request tras un rato de silencio puede
+// fallar mientras arranca, aunque la capa de datos ya reintenta durante todo el
+// arranque. Es transitorio y el cliente vuelve a pedirlo cada 3 s, así que se
+// registra como aviso; `console.error` lo convertiría en un error de pantalla
+// completa en el overlay de desarrollo por algo que se recupera solo.
+function registrarFallo(contexto, error) {
+  if (isTransientDbError(error)) {
+    console.warn(`[puntajes] ${contexto}: base no disponible (${error.code || error.message}), se reintentará.`);
+  } else {
+    console.error(`[puntajes] ${contexto} falló:`, error?.message || error);
+  }
+}
+
 export async function GET() {
   try {
     const [datos, pendientes] = await Promise.all([leerPuntajes(), contarPendientes()]);
@@ -99,7 +113,7 @@ export async function GET() {
 
     return respuesta(datos, pendientes, CACHE_GET);
   } catch (error) {
-    console.error('[puntajes] GET falló:', error.message);
+    registrarFallo('GET', error);
     return NextResponse.json(
       { resultados: [], meta: { error: 'service_unavailable' } },
       { status: 503, headers: { 'Cache-Control': 'no-store' } },
@@ -156,7 +170,7 @@ export async function POST(request) {
       const [datos, pendientes] = await Promise.all([leerPuntajes(), contarPendientes()]);
       return respuesta(datos, pendientes, 'no-store', { reutilizada: true });
     } catch (error) {
-      console.error('[puntajes] POST (lote en curso) falló:', error.message);
+      registrarFallo('POST (lote en curso)', error);
       return NextResponse.json(
         { resultados: [], meta: { error: 'service_unavailable' } },
         { status: 503, headers: { 'Cache-Control': 'no-store' } },
@@ -193,7 +207,7 @@ export async function POST(request) {
       reutilizada: resultadoSync?.reutilizada === true,
     });
   } catch (error) {
-    console.error('[puntajes] POST falló:', error.message);
+    registrarFallo('POST', error);
     return NextResponse.json(
       { resultados: [], meta: { error: 'service_unavailable' } },
       { status: 503, headers: { 'Cache-Control': 'no-store' } },

@@ -42,6 +42,9 @@ export async function GET(request) {
         ae.nombre as alcance,
         r.nombre as mi_rol,
         r.id_rol,
+        r.puede_administrar,
+        r.puede_editar,
+        r.puede_ver,
         COUNT(DISTINCT ie.id_inscripcion) as total_inscritos,
         COUNT(DISTINCT CASE WHEN ie.asistio = true THEN ie.id_inscripcion END) as total_asistieron
       FROM staff_evento se
@@ -51,7 +54,7 @@ export async function GET(request) {
       LEFT JOIN catalogo_alcance_evento ae ON e.id_alcance = ae.id_alcance
       LEFT JOIN inscripcion_evento ie ON e.id_evento = ie.id_evento AND ie.estado <> 'cancelada'
       WHERE se.id_miembro = $1 AND e.deleted_at IS NULL
-      GROUP BY e.id_evento, te.nombre, ae.nombre, r.nombre, r.id_rol
+      GROUP BY e.id_evento, te.nombre, ae.nombre, r.nombre, r.id_rol, r.puede_administrar, r.puede_editar, r.puede_ver
       ORDER BY e.fecha_inicio DESC`,
       [id_miembro]
     );

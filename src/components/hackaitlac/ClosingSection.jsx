@@ -4,14 +4,26 @@ import { useEffect, useRef } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import styles from './hackaitlac.module.css';
+import { formatearFechaHora } from '@/lib/fechas';
 import { acquireScroll, releaseScroll, revealLines } from './scroll-engine';
 
 const CONTACTO = 'hackaitlac@lcardenas.tecnm.mx';
 
-/** Cierre: premio, llamada al registro y pie con las instituciones. */
-export default function ClosingSection({ zIndex = 7 }) {
+/**
+ * Cierre: premio, llamada al registro y pie con las instituciones.
+ *
+ * `evento` llega del sistema de eventos (el que tiene slug 'hackaitlac'): con
+ * él, el botón lleva al formulario real y las fechas y los lugares que quedan
+ * son los de la base. Sin él —contenido de respaldo— se mantiene el correo del
+ * comité, que es lo que había antes de que la convocatoria fuera gestionable.
+ */
+export default function ClosingSection({ zIndex = 7, evento = null, premio = null }) {
   const sectionRef = useRef(null);
   const titleRef = useRef(null);
+
+  const registroCerrado = Boolean(evento?.registro_cerrado || evento?.evento_terminado);
+  const premioTexto = premio || (evento ? null : '$15,000');
+  const lugaresLibres = evento?.lugares_libres;
 
   useEffect(() => {
     let cleanup = () => {};
@@ -41,10 +53,14 @@ export default function ClosingSection({ zIndex = 7 }) {
 
       <div className={styles.closingInner}>
         <div className={styles.prize}>
-          <p className={styles.prizeAmount}>
-            $15,000
-            <small>MXN al primer lugar de cada desafío</small>
-          </p>
+          {premioTexto && (
+            <p className={styles.prizeAmount}>
+              {premioTexto}
+              <small>
+                {premio ? 'Al primer lugar de cada desafío' : 'MXN al primer lugar de cada desafío'}
+              </small>
+            </p>
+          )}
           <p className={styles.prizeCopy}>
             Además del premio económico, el equipo ganador de cada desafío recibe un reconocimiento
             oficial. Todos los participantes obtienen constancia digital descargable, y los
@@ -57,19 +73,50 @@ export default function ClosingSection({ zIndex = 7 }) {
             Reúne a tu equipo y <em>elige tu desafío</em>
           </h2>
           <p className={styles.ctaCopy}>
-            El registro está abierto del 1 al 30 de septiembre de 2026, o hasta agotar los espacios
-            disponibles. Cinco integrantes más un asesor, un solo desafío por equipo.
+            {evento ? (
+              <>
+                {registroCerrado
+                  ? 'El periodo de inscripción ya terminó.'
+                  : evento.fecha_limite_registro
+                    ? `El registro cierra el ${formatearFechaHora(evento.fecha_limite_registro)}, o antes si se agotan los espacios.`
+                    : 'El registro está abierto hasta agotar los espacios disponibles.'}
+                {typeof lugaresLibres === 'number' && !registroCerrado
+                  ? ` Quedan ${lugaresLibres} lugares.`
+                  : ''}{' '}
+                Un solo desafío por equipo.
+              </>
+            ) : (
+              'El registro está abierto hasta agotar los espacios disponibles. Un solo desafío por equipo.'
+            )}
           </p>
           <div className={styles.ctaActions}>
-            <a
-              className={styles.btnGold}
-              href={`mailto:${CONTACTO}?subject=${encodeURIComponent('Registro HackaItlac 2026')}`}
-            >
-              Registrar mi equipo
-              <span className={styles.btnArrow} aria-hidden="true">
-                →
-              </span>
-            </a>
+            {/* Con evento configurado, el botón entra al formulario real de
+                inscripción (el mismo de /eventos, con sus cupos y su ticket).
+                Sin él, se mantiene el correo del comité. */}
+            {evento ? (
+              registroCerrado ? (
+                <span className={styles.btnDisabled} aria-disabled="true">
+                  Registro cerrado
+                </span>
+              ) : (
+                <Link className={styles.btnGold} href={evento.url_registro}>
+                  Registrar mi equipo
+                  <span className={styles.btnArrow} aria-hidden="true">
+                    →
+                  </span>
+                </Link>
+              )
+            ) : (
+              <a
+                className={styles.btnGold}
+                href={`mailto:${CONTACTO}?subject=${encodeURIComponent('Registro HackaItlac')}`}
+              >
+                Registrar mi equipo
+                <span className={styles.btnArrow} aria-hidden="true">
+                  →
+                </span>
+              </a>
+            )}
             <a className={styles.btnOutline} href={`mailto:${CONTACTO}`}>
               Escribir al comité
             </a>
@@ -95,6 +142,15 @@ export default function ClosingSection({ zIndex = 7 }) {
               width={413}
               height={256}
               sizes="80px"
+            />
+          </span>
+          <span className={styles.orgChip}>
+            <Image
+              src="/img/society.png"
+              alt="IEEE Computer Society"
+              width={2500}
+              height={765}
+              sizes="150px"
             />
           </span>
         </div>

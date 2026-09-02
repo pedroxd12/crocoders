@@ -16,6 +16,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import EmptyState from '@/components/ui/EmptyState';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { fetcher } from '@/lib/fetcher';
+import { nivelDeRol, ETIQUETA_NIVEL, TONO_NIVEL, DESCRIPCION_NIVEL, NIVEL_STAFF } from '@/lib/roles-staff';
 
 const PROCEDENCIAS = [
   { value: 'club_programacion', label: 'Miembro del Club de Programación' },
@@ -81,6 +82,10 @@ export default function EventoStaff() {
   const listaStaff = useMemo(() => (Array.isArray(staff) ? staff : []), [staff]);
   const listaJueces = useMemo(() => (Array.isArray(jueces) ? jueces : []), [jueces]);
   const roles = catalogos?.roles ?? [];
+  // Qué concede el rol elegido, dicho ANTES de asignarlo: el catálogo tiene
+  // tres banderas y sólo el nombre no explica si la persona podrá escanear,
+  // validar pagos o sólo mirar (src/lib/roles-staff.js).
+  const rolSeleccionado = roles.find((r) => String(r.id_rol) === String(selectedRole)) || null;
   const availableMembers = useMemo(
     () => (Array.isArray(usuarios) ? usuarios.filter((u) => u.tipo === 'miembro') : []),
     [usuarios],
@@ -214,7 +219,8 @@ export default function EventoStaff() {
         <div className="min-w-0">
           <h2 className="text-lg font-semibold tracking-tight text-fg">Equipo organizador</h2>
           <p className="mt-1 text-sm text-muted">
-            Miembros con permisos sobre este evento (acceso al panel de staff y al escaneo de asistencia).
+            Miembros con acceso al panel de staff de este evento. Lo que cada uno puede hacer lo decide su rol:
+            solo consulta, operación (escáner QR y pagos) o gestión (marcas a mano).
           </p>
         </div>
         <Button onClick={() => setIsModalOpen(true)} className="shrink-0">
@@ -227,6 +233,17 @@ export default function EventoStaff() {
           { header: 'Nombre', accessor: 'nombre_completo', cellClassName: 'font-medium' },
           { header: 'Correo', accessor: 'correo_electronico', cellClassName: 'text-muted' },
           { header: 'Rol', render: (row) => <Badge tone="info">{row.rol_nombre}</Badge> },
+          {
+            header: 'Permisos',
+            render: (row) => {
+              const nivel = nivelDeRol(row);
+              return (
+                <Badge tone={TONO_NIVEL[nivel]} title={DESCRIPCION_NIVEL[nivel]}>
+                  {ETIQUETA_NIVEL[nivel]}
+                </Badge>
+              );
+            },
+          },
           {
             header: 'Acciones',
             align: 'right',
@@ -349,9 +366,26 @@ export default function EventoStaff() {
             onChange={(e) => setSelectedRole(e.target.value)}
             required
             placeholder="Seleccionar rol"
-            options={roles.map((r) => ({ value: r.id_rol, label: r.nombre }))}
-            help="El rol determina qué puede hacer esta persona durante el evento."
+            options={roles.map((r) => ({
+              value: r.id_rol,
+              label: `${r.nombre} · ${ETIQUETA_NIVEL[nivelDeRol(r)]}`,
+            }))}
+            help={
+              rolSeleccionado
+                ? DESCRIPCION_NIVEL[nivelDeRol(rolSeleccionado)]
+                : 'El rol determina qué puede hacer esta persona durante el evento.'
+            }
           />
+          <dl className="space-y-1.5 rounded-lg border border-line bg-surface-2 p-3 text-xs">
+            {Object.values(NIVEL_STAFF).map((nivel) => (
+              <div key={nivel} className="flex gap-2">
+                <dt className="shrink-0">
+                  <Badge tone={TONO_NIVEL[nivel]}>{ETIQUETA_NIVEL[nivel]}</Badge>
+                </dt>
+                <dd className="text-muted">{DESCRIPCION_NIVEL[nivel]}</dd>
+              </div>
+            ))}
+          </dl>
         </form>
       </Modal>
 

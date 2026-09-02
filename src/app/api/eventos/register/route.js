@@ -5,6 +5,9 @@ import { getSession } from '@/lib/auth';
 import { rateLimit } from '@/lib/rate-limit';
 import { verificarInvitado } from '@/lib/invitado-token';
 import { recalcularCupos, verificarDisponibilidad } from '@/lib/eventos-cupos';
+// Desafíos del evento: cada uno tiene su propio cupo de equipos y se elige al
+// inscribirse (ver src/lib/retos.js).
+import { resolverRetoDeInscripcion } from '@/lib/retos';
 import { sqlRegistroCerrado, sqlEventoTerminado } from '@/lib/eventos-fechas';
 // Errores de reglas de negocio (no fallos del servidor). Antes todas estas
 // validaciones eran `throw new Error(...)` y acababan en el catch genérico, así
@@ -202,10 +205,20 @@ export async function POST(request) {
       }
     }
 
+    // Desafío elegido. Se resuelve DENTRO de la transacción y con el evento ya
+    // bloqueado (FOR UPDATE de arriba): eso es lo que impide que dos equipos
+    // se queden a la vez con la última plaza de un reto. Si el evento tiene
+    // retos activos, elegir uno es obligatorio.
+    const reto = await resolverRetoDeInscripcion(client, eventoId, data.id_reto);
+    if (!reto.ok) {
+      await client.query('ROLLBACK');
+      return NextResponse.json({ success: false, error: reto.error }, { status: 400 });
+    }
+
     // Eventos con costo: la inscripción NO puede nacer confirmada mientras no
     // exista ninguna pasarela de pago en el proyecto. Queda 'pendiente' y
     // marcada como `requiere_pago` hasta que un administrador registre el cobro
-    // desde /api/admin/inscripciones/[id]. El lugar queda igualmente apartado.
+    // desde /api/eventos/inscripciones/[id]. El lugar queda igualmente apartado.
     const estadoInicial = evento.tiene_costo ? 'pendiente' : 'confirmada';
     const requierePago = Boolean(evento.tiene_costo);
 
@@ -253,6 +266,7 @@ export async function POST(request) {
         integrantesResueltos: equipoResuelto.integrantesResueltos,
         estadoInicial,
         requierePago,
+        idReto: reto.idReto,
       });
 
     } else if (tipo === 'miembro') {
@@ -281,13 +295,14 @@ export async function POST(request) {
       // de la tabla. NO se usa `ON CONFLICT (...) WHERE ...` porque ese constraint
       // NO es un índice parcial y Postgres no lo encontraría (error 42P10).
       const insRes = await client.query(
-        `INSERT INTO inscripcion_evento (id_evento, id_miembro, estado, requiere_pago, fecha_inscripcion)
-         VALUES ($1, $2, $3, $4, NOW())
+        `INSERT INTO inscripcion_evento (id_evento, id_miembro, id_reto, estado, requiere_pago, fecha_inscripcion)
+         VALUES ($1, $2, $3, $4, $5, NOW())
          ON CONFLICT ON CONSTRAINT inscripcion_evento_id_evento_id_miembro_key
          DO UPDATE SET estado = EXCLUDED.estado, requiere_pago = EXCLUDED.requiere_pago,
+                       id_reto = EXCLUDED.id_reto,
                        fecha_inscripcion = NOW(), updated_at = NOW()
          RETURNING id_inscripcion`,
-        [eventoId, memberId, estadoInicial, requierePago],
+        [eventoId, memberId, reto.idReto, estadoInicial, requierePago],
       );
       inscripcionId = insRes.rows[0].id_inscripcion;
     } else {
@@ -306,13 +321,14 @@ export async function POST(request) {
       }
 
       const insRes = await client.query(
-        `INSERT INTO inscripcion_evento (id_evento, id_invitado, estado, requiere_pago, fecha_inscripcion)
-         VALUES ($1, $2, $3, $4, NOW())
+        `INSERT INTO inscripcion_evento (id_evento, id_invitado, id_reto, estado, requiere_pago, fecha_inscripcion)
+         VALUES ($1, $2, $3, $4, $5, NOW())
          ON CONFLICT ON CONSTRAINT inscripcion_evento_id_evento_id_invitado_key
          DO UPDATE SET estado = EXCLUDED.estado, requiere_pago = EXCLUDED.requiere_pago,
+                       id_reto = EXCLUDED.id_reto,
                        fecha_inscripcion = NOW(), updated_at = NOW()
          RETURNING id_inscripcion`,
-        [eventoId, guestId, estadoInicial, requierePago],
+        [eventoId, guestId, reto.idReto, estadoInicial, requierePago],
       );
       inscripcionId = insRes.rows[0].id_inscripcion;
     }
@@ -358,6 +374,9 @@ export async function POST(request) {
         ? 'Registro recibido. Tu lugar queda apartado hasta que se verifique el pago.'
         : 'Registro exitoso',
       id_inscripcion: inscripcionId,
+      // Desafío en el que quedó la inscripción (null si el evento no tiene).
+      id_reto: reto.idReto,
+      reto: reto.reto ? { id_reto: reto.reto.id_reto, titulo: reto.reto.titulo } : null,
       // Estado real de la inscripción, para que la UI no prometa "confirmada"
       // en un evento de pago que aún nadie ha cobrado.
       estado_inscripcion: estadoInicial,

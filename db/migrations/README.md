@@ -40,6 +40,7 @@ Léelo antes de tocar la base.
 | `011_talla_asesor.sql` | **aplicada** (2026-09-01) | `asesor_equipo.talla_playera` + CHECK: al asesor también se le entrega playera |
 | `012_numero_control_invitado.sql` | **aplicada** (2026-09-01) | `invitado.numero_control` para alumnos del ITLAC |
 | `013_comprobante_pago.sql` | **aplicada** (2026-09-02) | tabla `comprobante_pago` (imagen del pago por inscripción, estado y revisor) + `evento.instrucciones_pago` |
+| `014_retos_evento.sql` | **aplicada** (2026-09-02) | tabla `reto_evento` (desafíos con cupo propio de equipos), `inscripcion_evento.id_reto` y `evento.slug` |
 
 ## Triggers activos en producción (verificado)
 
@@ -53,8 +54,12 @@ escribieron endpoints que ajustaban los cupos a mano, duplicando el descuento:
 - `trigger_estadisticas_prog_miembro` / `trigger_estadisticas_prog_invitado`
 - `trigger_actualizar_pago_inscripcion` — confirma la inscripción al completarse el pago.
 - `trigger_*_updated_at` en `evento`, `evidencia`, `inscripcion_evento`,
-  `invitado`, `miembro`, `pago`, `equipo_concurso` y —tras aplicar la 013—
-  `comprobante_pago`.
+  `invitado`, `miembro`, `pago`, `equipo_concurso` y —tras aplicar la 013 y la
+  014— `comprobante_pago` y `reto_evento`.
+
+El cupo de un reto (`reto_evento.cupo_equipos`) NO tiene contador
+denormalizado ni trigger: se deriva siempre de las inscripciones reales en
+`src/lib/retos.js`. Es a propósito, por lo que costó `evento.cupos_disponibles`.
 
 ## Nota sobre `pago` vs `comprobante_pago`
 

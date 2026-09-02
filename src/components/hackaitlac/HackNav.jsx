@@ -18,8 +18,12 @@ const LINKS = [
  * sitio (AppShell) porque es full-bleed, así que sin esto no había forma de
  * saltar entre secciones ni de volver al sitio principal desde arriba.
  */
-export default function HackNav() {
+export default function HackNav({ mostrarDesafios = true }) {
   const [solid, setSolid] = useState(false);
+
+  // Sin desafíos publicados esa sección no se pinta: dejar el enlace sería un
+  // botón que no lleva a ningún sitio (scrollToId no encuentra el ancla).
+  const links = mostrarDesafios ? LINKS : LINKS.filter((l) => l.id !== 'desafios');
 
   useEffect(() => {
     const onScroll = () => setSolid(window.scrollY > 40);
@@ -45,7 +49,7 @@ export default function HackNav() {
       </a>
 
       <div className={styles.navLinks}>
-        {LINKS.map((link) => (
+        {links.map((link) => (
           <button
             key={link.id}
             type="button"

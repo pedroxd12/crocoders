@@ -152,6 +152,11 @@ function EventCard({ evento, isRegistered, onParticipate, onViewDetails, index }
               {rangoEquipos(evento.min_integrantes_equipo, evento.max_integrantes_equipo)}
             </CategoriaTag>
           )}
+          {evento.total_retos > 0 && (
+            <CategoriaTag>
+              {evento.total_retos} {evento.total_retos === 1 ? 'desafío' : 'desafíos'}
+            </CategoriaTag>
+          )}
         </div>
 
         <h3

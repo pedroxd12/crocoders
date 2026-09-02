@@ -24,7 +24,12 @@ const { useUploadThing } = generateReactHelpers();
 
 const TIPOS_ACEPTADOS = 'image/png,image/jpeg,image/webp';
 
-export default function FlyerUploader({ url, onChange, onError }) {
+/**
+ * `nombre` sólo cambia las etiquetas ("Subir flyer" / "Subir imagen del reto"):
+ * el uploader es el mismo y sigue apuntando al endpoint `eventoImageUploader`,
+ * que exige rol administrador.
+ */
+export default function FlyerUploader({ url, onChange, onError, nombre = 'flyer' }) {
   const inputRef = useRef(null);
   const [errorLocal, setErrorLocal] = useState(null);
 
@@ -81,7 +86,7 @@ export default function FlyerUploader({ url, onChange, onError }) {
             onClick={() => inputRef.current?.click()}
           >
             {!isUploading && <ImagePlus size={16} aria-hidden="true" />}
-            {isUploading ? 'Subiendo…' : url ? 'Cambiar flyer' : 'Subir flyer'}
+            {isUploading ? 'Subiendo…' : url ? `Cambiar ${nombre}` : `Subir ${nombre}`}
           </Button>
           <p className="mt-1.5 text-xs text-faint">PNG, JPG o WebP · hasta 4 MB</p>
         </div>
@@ -90,14 +95,14 @@ export default function FlyerUploader({ url, onChange, onError }) {
           <div className="relative shrink-0">
             <Image
               src={url}
-              alt="Vista previa del flyer"
+              alt={`Vista previa: ${nombre}`}
               width={80}
               height={80}
               className="h-20 w-20 rounded-lg border border-line object-cover"
             />
             <IconButton
               icon={Trash2}
-              label="Quitar flyer"
+              label={`Quitar ${nombre}`}
               tone="danger"
               size={14}
               onClick={quitar}

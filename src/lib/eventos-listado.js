@@ -51,6 +51,12 @@ const SQL_EVENTOS_PUBLICOS = `
     c.modalidad,
     c.min_integrantes_equipo,
     c.max_integrantes_equipo,
+    -- Desafíos activos del evento (migración 014): la tarjeta lo anuncia para
+    -- que se sepa antes de entrar que la inscripción es por desafío.
+    (
+      SELECT COUNT(*)::int FROM reto_evento r
+       WHERE r.id_evento = e.id_evento AND r.activo = TRUE
+    ) as total_retos,
     (
       SELECT COALESCE(SUM(
                CASE WHEN ie.id_equipo IS NOT NULL
@@ -118,6 +124,7 @@ export async function listarEventosPublicos() {
       cupos_disponibles: evento.cupos_disponibles !== null ? Number(evento.cupos_disponibles) : null,
       // Lugares realmente ocupados (los equipos cuentan por integrante).
       lugares_ocupados: Number(evento.lugares_ocupados) || 0,
+      total_retos: Number(evento.total_retos) || 0,
     };
   });
 }

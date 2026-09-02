@@ -196,7 +196,7 @@ export async function resolverEquipo(
  */
 export async function insertarEquipo(
   client,
-  { eventoId, idConcurso, equipo, asesores, integrantesResueltos, estadoInicial, requierePago },
+  { eventoId, idConcurso, equipo, asesores, integrantesResueltos, estadoInicial, requierePago, idReto = null },
 ) {
   // Las columnas *_asesor de equipo_concurso son LEGADAS (las lee el panel
   // de asistentes): se escribe ahí el primer asesor, y TODOS van además a
@@ -269,10 +269,13 @@ export async function insertarEquipo(
     );
   }
 
+  // `id_reto`: el desafío elegido por el equipo (NULL en eventos sin retos).
+  // Lo valida y le comprueba el cupo `resolverRetoDeInscripcion` antes de
+  // llegar aquí; ver src/lib/retos.js.
   const insRes = await client.query(
-    `INSERT INTO inscripcion_evento (id_evento, id_equipo, estado, requiere_pago, fecha_inscripcion)
-     VALUES ($1, $2, $3, $4, NOW()) RETURNING id_inscripcion`,
-    [eventoId, teamId, estadoInicial, requierePago],
+    `INSERT INTO inscripcion_evento (id_evento, id_equipo, id_reto, estado, requiere_pago, fecha_inscripcion)
+     VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING id_inscripcion`,
+    [eventoId, teamId, idReto, estadoInicial, requierePago],
   );
   return insRes.rows[0].id_inscripcion;
 }
