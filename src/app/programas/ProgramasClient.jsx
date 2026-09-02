@@ -10,27 +10,40 @@ import { fetcher, postFetcher } from '@/lib/fetcher';
 import { toast } from 'react-toastify';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
-import Select from '@/components/ui/Select';
-import Badge from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
+import { EstadoBadge, CategoriaTag } from '@/components/eventos/EventoBadges';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import LoadingSpinner from '@/components/LoadingSpinner';
-import { Calendar, Clock, MapPin, Users, BookOpen, Award, LogIn, UserPlus, CheckCircle } from 'lucide-react';
+import {
+  CamposInvitado,
+  TallaModal,
+  INVITADO_VACIO,
+  validarInvitado,
+  limpiarInvitadoPayload,
+} from '@/components/eventos/RegistroInvitado';
+import { Calendar, Clock, MapPin, Users, BookOpen, Award, LogIn, UserPlus } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { formatearFecha, formatearDiasSemana, formatearHora } from '@/lib/programas-fechas';
 
-const carreras = [
-  'Ingeniería en Sistemas Computacionales', 'Ingeniería en Electronica',
-  'Ingeniería Industrial', 'Ingeniería Quimica',
-  'Ingeniería en Logistica', 'Ingeniería en Mecatronica',
-];
-const semestres = Array.from({ length: 14 }, (_, i) => ({ value: (i + 1).toString(), label: `${i + 1}° Semestre` }));
-
-const GUEST_VACIO = {
-  nombre_completo: '', correo_electronico: '', numero_telefono: '',
-  carrera: '', semestre: '', escuela_institucion: '',
-};
+// Correo de confirmación con el ticket QR del programa. El registro ya quedó
+// hecho cuando esto corre: si el envío falla sólo se avisa, no se revierte.
+// (/api/confirmation responde 200 con success:false en sus fallos genéricos,
+// así que no basta con mirar res.ok.)
+function enviarCorreoConfirmacion(qrToken) {
+  if (!qrToken) return;
+  fetch('/api/confirmation', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ qrToken }),
+  })
+    .then(async (res) => {
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok || !result.success) throw new Error();
+    })
+    .catch(() => {
+      toast.warning('Te inscribiste, pero no pudimos enviar el correo con tu ticket QR.', { theme: 'dark' });
+    });
+}
 
 // `programasIniciales` es el catálogo que el Server Component de page.jsx ya
 // consultó y envió dentro del HTML; se le pasa a SWR como `fallbackData` para
@@ -43,8 +56,11 @@ function ProgramasContent({ programasIniciales }) {
   const [selected, setSelected] = useState(null); // programa elegido para inscribir
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [showGuestModal, setShowGuestModal] = useState(false);
+  // Talla de un MIEMBRO en programas con `solicitar_talla`: su inscripción es
+  // de un clic, así que se le pregunta en un mini-modal antes de confirmar.
+  const [showTallaModal, setShowTallaModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [guestData, setGuestData] = useState(GUEST_VACIO);
+  const [guestData, setGuestData] = useState(INVITADO_VACIO);
   const [formErrors, setFormErrors] = useState({});
   const [aCancelar, setACancelar] = useState(null);
   const [cancelando, setCancelando] = useState(false);
@@ -86,26 +102,36 @@ function ProgramasContent({ programasIniciales }) {
       return;
     }
     if (isAuthenticated) {
-      inscribirMiembro(programa);
+      if (programa.solicitar_talla) {
+        setShowTallaModal(true);
+      } else {
+        inscribirMiembro(programa);
+      }
     } else {
       setShowTypeModal(true);
     }
   };
 
-  const inscribirMiembro = async (programa) => {
+  const inscribirMiembro = async (programa, tallaPlayera) => {
     setIsSubmitting(true);
     try {
       const res = await fetch(`/api/programas/${programa.id_programa}/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ programaId: programa.id_programa, tipo: 'miembro' }),
+        body: JSON.stringify({
+          programaId: programa.id_programa,
+          tipo: 'miembro',
+          ...(tallaPlayera ? { talla_playera: tallaPlayera } : {}),
+        }),
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || 'Error al inscribirse');
       setRegistrationOverrides(prev => ({ ...prev, [programa.id_programa]: true }));
       mutateBatch();
       toast.success('¡Inscripción exitosa!', { theme: 'dark' });
+      enviarCorreoConfirmacion(result.qrToken);
       setShowTypeModal(false);
+      setShowTallaModal(false);
     } catch (e) {
       toast.error(`Error: ${e.message}`, { theme: 'dark' });
     } finally {
@@ -132,12 +158,9 @@ function ProgramasContent({ programasIniciales }) {
   };
 
   const validateGuest = () => {
-    const errs = {};
-    if (!guestData.nombre_completo.trim()) errs.nombre_completo = 'Escribe tu nombre completo';
-    if (!/\S+@\S+\.\S+/.test(guestData.correo_electronico)) errs.correo_electronico = 'Correo no válido';
-    if (!/^[0-9]{10}$/.test(guestData.numero_telefono)) errs.numero_telefono = 'El teléfono debe tener 10 dígitos';
-    if (!guestData.carrera) errs.carrera = 'Selecciona tu carrera';
-    if (!guestData.semestre) errs.semestre = 'Selecciona tu semestre';
+    const errs = validarInvitado(guestData, {
+      requiereTalla: Boolean(selected?.solicitar_talla),
+    });
     setFormErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -153,10 +176,12 @@ function ProgramasContent({ programasIniciales }) {
 
     setIsSubmitting(true);
     try {
+      // `limpiarInvitadoPayload` descarta los campos vacíos (zod convertía un
+      // `semestre: ''` en 0 y respondía 400) y los que no aplican al nivel.
       const guestRes = await fetch('/api/invitados', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(guestData),
+        body: JSON.stringify(limpiarInvitadoPayload(guestData)),
       });
       const guest = await guestRes.json();
       if (!guestRes.ok) throw new Error(guest.error || 'Error al crear invitado');
@@ -179,9 +204,10 @@ function ProgramasContent({ programasIniciales }) {
 
       setRegistrationOverrides(prev => ({ ...prev, [selected.id_programa]: true }));
       toast.success('¡Inscripción como invitado exitosa!', { theme: 'dark' });
+      enviarCorreoConfirmacion(result.qrToken);
       setShowGuestModal(false);
       setShowTypeModal(false);
-      setGuestData(GUEST_VACIO);
+      setGuestData(INVITADO_VACIO);
       setFormErrors({});
     } catch (e) {
       toast.error(`Error: ${e.message}`, { theme: 'dark' });
@@ -242,9 +268,11 @@ function ProgramasContent({ programasIniciales }) {
                       <div className="w-full h-full flex items-center justify-center text-faint"><BookOpen size={40} /></div>
                     )}
                     <div className="absolute top-3 left-3 flex flex-wrap gap-2">
-                      {p.tipo && <Badge tone="success">{p.tipo}</Badge>}
-                      {finalizado && <Badge tone="danger">Finalizado</Badge>}
-                      {inscrito && <Badge tone="info"><CheckCircle size={12} /> Inscrito</Badge>}
+                      {/* Mismo sistema que eventos: tag de categoría (outline)
+                          + badge de estado (sólido, mapeo de color fijo). */}
+                      {p.tipo && <CategoriaTag className="backdrop-blur-md">{p.tipo}</CategoriaTag>}
+                      {finalizado && <EstadoBadge estado="finalizado" />}
+                      {!finalizado && inscrito && <EstadoBadge estado="inscrito" />}
                     </div>
                   </div>
 
@@ -338,58 +366,23 @@ function ProgramasContent({ programasIniciales }) {
           </>
         }
       >
-        <div className="space-y-4">
-          <Input
-            label="Nombre completo"
-            value={guestData.nombre_completo}
-            onChange={(e) => setGuestData({ ...guestData, nombre_completo: e.target.value })}
-            error={formErrors.nombre_completo}
-            required
-          />
-          <Input
-            label="Correo electrónico"
-            type="email"
-            value={guestData.correo_electronico}
-            onChange={(e) => setGuestData({ ...guestData, correo_electronico: e.target.value })}
-            error={formErrors.correo_electronico}
-            required
-          />
-          <Input
-            label="Teléfono"
-            value={guestData.numero_telefono}
-            onChange={(e) => setGuestData({ ...guestData, numero_telefono: e.target.value.replace(/\D/g, '').slice(0, 10) })}
-            placeholder="10 dígitos"
-            error={formErrors.numero_telefono}
-            required
-          />
-          {/* El campo se enviaba a /api/invitados pero no existía en el formulario:
-              todos los invitados quedaban sin institución. */}
-          <Input
-            label="Escuela o institución"
-            value={guestData.escuela_institucion}
-            onChange={(e) => setGuestData({ ...guestData, escuela_institucion: e.target.value })}
-            help="Opcional. Si vienes de otra escuela, indícalo aquí."
-          />
-          <Select
-            label="Carrera"
-            value={guestData.carrera}
-            onChange={(e) => setGuestData({ ...guestData, carrera: e.target.value })}
-            options={carreras.map(c => ({ value: c, label: c }))}
-            placeholder="Selecciona tu carrera"
-            error={formErrors.carrera}
-            required
-          />
-          <Select
-            label="Semestre"
-            value={guestData.semestre}
-            onChange={(e) => setGuestData({ ...guestData, semestre: e.target.value })}
-            options={semestres}
-            placeholder="Selecciona tu semestre"
-            error={formErrors.semestre}
-            required
-          />
-        </div>
+        {/* Mismos campos compartidos que eventos: nivel de estudios adaptativo,
+            edad, escuela y talla si el programa la pide. */}
+        <CamposInvitado
+          data={guestData}
+          errors={formErrors}
+          onChange={setGuestData}
+          requiereTalla={Boolean(selected?.solicitar_talla)}
+        />
       </Modal>
+
+      <TallaModal
+        isOpen={showTallaModal}
+        onClose={() => setShowTallaModal(false)}
+        titulo={selected?.nombre}
+        loading={isSubmitting}
+        onConfirm={(talla) => inscribirMiembro(selected, talla)}
+      />
 
       <ConfirmDialog
         isOpen={Boolean(aCancelar)}

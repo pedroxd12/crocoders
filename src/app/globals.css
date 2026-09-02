@@ -87,6 +87,37 @@ html, body {
   overflow-x: hidden;
 }
 
+/* HackaItlac es la única sección del sitio con identidad clara (blanco, azul
+   marino y amarillo del manual de marca). El resto de la web es oscura, así
+   que hay que revertir aquí el fondo y el `color-scheme` del body: si no, se
+   ve una franja gris #1a1a1a al hacer overscroll y los controles nativos
+   (barra de scroll incluida) se siguen pintando en modo oscuro.
+   `:has()` evita tener que tocar el body desde JS y no provoca parpadeo. */
+body:has([data-hackaitlac]) {
+  background: #ffffff;
+  color: #0a1e49;
+  color-scheme: light;
+}
+
+/* Barra de scroll fina para paneles con scroll interno (cuerpo de los modales,
+   formularios largos). La barra nativa gruesa del navegador rompía el look
+   oscuro del resto de la interfaz. */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-surface-3) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--color-surface-3);
+  border-radius: 8px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* Removed unused main-container and scroll-snap rules to prevent Lenis conflicts */
 
 .typewriter-text {

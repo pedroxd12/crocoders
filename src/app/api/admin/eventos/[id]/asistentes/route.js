@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
+import { SQL_COLUMNAS_COMPROBANTE, SQL_JOIN_COMPROBANTE } from '@/lib/comprobantes-pago';
 
 export async function GET(request, { params }) {
   const guard = await requireAdmin(request);
@@ -55,14 +56,47 @@ export async function GET(request, { params }) {
         CASE WHEN eq.id_equipo IS NOT NULL
              THEN (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = eq.id_equipo)
              ELSE NULL END as integrantes_equipo,
+        -- Check-in por persona (migración 009): cuántos integrantes ya llegaron
+        -- y cuántas playeras se entregaron (integrantes + asesores). En filas
+        -- individuales la entrega viaja en playera_entregada de la inscripción.
+        ie.playera_entregada,
+        CASE WHEN eq.id_equipo IS NOT NULL
+             THEN (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = eq.id_equipo AND asistio)
+             ELSE NULL END as integrantes_asistieron,
+        CASE WHEN eq.id_equipo IS NOT NULL
+             THEN (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = eq.id_equipo AND playera_entregada)
+                + (SELECT COUNT(*) FROM asesor_equipo WHERE id_equipo = eq.id_equipo AND playera_entregada)
+             ELSE NULL END as playeras_entregadas,
+        CASE WHEN eq.id_equipo IS NOT NULL
+             THEN (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = eq.id_equipo)
+                + (SELECT COUNT(*) FROM asesor_equipo WHERE id_equipo = eq.id_equipo)
+             ELSE NULL END as personas_equipo,
         m.numero_ieee,
+        -- Datos de referencia del inscrito (los pide el formulario público).
+        i.nivel_estudios,
+        i.edad,
+        -- Talla: la del miembro/invitado, o las de todo el equipo agregadas
+        -- (una por integrante, en orden de alta) para poder pedir las playeras.
+        CASE
+            WHEN m.id_miembro IS NOT NULL THEN m.talla_playera
+            WHEN i.id_invitado IS NOT NULL THEN i.talla_playera
+            WHEN eq.id_equipo IS NOT NULL THEN (
+                SELECT string_agg(COALESCE(tm.talla_playera, ti.talla_playera, '—'), ', ' ORDER BY it.id_integrante)
+                  FROM integrante_equipo it
+                  LEFT JOIN miembro tm ON tm.id_miembro = it.id_miembro
+                  LEFT JOIN invitado ti ON ti.id_invitado = it.id_invitado
+                 WHERE it.id_equipo = eq.id_equipo)
+        END as talla_playera,
         e.nombre as nombre_evento,
-        e.fecha_inicio
+        e.fecha_inicio,
+        -- Comprobante de pago subido por el inscrito (migración 013): es lo
+        -- que se valida desde esta misma pantalla.
+        ${SQL_COLUMNAS_COMPROBANTE}
       FROM inscripcion_evento ie
       LEFT JOIN miembro m ON ie.id_miembro = m.id_miembro
       LEFT JOIN invitado i ON ie.id_invitado = i.id_invitado
       LEFT JOIN equipo_concurso eq ON ie.id_equipo = eq.id_equipo
-      JOIN evento e ON ie.id_evento = e.id_evento
+      JOIN evento e ON ie.id_evento = e.id_evento${SQL_JOIN_COMPROBANTE}
       WHERE ie.id_evento = $1 AND ie.estado <> 'cancelada'
       ORDER BY ie.fecha_inscripcion DESC
     `;

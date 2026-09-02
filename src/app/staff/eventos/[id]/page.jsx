@@ -29,6 +29,8 @@ import StatCard from '@/components/ui/StatCard';
 import EmptyState from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import QRScannerModal from '@/components/QRScannerModal';
+import ComprobanteRevisionModal from '@/components/eventos/ComprobanteRevisionModal';
+import { TONO_COMPROBANTE, ETIQUETA_COMPROBANTE } from '@/lib/comprobante-estado';
 import { formatearFechaHora, formatearFechaLarga, formatearHora } from '@/lib/fechas';
 import { estadoTemporal } from '../../fechas';
 
@@ -56,6 +58,8 @@ export default function StaffEventoDetalle() {
   const router = useRouter();
   const [busqueda, setBusqueda] = useState('');
   const [escanerAbierto, setEscanerAbierto] = useState(false);
+  // Fila cuyo comprobante de pago se está revisando (null = modal cerrado).
+  const [comprobanteAbierto, setComprobanteAbierto] = useState(null);
 
   const {
     data: detalle,
@@ -88,6 +92,17 @@ export default function StaffEventoDetalle() {
         a.numero_ieee?.includes(q),
     );
   }, [asistentes, busqueda]);
+
+  // Parche local de una fila tras validar un pago: el servidor ya devolvió el
+  // resultado, no hace falta volver a pedir la lista entera.
+  const parchearAsistente = (idInscripcion, cambios) => {
+    refrescarAsistentes(
+      (actual = []) => actual.map((a) => (a.id_inscripcion === idInscripcion ? { ...a, ...cambios } : a)),
+      { revalidate: false },
+    );
+  };
+
+  const comprobantesPendientes = asistentes.filter((a) => a.comprobante_estado === 'pendiente').length;
 
   const totalAsistieron = asistentes.filter((a) => a.asistio).length;
   const porcentaje = asistentes.length > 0
@@ -184,9 +199,16 @@ export default function StaffEventoDetalle() {
             />
             <StatCard
               icon={CreditCard}
-              label="Pagos completados"
+              label="Pagos validados"
               value={evento.pagos_completados || 0}
               tone="neutral"
+              hint={
+                evento.tiene_costo
+                  ? comprobantesPendientes > 0
+                    ? `${comprobantesPendientes} comprobante(s) por revisar`
+                    : 'Sin comprobantes pendientes'
+                  : 'Evento gratuito'
+              }
             />
           </div>
         </>
@@ -250,6 +272,39 @@ export default function StaffEventoDetalle() {
                 </span>
               ),
           },
+          // Pago: en un evento con costo el staff necesita ver quién ya pagó y
+          // poder validar el comprobante sin pasar por un administrador.
+          ...(evento?.tiene_costo
+            ? [
+                {
+                  key: 'pago',
+                  label: 'Pago',
+                  render: (row) => (
+                    <Badge tone={row.pago_completado ? 'success' : 'warning'}>
+                      {row.pago_completado ? 'Pagado' : 'Pendiente'}
+                    </Badge>
+                  ),
+                },
+                {
+                  key: 'comprobante',
+                  label: 'Comprobante',
+                  render: (row) =>
+                    row.id_comprobante ? (
+                      <button
+                        type="button"
+                        onClick={() => setComprobanteAbierto(row)}
+                        title="Ver el comprobante y validar el pago"
+                      >
+                        <Badge tone={TONO_COMPROBANTE[row.comprobante_estado] || 'neutral'}>
+                          {ETIQUETA_COMPROBANTE[row.comprobante_estado] || row.comprobante_estado}
+                        </Badge>
+                      </button>
+                    ) : (
+                      <span className="text-xs text-faint">Sin subir</span>
+                    ),
+                },
+              ]
+            : []),
           {
             key: 'fecha_inscripcion',
             label: 'Se inscribió',
@@ -271,6 +326,22 @@ export default function StaffEventoDetalle() {
         }
       />
 
+      {/* Misma pantalla de validación que usa el panel de administración. */}
+      <ComprobanteRevisionModal
+        key={comprobanteAbierto?.id_comprobante ?? 'ninguno'}
+        fila={comprobanteAbierto}
+        onClose={() => setComprobanteAbierto(null)}
+        onRevisado={({ fila, comprobante, inscripcion }) => {
+          parchearAsistente(fila.id_inscripcion, {
+            comprobante_estado: comprobante.estado,
+            comprobante_motivo_rechazo: comprobante.motivo_rechazo,
+            comprobante_revisado_en: comprobante.revisado_en,
+            pago_completado: inscripcion.pago_completado,
+            estado: inscripcion.estado,
+          });
+        }}
+      />
+
       <QRScannerModal
         isOpen={escanerAbierto}
         onClose={() => setEscanerAbierto(false)}
@@ -283,6 +354,9 @@ export default function StaffEventoDetalle() {
           toast.success(`Asistencia registrada: ${data?.nombre || 'asistente'}`);
           refrescarAsistentes();
         }}
+        // Marcar llegada/playera desde el roster del escáner también mueve la
+        // lista (el agregado del equipo se recalcula en el servidor).
+        onUpdate={() => refrescarAsistentes()}
       />
     </div>
   );

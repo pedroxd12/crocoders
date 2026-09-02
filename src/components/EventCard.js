@@ -2,9 +2,34 @@
 import { memo, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { Calendar, Users, Clock, CheckCircle, XCircle, MapPin, ArrowRight, Sparkles } from 'lucide-react';
+import { Calendar, Users, MapPin, ArrowRight, ImageOff } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { formatearFechaMedia } from '@/lib/fechas';
+import { EstadoBadge, CategoriaTag, estadoDeEvento, rangoEquipos } from '@/components/eventos/EventoBadges';
+import Button from '@/components/ui/Button';
+
+/**
+ * Fila de dato del evento. Un solo tratamiento de iconografía (cajita con
+ * fondo suave) y una paleta SEMÁNTICA fija compartida con el detalle:
+ * fecha → brand, aforo → info, ubicación → accent. Antes tarjeta, detalle y
+ * recuadros usaban tres tratamientos y colores decorativos distintos.
+ */
+const TONOS_DATO = {
+  brand: 'bg-brand-soft text-brand',
+  info: 'bg-info-soft text-info',
+  accent: 'bg-accent/10 text-accent',
+};
+
+function DatoEvento({ icon: Icon, tone, children }) {
+  return (
+    <div className="flex items-center gap-3 text-sm text-muted">
+      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${TONOS_DATO[tone]}`}>
+        <Icon size={17} aria-hidden="true" />
+      </span>
+      <span className="min-w-0">{children}</span>
+    </div>
+  );
+}
 
 function EventCard({ evento, isRegistered, onParticipate, onViewDetails, index }) {
   const router = useRouter();
@@ -12,58 +37,18 @@ function EventCard({ evento, isRegistered, onParticipate, onViewDetails, index }
 
   const isEventFinished = evento.isPastEvent;
   const sinCupos = evento.cupos !== null && evento.cupos_disponibles <= 0;
+  const estado = estadoDeEvento(evento, isRegistered);
+
+  // ¿Concurso por equipos? Entonces la inscripción NO es el flujo individual
+  // genérico: el botón lo dice y el clic lleva al detalle, donde vive el
+  // formulario de equipo. Mismas tres condiciones que usa el detalle.
+  const esConcursoEquipos = Boolean(
+    evento.permite_equipos && evento.id_concurso && evento.modalidad === 'equipos',
+  );
 
   // El formateo vive en un helper compartido porque la fecha llega como DATE de
   // Postgres serializado a UTC y, formateada sin más, se imprime el día anterior.
   const fechaFormateada = formatearFechaMedia(evento.fecha);
-
-  const getEventStatusInfo = () => {
-    if (isEventFinished) {
-      return {
-        text: 'Finalizado',
-        color: 'bg-slate-600/80 backdrop-blur-md',
-        textColor: 'text-white',
-        Icon: Clock,
-        gradient: 'from-slate-500/20 to-slate-700/20'
-      };
-    }
-    if (isRegistered) {
-      return {
-        text: 'Inscrito',
-        color: 'bg-purple-500/80 backdrop-blur-md',
-        textColor: 'text-white',
-        Icon: CheckCircle,
-        gradient: 'from-purple-500/20 to-purple-700/20'
-      };
-    }
-    if (evento.registroCerrado) {
-      return {
-        text: 'Inscripciones Cerradas',
-        color: 'bg-orange-500/80 backdrop-blur-md',
-        textColor: 'text-white',
-        Icon: XCircle,
-        gradient: 'from-orange-500/20 to-orange-700/20'
-      };
-    }
-    if (evento.cupos !== null && evento.cupos_disponibles <= 0) {
-      return {
-        text: 'Cupos Llenos',
-        color: 'bg-red-500/80 backdrop-blur-md',
-        textColor: 'text-white',
-        Icon: XCircle,
-        gradient: 'from-red-500/20 to-red-700/20'
-      };
-    }
-    return {
-      text: 'Disponible',
-      color: 'bg-emerald-500/80 backdrop-blur-md',
-      textColor: 'text-white',
-      Icon: Sparkles,
-      gradient: 'from-emerald-500/20 to-green-700/20'
-    };
-  };
-
-  const statusInfo = getEventStatusInfo();
 
   const handleCardClick = () => {
     if (onViewDetails) {
@@ -73,10 +58,6 @@ function EventCard({ evento, isRegistered, onParticipate, onViewDetails, index }
     }
   };
 
-  // Rótulo y estado del botón de inscripción. La tarjeta recibía
-  // `onParticipate` desde /eventos pero no lo declaraba ni lo renderizaba: no
-  // existía botón de inscripción en el listado y toda la maquinaria de registro
-  // de esa página era código muerto.
   const accionInscripcion = (() => {
     if (isRegistered) return { texto: 'Ver mi inscripción', deshabilitado: false };
     if (isEventFinished) return { texto: 'Evento finalizado', deshabilitado: true };
@@ -85,29 +66,27 @@ function EventCard({ evento, isRegistered, onParticipate, onViewDetails, index }
     return { texto: 'Participar', deshabilitado: false };
   })();
 
+  // Aforo en términos de OCUPACIÓN ("3 inscritos de 150"), no de disponibilidad:
+  // "147/150 disponibles" con barra llena comunicaba justo lo contrario.
+  // `lugares_ocupados` cuenta personas (un equipo = N lugares).
   const getCuposDisplay = () => {
-    if (evento.cupos === null) return 'Cupos ilimitados';
+    if (evento.cupos === null) return <span>Cupos ilimitados</span>;
 
-    const disponibles = evento.cupos_disponibles !== null
-      ? Number(evento.cupos_disponibles)
-      : Math.max(0, evento.cupos - (evento.asistentes_count || 0));
-
-    const asistentes = evento.asistentes_count !== undefined
-      ? evento.asistentes_count
-      : (evento.cupos !== null && evento.cupos_disponibles !== null)
-          ? evento.cupos - evento.cupos_disponibles
-          : 0;
-
-    const pocosDisponibles = disponibles > 0 && disponibles <= evento.cupos * 0.2;
+    const cupos = Number(evento.cupos);
+    const ocupados = evento.lugares_ocupados != null
+      ? Number(evento.lugares_ocupados)
+      : Math.max(0, cupos - Number(evento.cupos_disponibles ?? cupos));
+    const libres = Math.max(0, cupos - ocupados);
+    const pocosDisponibles = libres > 0 && libres <= cupos * 0.2;
 
     return (
-      <span className="flex items-center">
-        <span>{asistentes} / {evento.cupos}</span>
-        {disponibles > 0 && (
-          <span className={`ml-1.5 ${pocosDisponibles ? 'text-amber-400 font-medium' : 'text-gray-400'}`}>
-            ({disponibles} disponibles{pocosDisponibles ? '!' : ''})
-          </span>
+      <span className="flex flex-wrap items-center gap-x-1.5">
+        <span className="text-fg font-medium">{ocupados}</span>
+        <span>de {cupos} inscritos</span>
+        {pocosDisponibles && (
+          <span className="font-medium text-warning">· ¡Quedan {libres}!</span>
         )}
+        {libres === 0 && <span className="font-medium text-danger">· Lleno</span>}
       </span>
     );
   };
@@ -126,146 +105,115 @@ function EventCard({ evento, isRegistered, onParticipate, onViewDetails, index }
         delay: Math.min(index, 5) * 0.06,
         ease: 'easeOut'
       }}
-      className="group relative bg-gradient-to-br from-gray-900/90 via-gray-900/95 to-black/90
-                 rounded-2xl overflow-hidden shadow-2xl border border-gray-800/50
-                 transition-transform duration-300 ease-out flex flex-col h-full cursor-pointer
-                 hover:-translate-y-2"
+      className="group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl
+                 border border-line bg-surface shadow-xl transition-all duration-300 ease-out
+                 hover:-translate-y-1.5 hover:border-line-strong"
       onClick={handleCardClick}
     >
-      {/* Glow effect on hover */}
-      <div className={`pointer-events-none absolute -inset-0.5 bg-gradient-to-r ${statusInfo.gradient}
-                      rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-500`}></div>
-
-      {/* Card content */}
-      <div className="relative h-full flex flex-col bg-gray-900/50 rounded-2xl">
-        {/* Image section */}
-        <div className="relative w-full pt-[56%] overflow-hidden rounded-t-2xl">
-          {!imageError && evento.imagen_url ? (
-            <>
-              <Image
-                src={evento.imagen_url}
-                alt={evento.nombre_evento || 'Imagen del evento'}
-                fill
-                className="object-cover transition-transform duration-500 ease-out group-hover:scale-105"
-                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                priority={index < 3}
-                loading={index < 3 ? 'eager' : 'lazy'}
-                quality={75}
-                onError={() => setImageError(true)}
-              />
-              {/* Gradient overlay */}
-              <div className="absolute inset-0 bg-gradient-to-t from-gray-900 via-gray-900/40 to-transparent
-                            opacity-80 group-hover:opacity-70 transition-opacity duration-300"></div>
-            </>
-          ) : (
-            <div className="absolute inset-0 bg-gradient-to-br from-gray-800 via-gray-850 to-gray-900
-                          flex items-center justify-center">
-              <div className="text-center p-4">
-                <Sparkles className="mx-auto mb-2 text-gray-600" size={32} />
-                <span className="text-gray-500 text-sm font-medium">
-                  {evento.imagen_url ? 'Error al cargar' : 'Sin imagen'}
-                </span>
-              </div>
+      {/* Imagen: el flyer vive contenido aquí, sin texto encima. El título ya
+          no se superpone al arte del banner (se pisaba con el texto del propio
+          flyer y quedaba ilegible). Solo el badge de ESTADO flota sobre ella. */}
+      <div className="relative w-full overflow-hidden bg-surface-2 pt-[52%]">
+        {!imageError && evento.imagen_url ? (
+          <Image
+            src={evento.imagen_url}
+            alt={evento.nombre_evento || 'Imagen del evento'}
+            fill
+            className="object-cover transition-transform duration-500 ease-out group-hover:scale-105"
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+            priority={index < 3}
+            loading={index < 3 ? 'eager' : 'lazy'}
+            quality={75}
+            onError={() => setImageError(true)}
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="p-4 text-center">
+              <ImageOff className="mx-auto mb-2 text-faint" size={28} aria-hidden="true" />
+              <span className="text-sm font-medium text-faint">
+                {evento.imagen_url ? 'Error al cargar' : 'Sin imagen'}
+              </span>
             </div>
+          </div>
+        )}
+
+        <div className="absolute right-3 top-3">
+          <EstadoBadge estado={estado} />
+        </div>
+      </div>
+
+      {/* Contenido */}
+      <div className="flex flex-grow flex-col p-5">
+        {/* Tags de categoría: outline, nunca con color de estado. */}
+        <div className="flex flex-wrap gap-1.5">
+          {evento.tipo && <CategoriaTag>{evento.tipo}</CategoriaTag>}
+          {esConcursoEquipos && (
+            <CategoriaTag>
+              {rangoEquipos(evento.min_integrantes_equipo, evento.max_integrantes_equipo)}
+            </CategoriaTag>
           )}
-
-          {/* Status badge */}
-          <div
-            className={`absolute top-4 right-4 text-xs font-semibold px-4 py-2 rounded-full
-                       ${statusInfo.textColor} ${statusInfo.color} shadow-xl
-                       flex items-center gap-2 border border-white/10`}
-          >
-            {statusInfo.Icon && <statusInfo.Icon size={14} />}
-            {statusInfo.text}
-          </div>
-
-          {/* Event title overlay */}
-          <div className="absolute bottom-0 left-0 right-0 p-5">
-            <h3
-              className="text-xl sm:text-2xl font-bold text-white line-clamp-2 drop-shadow-2xl
-                       group-hover:text-green-300 transition-colors duration-300"
-              title={evento.nombre_evento}
-            >
-              {evento.nombre_evento}
-            </h3>
-          </div>
         </div>
 
-        {/* Content section */}
-        <div className="p-6 flex flex-col flex-grow">
-          {/* Event details */}
-          <div className="space-y-4">
-            <div className="flex items-center text-gray-300 group-hover:text-green-300 transition-colors duration-300">
-              <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-green-500/10
-                            group-hover:bg-green-500/20 transition-colors mr-3">
-                <Calendar size={18} className="text-green-400" />
-              </div>
-              <span className="font-semibold text-sm">{fechaFormateada}</span>
-            </div>
+        <h3
+          className="mt-2.5 text-lg font-bold leading-snug text-fg line-clamp-2 transition-colors
+                     group-hover:text-brand sm:text-xl"
+          title={evento.nombre_evento}
+        >
+          {evento.nombre_evento}
+        </h3>
 
-            <div className="flex items-center text-gray-300">
-              <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-blue-500/10
-                            group-hover:bg-blue-500/20 transition-colors mr-3">
-                <Users size={18} className="text-blue-400" />
-              </div>
-              <div className="flex flex-wrap items-center text-sm">
-                {getCuposDisplay()}
-              </div>
-            </div>
+        <div className="mt-4 space-y-3">
+          <DatoEvento icon={Calendar} tone="brand">
+            <span className="font-medium text-fg">{fechaFormateada}</span>
+          </DatoEvento>
 
-            {evento.ubicacion && (
-              <div className="flex items-center text-gray-300">
-                <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-purple-500/10
-                              group-hover:bg-purple-500/20 transition-colors mr-3">
-                  <MapPin size={18} className="text-purple-400" />
-                </div>
-                <span className="line-clamp-1 text-sm">{evento.ubicacion}</span>
-              </div>
-            )}
-          </div>
+          <DatoEvento icon={Users} tone="info">{getCuposDisplay()}</DatoEvento>
 
-          {/* Description */}
-          {evento.descripcion_corta && (
-            <p className="text-sm text-gray-400 mt-5 line-clamp-2 leading-relaxed
-                       group-hover:text-gray-300 transition-colors duration-300">
-              {evento.descripcion_corta}
-            </p>
+          {evento.ubicacion && (
+            <DatoEvento icon={MapPin} tone="accent">
+              <span className="line-clamp-1">{evento.ubicacion}</span>
+            </DatoEvento>
           )}
+        </div>
 
-          {/* Acciones. Son botones reales, no un adorno: antes el único destino
-              posible de la tarjeta era el detalle, aunque /eventos ya tuviera
-              todo el flujo de inscripción implementado. */}
-          <div className="mt-auto flex items-center gap-2 pt-6">
-            <button
-              type="button"
+        {evento.descripcion_corta && (
+          <p className="mt-4 text-sm leading-relaxed text-muted line-clamp-2">
+            {evento.descripcion_corta}
+          </p>
+        )}
+
+        {/* Acciones con las primitivas del sistema: mismo radio, alto y peso
+            tipográfico que el resto de botones de la app. */}
+        <div className="mt-auto flex items-center gap-2 pt-5">
+          <Button
+            variant="secondary"
+            className="flex-1"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleCardClick();
+            }}
+          >
+            Ver detalles
+            <ArrowRight size={16} aria-hidden="true" />
+          </Button>
+
+          {/* En concursos por equipos NO hay botón de inscripción en la
+              tarjeta: el formulario de equipo vive en el detalle, así que
+              "Ver detalles" es la única acción y el botón extra sólo repetía
+              ese mismo destino. */}
+          {onParticipate && !esConcursoEquipos && (
+            <Button
+              variant="primary"
+              className="flex-1"
+              disabled={accionInscripcion.deshabilitado}
               onClick={(e) => {
                 e.stopPropagation();
-                handleCardClick();
+                onParticipate();
               }}
-              className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-line
-                         px-4 py-2.5 text-sm font-medium text-muted transition-colors
-                         hover:border-line-strong hover:text-fg"
             >
-              Ver detalles
-              <ArrowRight size={16} aria-hidden="true" />
-            </button>
-
-            {onParticipate && (
-              <button
-                type="button"
-                disabled={accionInscripcion.deshabilitado}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onParticipate();
-                }}
-                className="inline-flex flex-1 items-center justify-center rounded-lg bg-brand px-4 py-2.5
-                           text-sm font-semibold text-bg transition-colors hover:bg-brand-strong
-                           disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-faint"
-              >
-                {accionInscripcion.texto}
-              </button>
-            )}
-          </div>
+              {accionInscripcion.texto}
+            </Button>
+          )}
         </div>
       </div>
     </motion.div>

@@ -45,8 +45,10 @@ export async function GET(request, context) {
         e.cupos_disponibles,
         e.tiene_costo,
         e.costo,
+        e.instrucciones_pago,
         e.imagen_flyer_url,
         e.estado,
+        e.solicitar_talla,
         (e.fecha_limite_registro AT TIME ZONE '${ZONA_EVENTOS}') AS fecha_limite_registro,
         -- Cierre efectivo: la fecha límite, o 1 hora antes del inicio si no hay.
         ${sqlLimiteRegistro('e')} AS limite_registro_efectivo,
@@ -60,6 +62,8 @@ export async function GET(request, context) {
         c.max_integrantes_equipo,
         c.min_integrantes_equipo,
         c.requiere_asesor,
+        c.asesor_participa,
+        c.max_asesores,
         c.url_concurso,
         (
           SELECT COUNT(*)

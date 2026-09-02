@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { connectWithRetry } from '@/lib/db-server';
 import { requireAuth } from '@/lib/auth';
+import { SQL_COLUMNAS_COMPROBANTE, SQL_JOIN_COMPROBANTE } from '@/lib/comprobantes-pago';
 
 // GET - Obtener asistentes del evento (para staff).
 // Gate: autenticado; abajo se exige pertenencia a staff_evento de ESTE evento (403).
@@ -42,11 +43,18 @@ export async function GET(request, { params }) {
           WHEN ie.id_miembro IS NOT NULL THEN 'miembro'
           WHEN ie.id_invitado IS NOT NULL THEN 'invitado'
           WHEN ie.id_equipo IS NOT NULL THEN 'equipo'
-        END as tipo
+        END as tipo,
+        -- Pago: el staff del evento valida los comprobantes igual que un
+        -- administrador, así que necesita las mismas columnas.
+        ie.estado,
+        ie.pago_completado,
+        e.tiene_costo AS requiere_pago,
+        ${SQL_COLUMNAS_COMPROBANTE}
       FROM inscripcion_evento ie
+      JOIN evento e ON e.id_evento = ie.id_evento
       LEFT JOIN miembro m ON ie.id_miembro = m.id_miembro
       LEFT JOIN invitado i ON ie.id_invitado = i.id_invitado
-      LEFT JOIN equipo_concurso eq ON ie.id_equipo = eq.id_equipo
+      LEFT JOIN equipo_concurso eq ON ie.id_equipo = eq.id_equipo${SQL_JOIN_COMPROBANTE}
       WHERE ie.id_evento = $1 AND ie.estado <> 'cancelada'
       ORDER BY ie.fecha_inscripcion DESC`,
       [id]

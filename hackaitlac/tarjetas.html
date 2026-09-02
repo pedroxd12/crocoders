@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stack Scroll</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;1,9..40,400&family=Instrument+Serif:ital@0;1&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/lenis@1.3.4/dist/lenis.css"
+    />
+    <style>
+      :root {
+        --font-editorial: "Instrument Serif", "Times New Roman", Times, serif;
+        --font-sans: "DM Sans", system-ui, sans-serif;
+        --bg-ink: #121212;
+        --bg-soft: #eceae4;
+        --text-ink: #141414;
+        --text-muted: #5c5c5c;
+        --accent: #d6ef4a;
+        --card-1: #d6ef4a;
+        --card-2: #f4f4f2;
+        --card-3: #6db5a8;
+        --card-4: #e8d5c4;
+        --card-5: #c8b8e8;
+      }
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html {
+        scroll-behavior: auto;
+      }
+
+      html.lenis,
+      html.lenis body {
+        height: auto;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        color: var(--text-ink);
+        background: var(--bg-soft);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .editorial {
+        font-family: var(--font-editorial);
+        font-weight: 400;
+      }
+
+      /* ——— Intro / Outro ——— */
+      .plain {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 2rem;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .plain::before {
+        content: "";
+        position: absolute;
+        inset: -20%;
+        background:
+          radial-gradient(ellipse 60% 50% at 20% 30%, rgba(214, 239, 74, 0.18), transparent 55%),
+          radial-gradient(ellipse 50% 40% at 80% 70%, rgba(109, 181, 168, 0.16), transparent 50%),
+          linear-gradient(165deg, #f3f1eb 0%, #e7e4dc 100%);
+        pointer-events: none;
+      }
+
+      .plain--outro::before {
+        background:
+          radial-gradient(ellipse 55% 45% at 70% 25%, rgba(200, 184, 232, 0.22), transparent 55%),
+          radial-gradient(ellipse 45% 40% at 20% 80%, rgba(232, 213, 196, 0.25), transparent 50%),
+          linear-gradient(195deg, #ebe8e1 0%, #ddd9d0 100%);
+      }
+
+      .plain__inner {
+        position: relative;
+        max-width: 28rem;
+      }
+
+      .plain__label {
+        font-size: 0.75rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-bottom: 1.25rem;
+      }
+
+      .plain__title {
+        font-family: var(--font-editorial);
+        font-size: clamp(2.75rem, 7vw, 4.5rem);
+        line-height: 1.05;
+        letter-spacing: -0.02em;
+        margin-bottom: 1rem;
+      }
+
+      .plain__copy {
+        font-size: 1.05rem;
+        line-height: 1.55;
+        color: var(--text-muted);
+      }
+
+      /* ——— Stack ——— */
+      .stack {
+        position: relative;
+        background: var(--bg-ink);
+        color: #fff;
+        min-height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: clamp(1.75rem, 4vh, 2.75rem) 1.25rem clamp(2rem, 5vh, 3.5rem);
+      }
+
+      .stack__header {
+        flex-shrink: 0;
+        text-align: center;
+        z-index: 20;
+        pointer-events: none;
+        margin-bottom: clamp(1.5rem, 5vh, 3.5rem);
+        margin-top: 2rem;
+      }
+
+      .stack__header h2 {
+        font-family: var(--font-editorial);
+        font-size: clamp(1.75rem, 3.5vw, 2.5rem);
+        font-weight: 400;
+      }
+
+      .stack__stage {
+        position: relative;
+        width: min(1100px, 100%);
+        flex: 0 0 auto;
+        margin-top: auto;
+        margin-bottom: auto;
+      }
+
+      .stack__deck {
+        position: relative;
+        width: 100%;
+        height: min(62vh, 540px);
+      }
+
+      .card {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        grid-template-columns: 1.15fr 0.85fr;
+        gap: clamp(1rem, 3vw, 2.5rem);
+        padding: clamp(1.25rem, 3vw, 2.25rem);
+        border-radius: 2px;
+        transform-origin: center top;
+        will-change: transform;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+      }
+
+      .card[data-tone="1"] {
+        background: var(--card-1);
+        color: var(--text-ink);
+      }
+      .card[data-tone="2"] {
+        background: var(--card-2);
+        color: var(--text-ink);
+      }
+      .card[data-tone="3"] {
+        background: var(--card-3);
+        color: var(--text-ink);
+      }
+      .card[data-tone="4"] {
+        background: var(--card-4);
+        color: var(--text-ink);
+      }
+      .card[data-tone="5"] {
+        background: var(--card-5);
+        color: var(--text-ink);
+      }
+
+      .card__content {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+
+      .card__top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 1rem;
+        margin-bottom: 0.65rem;
+      }
+
+      .card__title {
+        font-family: var(--font-editorial);
+        font-size: clamp(2rem, 4.5vw, 3.4rem);
+        line-height: 1;
+        letter-spacing: -0.02em;
+      }
+
+      .card__index {
+        font-family: var(--font-editorial);
+        font-size: clamp(1.5rem, 3vw, 2.25rem);
+        opacity: 0.35;
+        line-height: 1;
+        flex-shrink: 0;
+      }
+
+      .card__lede {
+        font-size: clamp(0.85rem, 1.4vw, 1rem);
+        line-height: 1.45;
+        max-width: 28ch;
+        opacity: 0.75;
+        margin-bottom: auto;
+      }
+
+      .card__body {
+        font-size: clamp(0.8rem, 1.2vw, 0.92rem);
+        line-height: 1.55;
+        max-width: 36ch;
+        opacity: 0.85;
+        margin: 1.5rem 0 1.25rem;
+      }
+
+      .card__cta {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.75rem;
+        align-self: flex-start;
+        background: #111;
+        color: #fff;
+        text-decoration: none;
+        font-size: 0.85rem;
+        padding: 0.55rem 0.55rem 0.55rem 1rem;
+        border: none;
+        cursor: pointer;
+        transition: transform 0.25s ease;
+      }
+
+      .card__cta:hover {
+        transform: translateY(-1px);
+      }
+
+      .card__cta-arrow {
+        display: grid;
+        place-items: center;
+        width: 1.75rem;
+        height: 1.75rem;
+        background: var(--accent);
+        color: #111;
+        font-size: 0.95rem;
+      }
+
+      .card__media {
+        position: relative;
+        min-height: 0;
+        display: flex;
+        justify-content: flex-end;
+        align-items: stretch;
+      }
+
+      .card__frame {
+        width: min(100%, 260px);
+        height: 100%;
+        aspect-ratio: 3 / 4;
+        overflow: hidden;
+        background: #1a1a1a;
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+      }
+
+      .card__frame img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center;
+        display: block;
+      }
+
+      @media (max-width: 768px) {
+        .stack__header {
+          margin-bottom: clamp(1.75rem, 5vh, 2.75rem);
+        }
+
+        .card {
+          grid-template-columns: 1fr;
+          grid-template-rows: auto 1fr;
+        }
+
+        .card__media {
+          order: -1;
+          height: 36%;
+          min-height: 130px;
+        }
+
+        .card__frame {
+          width: 100%;
+          aspect-ratio: auto;
+        }
+
+        .card__body {
+          margin: 1rem 0;
+        }
+
+        .stack__deck {
+          height: min(68vh, 580px);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <section class="plain plain--intro" aria-label="Intro">
+      <div class="plain__inner">
+        <p class="plain__label">Studio</p>
+        <h1 class="plain__title">What we make</h1>
+        <p class="plain__copy">A short look at how we grow brands — then scroll into the work.</p>
+      </div>
+    </section>
+
+    <section class="stack" id="stack" aria-label="Services">
+      <div class="stack__header">
+        <h2>Our services</h2>
+      </div>
+
+      <div class="stack__stage">
+        <div class="stack__deck" id="deck">
+          <article class="card" data-tone="1">
+            <div class="card__content">
+              <div class="card__top">
+                <h3 class="card__title">Organic content</h3>
+                <span class="card__index">01</span>
+              </div>
+              <p class="card__lede">Let's build an engaged audience for your brand.</p>
+              <p class="card__body">
+                A strong organic presence brings you closer to your customers at scale.
+                We'll help you build one that's visually polished and feels authentic to you.
+              </p>
+              <a class="card__cta" href="#outro">
+                Discover our approach
+                <span class="card__cta-arrow" aria-hidden="true">→</span>
+              </a>
+            </div>
+            <div class="card__media">
+              <div class="card__frame">
+                <img
+                  src="https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=700&h=933&q=80"
+                  alt="Editorial fashion portrait for organic content"
+                />
+              </div>
+            </div>
+          </article>
+
+          <article class="card" data-tone="2">
+            <div class="card__content">
+              <div class="card__top">
+                <h3 class="card__title">Ads for social</h3>
+                <span class="card__index">02</span>
+              </div>
+              <p class="card__lede">
+                (and why your ad creatives benefit more from clarity than novelty)
+              </p>
+              <p class="card__body">
+                Paid social works best when the idea is sharp and the craft is clean.
+                We plan, design, and ship campaigns that feel native — not noisy.
+              </p>
+              <a class="card__cta" href="#outro">
+                Discover our approach
+                <span class="card__cta-arrow" aria-hidden="true">→</span>
+              </a>
+            </div>
+            <div class="card__media">
+              <div class="card__frame">
+                <img
+                  src="https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&w=700&h=933&q=80"
+                  alt="Athletic lifestyle still for social ads"
+                />
+              </div>
+            </div>
+          </article>
+
+          <article class="card" data-tone="3">
+            <div class="card__content">
+              <div class="card__top">
+                <h3 class="card__title">Brand systems</h3>
+                <span class="card__index">03</span>
+              </div>
+              <p class="card__lede">Identity that holds up across every surface.</p>
+              <p class="card__body">
+                From type to tone to motion, we build flexible systems so your brand
+                stays recognizable — whether it's a reel, a site, or a campaign.
+              </p>
+              <a class="card__cta" href="#outro">
+                Discover our approach
+                <span class="card__cta-arrow" aria-hidden="true">→</span>
+              </a>
+            </div>
+            <div class="card__media">
+              <div class="card__frame">
+                <img
+                  src="https://images.unsplash.com/photo-1618220179428-22790b461013?auto=format&fit=crop&w=700&h=933&q=80"
+                  alt="Minimal interior for brand systems"
+                />
+              </div>
+            </div>
+          </article>
+
+          <article class="card" data-tone="4">
+            <div class="card__content">
+              <div class="card__top">
+                <h3 class="card__title">Campaign craft</h3>
+                <span class="card__index">04</span>
+              </div>
+              <p class="card__lede">Big ideas, made to travel.</p>
+              <p class="card__body">
+                We shape narratives that cut through — then adapt them for every channel
+                without losing the spark that made them work in the first place.
+              </p>
+              <a class="card__cta" href="#outro">
+                Discover our approach
+                <span class="card__cta-arrow" aria-hidden="true">→</span>
+              </a>
+            </div>
+            <div class="card__media">
+              <div class="card__frame">
+                <img
+                  src="https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=700&h=933&q=80"
+                  alt="Campaign fashion photography"
+                />
+              </div>
+            </div>
+          </article>
+
+          <article class="card" data-tone="5">
+            <div class="card__content">
+              <div class="card__top">
+                <h3 class="card__title">Growth partners</h3>
+                <span class="card__index">05</span>
+              </div>
+              <p class="card__lede">Ongoing creative that compounds.</p>
+              <p class="card__body">
+                Think of us as an extension of your team — testing, shipping, and refining
+                so every month leaves your brand stronger than the last.
+              </p>
+              <a class="card__cta" href="#outro">
+                Discover our approach
+                <span class="card__cta-arrow" aria-hidden="true">→</span>
+              </a>
+            </div>
+            <div class="card__media">
+              <div class="card__frame">
+                <img
+                  src="https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=700&h=933&q=80"
+                  alt="Portrait for growth partnership"
+                />
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="plain plain--outro" id="outro" aria-label="Outro">
+      <div class="plain__inner">
+        <p class="plain__label">Next</p>
+        <h2 class="plain__title">Let's talk</h2>
+        <p class="plain__copy">That's the stack. Ready when you are.</p>
+      </div>
+    </section>
+
+    <script src="https://cdn.jsdelivr.net/npm/lenis@1.3.4/dist/lenis.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/ScrollTrigger.min.js"></script>
+    <script>
+
+      const lenis = new Lenis({
+        duration: 1.15,
+        easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+        smoothWheel: true,
+      });
+
+      lenis.on("scroll", ScrollTrigger.update);
+      gsap.ticker.add((time) => lenis.raf(time * 1000));
+      gsap.ticker.lagSmoothing(0);
+
+      const cards = gsap.utils.toArray(".card");
+      const PEEK = 42;
+      const SCALE_STEP = 0.045;
+
+      function stackPose(index) {
+        return {
+          y: index * PEEK,
+          scale: 1 - index * SCALE_STEP,
+        };
+      }
+
+      cards.forEach((card, i) => {
+        gsap.set(card, {
+          zIndex: cards.length - i,
+          y: window.innerHeight * 0.72 + i * PEEK,
+          scale: stackPose(i).scale * 0.9,
+          rotate: 0,
+          transformOrigin: "50% 0%",
+        });
+      });
+
+
+      const tl = gsap.timeline({
+        scrollTrigger: {
+          trigger: "#stack",
+          start: "top top",
+          end: () => `+=${cards.length * window.innerHeight}`,
+          pin: true,
+          scrub: true,
+          invalidateOnRefresh: true,
+        },
+      });
+
+      cards.forEach((card, i) => {
+        tl.to(card, { ...stackPose(i), ease: "power3.out", duration: 1.35 }, i * 0.06);
+      });
+
+      tl.to({}, { duration: 0.35 });
+
+      const flyAt = tl.duration();
+      const flying = cards.slice(0, -1);
+
+      flying.forEach((card, i) => {
+        const time = flyAt + i;
+        const behind = cards.slice(i + 1);
+
+        tl.to(
+          card,
+          {
+            y: () => -window.innerHeight * 1.15,
+            rotate: -25,
+            scale: 0.94,
+            ease: "none",
+            duration: 1,
+          },
+          time
+        );
+
+        tl.to(
+          behind,
+          {
+            y: (index) => stackPose(index).y,
+            scale: (index) => stackPose(index).scale,
+            ease: "none",
+            duration: 1,
+          },
+          time
+        );
+
+      });
+
+      tl.to({}, { duration: 0.4 });
+
+      window.addEventListener("resize", () => ScrollTrigger.refresh());
+    </script>
+  </body>
+</html>

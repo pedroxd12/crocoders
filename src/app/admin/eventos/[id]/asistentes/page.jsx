@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { toast } from 'react-toastify';
 import {
-  ArrowLeft, Check, Search, UserPlus, QrCode, Users, UserRoundCheck,
+  ArrowLeft, Check, Search, UserPlus, QrCode, Users, UserRoundCheck, Receipt,
 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -16,8 +16,14 @@ import StatCard from '@/components/ui/StatCard';
 import PageHeader from '@/components/ui/PageHeader';
 import EmptyState from '@/components/ui/EmptyState';
 import QRScannerModal from '@/components/QRScannerModal';
+import RegistroManualModal from '@/components/admin/RegistroManualModal';
+import ComprobanteRevisionModal from '@/components/eventos/ComprobanteRevisionModal';
+import { TONO_COMPROBANTE, ETIQUETA_COMPROBANTE } from '@/lib/comprobante-estado';
 import { fetcher } from '@/lib/fetcher';
 import { formatearFechaDia } from '@/lib/fechas';
+import { NIVELES_ESTUDIO } from '@/lib/registro-campos';
+
+const NIVEL_LABEL = Object.fromEntries(NIVELES_ESTUDIO.map((n) => [n.value, n.label]));
 
 export default function EventoAsistentes() {
   const { id } = useParams();
@@ -43,19 +49,10 @@ export default function EventoAsistentes() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
-  const [selectedUserJson, setSelectedUserJson] = useState('');
-  const [isRegistering, setIsRegistering] = useState(false);
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
   const [pagoAConfirmar, setPagoAConfirmar] = useState(null);
-
-  // El catálogo completo de miembros e invitados sólo se descarga cuando se
-  // abre el modal: antes se pedía en cada montaje aunque nadie fuera a
-  // registrar a mano, y el endpoint no pagina.
-  const { data: usersCatalog } = useSWR(
-    isRegisterModalOpen ? '/api/admin/users' : null,
-    fetcher,
-    { revalidateOnFocus: false },
-  );
+  // Fila cuyo comprobante se está revisando (null = modal cerrado).
+  const [comprobanteAbierto, setComprobanteAbierto] = useState(null);
 
   const parchearInscripcion = (idInscripcion, cambios) => {
     mutarAsistentes(
@@ -98,35 +95,6 @@ export default function EventoAsistentes() {
     }
   };
 
-  const handleManualRegister = async (e) => {
-    e.preventDefault();
-    if (!selectedUserJson) {
-      toast.warning('Selecciona un usuario');
-      return;
-    }
-
-    setIsRegistering(true);
-    try {
-      const user = JSON.parse(selectedUserJson);
-      const res = await fetch('/api/admin/eventos/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_evento: id, id_usuario: user.id, tipo_usuario: user.tipo }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Error al registrar');
-
-      toast.success(`${user.nombre_completo} quedó registrado`);
-      setIsRegisterModalOpen(false);
-      setSelectedUserJson('');
-      mutarAsistentes();
-    } catch (error) {
-      toast.error(error.message);
-    } finally {
-      setIsRegistering(false);
-    }
-  };
-
   const filteredAsistentes = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     if (!q) return lista;
@@ -138,32 +106,10 @@ export default function EventoAsistentes() {
     );
   }, [lista, searchTerm]);
 
-  // Excluye del desplegable a quien ya está inscrito.
-  //
-  // Se compara por CORREO y no sólo por id porque el endpoint de asistentes no
-  // devuelve `id_miembro` / `id_invitado` (ver notas): comparar `undefined ===
-  // u.id` daba siempre false y el filtro no excluía a nadie, así que el admin
-  // elegía a alguien ya inscrito y el API respondía con un error de duplicado.
-  // El correo sí viaja en ambas listas. Se mantiene además la comparación por
-  // id para que siga funcionando —y sea más precisa— en cuanto el API los
-  // exponga. Las filas de tipo "Equipo" traen el correo del capitán, que
-  // efectivamente ya está inscrito.
-  const availableUsers = useMemo(() => {
-    const catalogo = Array.isArray(usersCatalog) ? usersCatalog : [];
-    const correosInscritos = new Set(
-      lista.map((a) => a.correo?.trim().toLowerCase()).filter(Boolean),
-    );
-    return catalogo.filter((u) => {
-      if (u.email && correosInscritos.has(u.email.trim().toLowerCase())) return false;
-      return !lista.some(
-        (a) =>
-          (u.tipo === 'miembro' && a.id_miembro != null && a.id_miembro === u.id) ||
-          (u.tipo === 'invitado' && a.id_invitado != null && a.id_invitado === u.id),
-      );
-    });
-  }, [usersCatalog, lista]);
-
   const totalAsistieron = lista.filter((a) => a.asistio).length;
+  // Trabajo pendiente de pago: comprobantes por revisar y quién no subió nada.
+  const comprobantesPendientes = lista.filter((a) => a.comprobante_estado === 'pendiente').length;
+  const sinComprobante = lista.filter((a) => a.requiere_pago && !a.id_comprobante).length;
 
   const columnas = [
     { header: 'Nombre', accessor: 'nombre_completo', cellClassName: 'font-medium' },
@@ -172,6 +118,70 @@ export default function EventoAsistentes() {
       header: 'Tipo',
       render: (row) => <Badge tone="neutral">{row.tipo_usuario}</Badge>,
     },
+    {
+      header: 'Perfil',
+      render: (row) =>
+        row.tipo_usuario === 'Equipo' ? (
+          <span className="text-xs text-muted">{row.integrantes_equipo} integrante(s)</span>
+        ) : (
+          <span className="text-xs text-muted">
+            {NIVEL_LABEL[row.nivel_estudios] || '—'}
+            {row.edad ? ` · ${row.edad} años` : ''}
+          </span>
+        ),
+    },
+    // La talla sólo tiene sentido cuando el evento la pide; en filas de equipo
+    // llega ya agregada (una por integrante, "—" cuando falta). La entrega se
+    // marca desde el escáner QR; aquí sólo se consulta el avance.
+    ...(evento?.solicitar_talla
+      ? [
+          {
+            header: 'Talla',
+            render: (row) =>
+              row.talla_playera ? (
+                <span className="text-xs font-medium">{row.talla_playera}</span>
+              ) : (
+                <span className="text-xs text-faint">—</span>
+              ),
+          },
+          {
+            header: 'Playera',
+            render: (row) =>
+              row.tipo_usuario === 'Equipo' ? (
+                <span className="text-xs text-muted">
+                  {row.playeras_entregadas ?? 0}/{row.personas_equipo ?? 0} entregadas
+                </span>
+              ) : row.playera_entregada ? (
+                <Badge tone="success">Entregada</Badge>
+              ) : (
+                <span className="text-xs text-faint">—</span>
+              ),
+          },
+        ]
+      : []),
+    // Comprobante de pago (migración 013): sólo tiene sentido en eventos con
+    // costo, y es la prueba con la que se decide el toggle de la columna Pago.
+    ...(evento?.tiene_costo
+      ? [
+          {
+            header: 'Comprobante',
+            render: (row) =>
+              row.id_comprobante ? (
+                <button
+                  type="button"
+                  onClick={() => setComprobanteAbierto(row)}
+                  title="Ver el comprobante y validar el pago"
+                >
+                  <Badge tone={TONO_COMPROBANTE[row.comprobante_estado] || 'neutral'}>
+                    {ETIQUETA_COMPROBANTE[row.comprobante_estado] || row.comprobante_estado}
+                  </Badge>
+                </button>
+              ) : (
+                <span className="text-xs text-faint">Sin subir</span>
+              ),
+          },
+        ]
+      : []),
     {
       header: 'Pago',
       render: (row) =>
@@ -192,7 +202,19 @@ export default function EventoAsistentes() {
     {
       header: 'Asistencia',
       align: 'center',
-      render: (row) => (
+      // En un equipo la asistencia se lleva POR INTEGRANTE (migración 009) y se
+      // marca desde el roster del escáner QR; el toggle de la inscripción
+      // completa la desincronizaría, así que la fila de equipo muestra el
+      // avance en lugar del botón.
+      render: (row) =>
+        row.tipo_usuario === 'Equipo' ? (
+          <span
+            className={`text-xs ${Number(row.integrantes_asistieron) > 0 ? 'font-medium text-brand' : 'text-faint'}`}
+            title="Integrantes con llegada registrada (se marca escaneando el QR del equipo)"
+          >
+            {row.integrantes_asistieron ?? 0}/{row.integrantes_equipo ?? 0}
+          </span>
+        ) : (
         <button
           type="button"
           onClick={() => toggleAsistencia(row.id_inscripcion, row.asistio)}
@@ -236,7 +258,7 @@ export default function EventoAsistentes() {
         }
       />
 
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:max-w-md">
+      <div className={`mb-6 grid gap-4 ${evento?.tiene_costo ? 'grid-cols-2 sm:max-w-2xl sm:grid-cols-3' : 'grid-cols-2 sm:max-w-md'}`}>
         <StatCard icon={Users} label="Inscritos" value={lista.length} tone="info" />
         <StatCard
           icon={UserRoundCheck}
@@ -245,6 +267,19 @@ export default function EventoAsistentes() {
           tone="brand"
           hint={lista.length ? `${Math.round((totalAsistieron / lista.length) * 100)}% de los inscritos` : undefined}
         />
+        {evento?.tiene_costo && (
+          <StatCard
+            icon={Receipt}
+            label="Pagos por validar"
+            value={comprobantesPendientes}
+            tone="warning"
+            hint={
+              sinComprobante > 0
+                ? `${sinComprobante} inscripción(es) aún sin comprobante`
+                : 'Todos subieron su comprobante'
+            }
+          />
+        )}
       </div>
 
       <div className="mb-4">
@@ -277,49 +312,17 @@ export default function EventoAsistentes() {
         }
       />
 
-      <Modal
+      {/* Registro manual con los MISMOS datos que el formulario público:
+          buscador de usuarios existentes, ficha completa de invitado nuevo y,
+          en concursos por equipos, el formulario de equipo. */}
+      <RegistroManualModal
         isOpen={isRegisterModalOpen}
         onClose={() => setIsRegisterModalOpen(false)}
-        title="Registrar asistente manualmente"
-        description="Inscribe a un miembro o invitado sin que pase por el formulario público."
-        size="md"
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={() => setIsRegisterModalOpen(false)}>
-              Cancelar
-            </Button>
-            <Button type="submit" form="formulario-registro-manual" loading={isRegistering}>
-              Registrar
-            </Button>
-          </>
-        }
-      >
-        <form id="formulario-registro-manual" onSubmit={handleManualRegister}>
-          <label htmlFor="usuario-a-registrar" className="mb-1.5 block text-sm font-medium text-muted">
-            Usuario
-          </label>
-          <select
-            id="usuario-a-registrar"
-            value={selectedUserJson}
-            onChange={(e) => setSelectedUserJson(e.target.value)}
-            size={8}
-            className="w-full rounded-lg border border-line bg-surface-2 p-2 text-sm text-fg focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/25"
-          >
-            {availableUsers.map((user) => (
-              <option key={`${user.tipo}-${user.id}`} value={JSON.stringify(user)}>
-                {user.nombre_completo} ({user.tipo}) — {user.email}
-              </option>
-            ))}
-          </select>
-          <p className="mt-2 text-xs text-faint">
-            {usersCatalog
-              ? availableUsers.length > 0
-                ? 'Miembros e invitados que aún no están inscritos en este evento.'
-                : 'No queda nadie por inscribir: todos los usuarios del sistema ya están en la lista.'
-              : 'Cargando usuarios…'}
-          </p>
-        </form>
-      </Modal>
+        evento={evento}
+        eventoId={id}
+        asistentes={lista}
+        onRegistered={() => mutarAsistentes()}
+      />
 
       {/* Cambiar el pago es reversible, así que NO usa ConfirmDialog (que
           siempre advierte "no se puede deshacer"): basta un modal sobrio. Lo
@@ -349,6 +352,24 @@ export default function EventoAsistentes() {
         </p>
       </Modal>
 
+      {/* Revisión del comprobante: la misma pantalla que usa el panel de staff. */}
+      <ComprobanteRevisionModal
+        key={comprobanteAbierto?.id_comprobante ?? 'ninguno'}
+        fila={comprobanteAbierto}
+        onClose={() => setComprobanteAbierto(null)}
+        onRevisado={({ fila, comprobante, inscripcion }) => {
+          // Se parchea la fila en local en vez de revalidar: el listado de un
+          // evento grande es caro y el servidor ya devolvió el resultado.
+          parchearInscripcion(fila.id_inscripcion, {
+            comprobante_estado: comprobante.estado,
+            comprobante_motivo_rechazo: comprobante.motivo_rechazo,
+            comprobante_revisado_en: comprobante.revisado_en,
+            pago_completado: inscripcion.pago_completado,
+            estado: inscripcion.estado,
+          });
+        }}
+      />
+
       <QRScannerModal
         isOpen={isQRScannerOpen}
         onClose={() => setIsQRScannerOpen(false)}
@@ -356,6 +377,9 @@ export default function EventoAsistentes() {
         // asistencia allí y respondía "Asistencia registrada".
         eventoId={id}
         onSuccess={() => mutarAsistentes()}
+        // Los toggles de llegada/playera del panel del escáner también cambian
+        // la lista (asistencia agregada del equipo, entrega de playeras).
+        onUpdate={() => mutarAsistentes()}
       />
     </div>
   );

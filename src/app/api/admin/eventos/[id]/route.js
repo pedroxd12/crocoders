@@ -44,6 +44,10 @@ export async function GET(request, context) {
         -- por Date (que la reinterpretaba en la zona del servidor).
         TO_CHAR(e.fecha_limite_registro, 'YYYY-MM-DD"T"HH24:MI') as fecha_limite_registro,
         t.nombre as tipo_nombre,
+        -- El registro manual de asistentes necesita saber si el evento es por
+        -- equipos: son las mismas tres condiciones del detalle público
+        -- (permite_equipos && id_concurso && modalidad = 'equipos').
+        t.permite_equipos,
         a.nombre as alcance_nombre,
         -- Concurso info
         c.id_concurso,
@@ -52,6 +56,8 @@ export async function GET(request, context) {
         c.min_integrantes_equipo,
         c.id_plataforma,
         c.requiere_asesor,
+        c.asesor_participa,
+        c.max_asesores,
         c.url_concurso,
         -- Dos cifras distintas y a propósito: filas de inscripción vs. lugares
         -- ocupados (un equipo es 1 inscripción y N lugares).
@@ -105,11 +111,11 @@ export async function PUT(request, context) {
     const {
         nombre, descripcion_html, id_tipo_evento, id_alcance,
         fecha_inicio, fecha_fin, fecha_limite_registro, hora_inicio, hora_fin,
-        ubicacion, cupos, tiene_costo, costo,
-        imagen_flyer_url, imagen_flyer_key,
+        ubicacion, cupos, tiene_costo, costo, instrucciones_pago,
+        imagen_flyer_url, imagen_flyer_key, solicitar_talla,
         // Concurso
-        es_concurso, modalidad, max_integrantes_equipo, min_integrantes_equipo, id_plataforma, 
-        requiere_asesor, url_concurso
+        es_concurso, modalidad, max_integrantes_equipo, min_integrantes_equipo, id_plataforma,
+        requiere_asesor, asesor_participa, max_asesores, url_concurso
     } = body;
 
     // Validación de campos obligatorios (la DB exige fecha_fin/hora_fin NOT NULL).
@@ -193,8 +199,10 @@ export async function PUT(request, context) {
             costo = $14,
             imagen_flyer_url = $15,
             imagen_flyer_key = $16,
+            solicitar_talla = $17,
+            instrucciones_pago = $18,
             updated_at = NOW()
-        WHERE id_evento = $17
+        WHERE id_evento = $19
         RETURNING *
     `;
 
@@ -207,7 +215,10 @@ export async function PUT(request, context) {
         nombre, sanitizeHtml(descripcion_html || ''), id_tipo_evento, id_alcance,
         fecha_inicio, fechaFinValue, fecha_limite_registro || null, hora_inicio, hora_fin,
         ubicacion ?? null, cuposValue, currentRes.rows[0].cupos_disponibles, tieneCostoValue, costoValue,
-        finalUrl, finalKey,
+        finalUrl, finalKey, Boolean(solicitar_talla),
+        // Igual que en el alta: las instrucciones sólo viven mientras el
+        // evento cobre. Al desmarcar el costo se limpian.
+        tieneCostoValue ? (instrucciones_pago?.trim() || null) : null,
         id
     ]);
 
@@ -221,6 +232,9 @@ export async function PUT(request, context) {
     if (es_concurso) {
         const checkConcurso = await client.query('SELECT id_concurso FROM concurso WHERE id_evento = $1', [id]);
         
+        const asesorParticipaValue = Boolean(asesor_participa);
+        const maxAsesoresValue = Math.min(5, Math.max(1, parseInt(max_asesores) || 1));
+
         if (checkConcurso.rows.length > 0) {
             // Update existing
             await client.query(`
@@ -230,14 +244,18 @@ export async function PUT(request, context) {
                     max_integrantes_equipo = $3,
                     min_integrantes_equipo = $4,
                     requiere_asesor = $5,
-                    url_concurso = $6
-                WHERE id_evento = $7
+                    asesor_participa = $6,
+                    max_asesores = $7,
+                    url_concurso = $8
+                WHERE id_evento = $9
             `, [
-                id_plataforma || null, 
+                id_plataforma || null,
                 modalidad || 'individual',
                 modalidad === 'equipos' ? (parseInt(max_integrantes_equipo) || 3) : null,
                 modalidad === 'equipos' ? (parseInt(min_integrantes_equipo) || 2) : 1,
                 requiere_asesor,
+                asesorParticipaValue,
+                maxAsesoresValue,
                 url_concurso,
                 id
             ]);
@@ -245,16 +263,19 @@ export async function PUT(request, context) {
             // Create new
             await client.query(`
                 INSERT INTO concurso (
-                    id_evento, id_plataforma, modalidad, 
-                    max_integrantes_equipo, min_integrantes_equipo, requiere_asesor, url_concurso
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    id_evento, id_plataforma, modalidad,
+                    max_integrantes_equipo, min_integrantes_equipo, requiere_asesor,
+                    asesor_participa, max_asesores, url_concurso
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             `, [
                 id,
-                id_plataforma || null, 
+                id_plataforma || null,
                 modalidad || 'individual',
                 modalidad === 'equipos' ? (parseInt(max_integrantes_equipo) || 3) : null,
                 modalidad === 'equipos' ? (parseInt(min_integrantes_equipo) || 2) : 1,
                 requiere_asesor,
+                asesorParticipaValue,
+                maxAsesoresValue,
                 url_concurso
             ]);
         }

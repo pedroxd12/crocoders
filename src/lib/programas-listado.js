@@ -29,6 +29,7 @@ export async function listarProgramasPublicos() {
       p.hora_fin,
       p.sesiones_requeridas_certificado,
       p.porcentaje_asistencia_minimo,
+      p.solicitar_talla,
       t.nombre AS tipo,
       a.nombre AS alcance,
       (SELECT COUNT(*) FROM sesion_programa sp WHERE sp.id_programa = p.id_programa) AS total_sesiones,

@@ -39,7 +39,11 @@ export async function POST(request) {
     numero_telefono,
     escuela_institucion,
     carrera,
+    numero_control,
     semestre,
+    nivel_estudios,
+    edad,
+    talla_playera,
   } = data;
 
   // Fail-fast del secreto ANTES de escribir: sin él no podríamos emitir el
@@ -83,14 +87,18 @@ export async function POST(request) {
     }
 
     const rows = await sql`
-      INSERT INTO invitado (nombre_completo, correo_electronico, numero_telefono, escuela_institucion, carrera, semestre)
+      INSERT INTO invitado (nombre_completo, correo_electronico, numero_telefono, escuela_institucion, carrera, numero_control, semestre, nivel_estudios, edad, talla_playera)
       VALUES (
         ${nombre_completo},
         ${correo_electronico},
         ${numero_telefono || null},
         ${escuela_institucion || null},
         ${carrera || null},
-        ${semestre ?? null}
+        ${numero_control || null},
+        ${semestre ?? null},
+        ${nivel_estudios || null},
+        ${edad ?? null},
+        ${talla_playera || null}
       )
       ON CONFLICT (correo_electronico) DO UPDATE SET
         -- El nombre NO se sobrescribe: sólo se rellena si estaba vacío. Es la
@@ -100,6 +108,13 @@ export async function POST(request) {
         escuela_institucion = COALESCE(invitado.escuela_institucion, EXCLUDED.escuela_institucion),
         carrera             = COALESCE(invitado.carrera, EXCLUDED.carrera),
         semestre            = COALESCE(invitado.semestre, EXCLUDED.semestre),
+        -- Estos SÍ se actualizan cuando vienen (EXCLUDED primero): edad, nivel,
+        -- talla y número de control cambian con el tiempo y el dato nuevo es el
+        -- bueno. No son identidad, así que el riesgo de suplantación no aplica.
+        nivel_estudios      = COALESCE(EXCLUDED.nivel_estudios, invitado.nivel_estudios),
+        edad                = COALESCE(EXCLUDED.edad, invitado.edad),
+        talla_playera       = COALESCE(EXCLUDED.talla_playera, invitado.talla_playera),
+        numero_control      = COALESCE(EXCLUDED.numero_control, invitado.numero_control),
         updated_at          = NOW()
       RETURNING id_invitado
     `;

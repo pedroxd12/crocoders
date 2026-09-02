@@ -6,11 +6,12 @@ import { rateLimit } from '@/lib/rate-limit';
 import { verificarInvitado } from '@/lib/invitado-token';
 import { recalcularCupos, verificarDisponibilidad } from '@/lib/eventos-cupos';
 import { sqlRegistroCerrado, sqlEventoTerminado } from '@/lib/eventos-fechas';
-
 // Errores de reglas de negocio (no fallos del servidor). Antes todas estas
 // validaciones eran `throw new Error(...)` y acababan en el catch genérico, así
 // que el usuario leía "Error: Error al registrarse" en vez del motivo real.
-class ValidationError extends Error {}
+// La clase y la lógica de equipos viven en la lib compartida con el registro
+// manual del panel admin.
+import { ValidationError, resolverEquipo, insertarEquipo } from '@/lib/eventos-equipo';
 
 export async function POST(request) {
   // Registro mayormente público (invitados sin cuenta): limitar por IP para
@@ -87,7 +88,14 @@ export async function POST(request) {
 
   const equipo = tipo === 'equipo' ? data.equipo : undefined;
   const integrantes = tipo === 'equipo' ? data.integrantes : undefined;
-  const asesor = tipo === 'equipo' ? data.asesor : undefined;
+  // Lista unificada de asesores: el cliente actual manda `asesores` (array);
+  // `asesor` suelto se acepta por compatibilidad. Las filas completamente
+  // vacías las descarta `resolverEquipo`.
+  const asesores = tipo === 'equipo'
+    ? (Array.isArray(data.asesores) && data.asesores.length > 0
+        ? data.asesores
+        : (data.asesor ? [data.asesor] : []))
+    : [];
 
   // Fail-fast del secreto del QR: si falta, abortamos ANTES de tocar la DB para
   // no dejar una inscripción confirmada y devolver 500 (el QR se genera dentro
@@ -122,11 +130,12 @@ export async function POST(request) {
     // hace atómico el conteo de lugares y el recálculo posterior de cupos.
     const eventoRes = await client.query(`
       SELECT e.id_evento, e.cupos, e.cupos_disponibles, e.estado, e.nombre,
-             e.tiene_costo,
+             e.tiene_costo, e.costo, e.instrucciones_pago, e.solicitar_talla,
              ${sqlRegistroCerrado('e')} AS registro_cerrado,
              ${sqlEventoTerminado('e')} AS evento_terminado,
              c.id_concurso, c.modalidad, c.max_integrantes_equipo,
-             c.min_integrantes_equipo, c.requiere_asesor, t.permite_equipos
+             c.min_integrantes_equipo, c.requiere_asesor, c.max_asesores,
+             t.permite_equipos
       FROM evento e
       LEFT JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
       LEFT JOIN concurso c ON e.id_evento = c.id_evento
@@ -203,118 +212,21 @@ export async function POST(request) {
     let inscripcionId;
     // Lugares que consume esta inscripción (un equipo ocupa uno por integrante).
     let lugaresSolicitados = 1;
-    // Integrantes ya resueltos a miembro/invitado, para insertarlos tras validar.
-    let integrantesResueltos = [];
+    // Equipo validado y resuelto (integrantes → miembro/invitado, asesores
+    // filtrados), listo para insertarse tras verificar cupos.
+    let equipoResuelto = null;
 
     if (tipo === 'equipo') {
-      if (!evento.permite_equipos) throw new ValidationError('Este evento no permite registro por equipos.');
-      if (!evento.id_concurso) throw new ValidationError('Configuración de concurso no encontrada para este evento.');
-      // La modalidad del concurso manda sobre el flag del catálogo de tipos:
-      // en 'individual' el esquema obliga a max_integrantes_equipo NULL, así
-      // que sin esta comprobación entraban "equipos" de hasta 10 personas.
-      if (evento.modalidad !== 'equipos') {
-        throw new ValidationError('Este concurso es de modalidad individual; no admite registro por equipos.');
-      }
-      if (!equipo?.nombre) throw new ValidationError('Nombre del equipo requerido.');
-      if (!integrantes || integrantes.length === 0) throw new ValidationError('Se requiere al menos un integrante.');
-      if (evento.min_integrantes_equipo && integrantes.length < evento.min_integrantes_equipo) {
-        throw new ValidationError(`El mínimo de integrantes por equipo es ${evento.min_integrantes_equipo}.`);
-      }
-      // Tope duro aunque el concurso no lo configure, para no depender de un NULL.
-      const maxIntegrantes = evento.max_integrantes_equipo || 5;
-      if (integrantes.length > maxIntegrantes) {
-        throw new ValidationError(`El máximo de integrantes por equipo es ${maxIntegrantes}.`);
-      }
-      if (evento.requiere_asesor && (!asesor?.nombre || !asesor?.email)) {
-        throw new ValidationError('Datos del asesor requeridos.');
-      }
-
-      // Correos únicos: repetir uno creaba dos filas en integrante_equipo para
-      // la misma persona y consumía dos lugares.
-      const correos = integrantes.map((i) => String(i.email || '').trim().toLowerCase());
-      if (correos.some((c) => !c)) throw new ValidationError('Todos los integrantes deben indicar su correo.');
-      if (new Set(correos).size !== correos.length) {
-        throw new ValidationError('Hay correos repetidos entre los integrantes del equipo.');
-      }
-
-      // 1) Resolver TODOS los integrantes antes de escribir nada: quién es
-      //    miembro y quién es un invitado que ya existe.
-      const miembrosRes = await client.query(
-        `SELECT id_miembro, LOWER(correo_electronico) AS correo
-           FROM miembro
-          WHERE LOWER(correo_electronico) = ANY($1::text[]) AND deleted_at IS NULL`,
-        [correos],
+      // Validación + resolución compartidas con el registro manual del admin
+      // (src/lib/eventos-equipo.js). `capitanId` exige que quien registra forme
+      // parte del equipo y lo marca capitán.
+      equipoResuelto = await resolverEquipo(
+        client,
+        evento,
+        { equipo, integrantes, asesores },
+        { capitanId: memberId },
       );
-      const porCorreoMiembro = new Map(miembrosRes.rows.map((r) => [r.correo, r.id_miembro]));
-
-      const invitadosRes = await client.query(
-        `SELECT id_invitado, LOWER(correo_electronico) AS correo
-           FROM invitado
-          WHERE LOWER(correo_electronico) = ANY($1::text[])`,
-        [correos],
-      );
-      const porCorreoInvitado = new Map(invitadosRes.rows.map((r) => [r.correo, r.id_invitado]));
-
-      integrantesResueltos = integrantes.map((integrante, i) => ({
-        datos: integrante,
-        correo: correos[i],
-        idMiembro: porCorreoMiembro.get(correos[i]) ?? null,
-        idInvitado: porCorreoMiembro.has(correos[i]) ? null : (porCorreoInvitado.get(correos[i]) ?? null),
-        esCapitan: false,
-      }));
-
-      // 2) El capitán tiene que ser quien está registrando el equipo. Así nadie
-      //    inscribe a terceros a su nombre, y ningún equipo se queda sin capitán
-      //    (sin capitán nadie puede darlo de baja y el correo de confirmación se
-      //    queda sin destinatario).
-      const yo = integrantesResueltos.find((r) => r.idMiembro === memberId);
-      if (!yo) {
-        throw new ValidationError('Debes formar parte del equipo que registras: incluye tu propio correo entre los integrantes.');
-      }
-      const capitanesMarcados = integrantesResueltos.filter((r) => r.datos.es_capitan);
-      if (capitanesMarcados.length > 1) throw new ValidationError('El equipo sólo puede tener un capitán.');
-      if (capitanesMarcados.length === 1 && capitanesMarcados[0] !== yo) {
-        throw new ValidationError('El capitán del equipo debe ser quien realiza el registro.');
-      }
-      yo.esCapitan = true;
-
-      // 3) Ningún integrante puede estar ya inscrito (ni por su cuenta ni en
-      //    otro equipo): antes la misma persona ocupaba dos o tres lugares.
-      const idsMiembro = integrantesResueltos.map((r) => r.idMiembro).filter(Boolean);
-      const idsInvitado = integrantesResueltos.map((r) => r.idInvitado).filter(Boolean);
-      if (idsMiembro.length > 0 || idsInvitado.length > 0) {
-        const yaRes = await client.query(
-          `SELECT ie.id_miembro AS ins_miembro, ie.id_invitado AS ins_invitado,
-                  int_eq.id_miembro AS eq_miembro, int_eq.id_invitado AS eq_invitado
-             FROM inscripcion_evento ie
-             LEFT JOIN equipo_concurso eq ON ie.id_equipo = eq.id_equipo
-             LEFT JOIN integrante_equipo int_eq ON eq.id_equipo = int_eq.id_equipo
-            WHERE ie.id_evento = $1
-              AND ie.estado <> 'cancelada'
-              AND (ie.id_miembro = ANY($2::int[]) OR int_eq.id_miembro = ANY($2::int[])
-                OR ie.id_invitado = ANY($3::int[]) OR int_eq.id_invitado = ANY($3::int[]))`,
-          [eventoId, idsMiembro, idsInvitado],
-        );
-        if (yaRes.rows.length > 0) {
-          const miembrosOcupados = new Set();
-          const invitadosOcupados = new Set();
-          for (const fila of yaRes.rows) {
-            if (fila.ins_miembro) miembrosOcupados.add(fila.ins_miembro);
-            if (fila.eq_miembro) miembrosOcupados.add(fila.eq_miembro);
-            if (fila.ins_invitado) invitadosOcupados.add(fila.ins_invitado);
-            if (fila.eq_invitado) invitadosOcupados.add(fila.eq_invitado);
-          }
-          const enConflicto = integrantesResueltos
-            .filter((r) => (r.idMiembro && miembrosOcupados.has(r.idMiembro))
-                        || (r.idInvitado && invitadosOcupados.has(r.idInvitado)))
-            .map((r) => r.correo);
-          if (enConflicto.length > 0) {
-            throw new ValidationError(`Ya hay integrantes inscritos en este evento: ${enConflicto.join(', ')}.`);
-          }
-        }
-      }
-
-      lugaresSolicitados = integrantesResueltos.length;
+      lugaresSolicitados = equipoResuelto.lugaresSolicitados;
     }
 
     // Cupos: se decide contra las INSCRIPCIONES REALES, no contra el contador
@@ -331,52 +243,37 @@ export async function POST(request) {
     }
 
     if (tipo === 'equipo') {
-      const teamRes = await client.query(
-        `INSERT INTO equipo_concurso (id_concurso, nombre_equipo, nombre_asesor, correo_asesor, telefono_asesor, institucion_asesor, registro_completo)
-         VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING id_equipo`,
-        [
-          evento.id_concurso,
-          equipo.nombre,
-          asesor?.nombre || null,
-          asesor?.email || null,
-          asesor?.telefono || null,
-          asesor?.institucion || null,
-        ],
-      );
-      const teamId = teamRes.rows[0].id_equipo;
-
-      for (const r of integrantesResueltos) {
-        // Los integrantes que no son miembros se dan de alta como invitados.
-        if (!r.idMiembro && !r.idInvitado) {
-          const guestRes = await client.query(
-            `INSERT INTO invitado (nombre_completo, correo_electronico, numero_telefono, escuela_institucion, carrera, semestre)
-             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_invitado`,
-            [
-              r.datos.nombre,
-              r.correo,
-              r.datos.telefono || null,
-              r.datos.institucion || null,
-              r.datos.carrera || null,
-              r.datos.semestre ? parseInt(r.datos.semestre) : null,
-            ],
-          );
-          r.idInvitado = guestRes.rows[0].id_invitado;
-        }
-
-        await client.query(
-          'INSERT INTO integrante_equipo (id_equipo, id_miembro, id_invitado, es_capitan) VALUES ($1, $2, $3, $4)',
-          [teamId, r.idMiembro, r.idInvitado, r.esCapitan],
-        );
-      }
-
-      const insRes = await client.query(
-        `INSERT INTO inscripcion_evento (id_evento, id_equipo, estado, requiere_pago, fecha_inscripcion)
-         VALUES ($1, $2, $3, $4, NOW()) RETURNING id_inscripcion`,
-        [eventoId, teamId, estadoInicial, requierePago],
-      );
-      inscripcionId = insRes.rows[0].id_inscripcion;
+      // Inserción compartida con el registro manual del admin
+      // (src/lib/eventos-equipo.js): equipo + asesores + integrantes + inscripción.
+      inscripcionId = await insertarEquipo(client, {
+        eventoId,
+        idConcurso: evento.id_concurso,
+        equipo,
+        asesores: equipoResuelto.asesores,
+        integrantesResueltos: equipoResuelto.integrantesResueltos,
+        estadoInicial,
+        requierePago,
+      });
 
     } else if (tipo === 'miembro') {
+      // Talla de playera: si el evento la pide, tiene que venir en el payload o
+      // estar ya guardada en la ficha del miembro. Si viene, se guarda (es el
+      // propio miembro autenticado actualizando su dato).
+      if (data.talla_playera) {
+        await client.query(
+          'UPDATE miembro SET talla_playera = $1 WHERE id_miembro = $2',
+          [data.talla_playera, memberId],
+        );
+      } else if (evento.solicitar_talla) {
+        const tallaRes = await client.query(
+          'SELECT talla_playera FROM miembro WHERE id_miembro = $1',
+          [memberId],
+        );
+        if (!tallaRes.rows[0]?.talla_playera) {
+          throw new ValidationError('Este evento requiere indicar tu talla de playera.');
+        }
+      }
+
       // Registro individual de un miembro autenticado.
       // Si existe una inscripción previa CANCELADA (las activas ya se filtraron
       // en el dupCheck), la reactivamos en vez de chocar con el UNIQUE.
@@ -397,10 +294,15 @@ export async function POST(request) {
       // Registro individual de un invitado (externo sin cuenta). El id viene
       // del guestToken firmado, ya verificado arriba; comprobamos que la fila
       // siga existiendo para devolver un error claro en vez de un 23503 -> 500.
-      const guestExists = await client.query('SELECT 1 FROM invitado WHERE id_invitado = $1', [guestId]);
+      const guestExists = await client.query('SELECT talla_playera FROM invitado WHERE id_invitado = $1', [guestId]);
       if (guestExists.rows.length === 0) {
         await client.query('ROLLBACK');
         return NextResponse.json({ success: false, error: 'Invitado no encontrado. Vuelve a completar tus datos.' }, { status: 404 });
+      }
+      // La talla la guardó POST /api/invitados un momento antes; si el evento la
+      // exige y la ficha no la tiene, el cliente se saltó el formulario.
+      if (evento.solicitar_talla && !guestExists.rows[0].talla_playera) {
+        throw new ValidationError('Este evento requiere indicar tu talla de playera.');
       }
 
       const insRes = await client.query(

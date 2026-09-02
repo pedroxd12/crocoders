@@ -31,7 +31,11 @@ export async function GET(request, { params }) {
           i.nombre_completo
         ) AS nombre_completo,
         COALESCE(m.correo_electronico, i.correo_electronico) AS email,
-        COALESCE(am.asistio, ai.asistio, false) AS asistio
+        COALESCE(am.asistio, ai.asistio, false) AS asistio,
+        -- Playera: la talla vive en la PERSONA y la entrega en la inscripción
+        -- al programa (una sola vez, no por sesión — migración 010).
+        COALESCE(m.talla_playera, i.talla_playera) AS talla_playera,
+        ip.playera_entregada
       FROM inscripcion_programa ip
       LEFT JOIN miembro  m ON ip.id_miembro = m.id_miembro
       LEFT JOIN invitado i ON ip.id_invitado = i.id_invitado

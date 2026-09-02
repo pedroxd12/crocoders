@@ -23,8 +23,10 @@ export async function GET(request) {
         e.cupos_disponibles,
         e.tiene_costo,
         e.costo,
+        e.instrucciones_pago,
         e.imagen_flyer_url,
         e.estado,
+        e.solicitar_talla,
         t.id_tipo_evento,
         t.nombre as tipo_nombre,
         a.id_alcance,
@@ -54,6 +56,8 @@ export async function GET(request) {
         c.min_integrantes_equipo,
         c.id_plataforma,
         c.requiere_asesor,
+        c.asesor_participa,
+        c.max_asesores,
         c.url_concurso,
         cp.nombre as plataforma_nombre
       FROM evento e
@@ -97,8 +101,10 @@ export async function POST(request) {
       cupos,
       tiene_costo,
       costo,
+      instrucciones_pago,
       imagen_flyer_url,
       imagen_flyer_key,
+      solicitar_talla,
       // Datos de concurso
       es_concurso,
       modalidad, // 'individual' | 'equipos'
@@ -106,6 +112,8 @@ export async function POST(request) {
       min_integrantes_equipo,
       id_plataforma,
       requiere_asesor,
+      asesor_participa,
+      max_asesores,
       url_concurso
     } = body;
 
@@ -147,6 +155,8 @@ export async function POST(request) {
         ubicacion, cupos, cupos_disponibles,
         tiene_costo, costo,
         imagen_flyer_url, imagen_flyer_key,
+        solicitar_talla,
+        instrucciones_pago,
         estado
       ) VALUES (
         $1, $2, $3, $4,
@@ -154,6 +164,7 @@ export async function POST(request) {
         $10, $11, $11, -- cupos_disponibles inicial = cupos
         $12, $13,
         $14, $15,
+        $16, $17,
         'publicado'
       )
       RETURNING id_evento;
@@ -178,7 +189,11 @@ export async function POST(request) {
       tieneCostoValue,
       costoValue,
       imagen_flyer_url,
-      imagen_flyer_key
+      imagen_flyer_key,
+      Boolean(solicitar_talla),
+      // Sin costo no hay nada que pagar: guardar instrucciones ahí sólo
+      // serviría para que reaparecieran si algún día se marca el cobro.
+      tieneCostoValue ? (instrucciones_pago?.trim() || null) : null
     ]);
 
     const idEvento = eventoRes.rows[0].id_evento;
@@ -190,13 +205,14 @@ export async function POST(request) {
       
       const insertConcursoQuery = `
         INSERT INTO concurso (
-          id_evento, id_plataforma, modalidad, 
-          max_integrantes_equipo, min_integrantes_equipo, requiere_asesor, url_concurso
+          id_evento, id_plataforma, modalidad,
+          max_integrantes_equipo, min_integrantes_equipo, requiere_asesor,
+          asesor_participa, max_asesores, url_concurso
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7
+          $1, $2, $3, $4, $5, $6, $7, $8, $9
         )
       `;
-      
+
       await client.query(insertConcursoQuery, [
         idEvento,
         id_plataforma || null,
@@ -204,6 +220,8 @@ export async function POST(request) {
         modalidad === 'equipos' ? (parseInt(max_integrantes_equipo) || 3) : null,
         minIntegrantes,
         requiere_asesor || false,
+        Boolean(asesor_participa),
+        Math.min(5, Math.max(1, parseInt(max_asesores) || 1)),
         url_concurso
       ]);
     }

@@ -1,7 +1,12 @@
 'use client';
 import { useId, useState } from 'react';
-import { ChevronDown, Filter, X, Sparkles } from 'lucide-react';
+import { ChevronDown, Filter, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// Clases de los <select> del panel, tomadas del sistema de campos (field.js).
+const selectClasses =
+  'w-full rounded-lg bg-surface-2 border border-line px-3 py-2.5 text-sm text-fg ' +
+  'transition-colors cursor-pointer focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/25';
 
 // El estado (próximos/pasados/todos) sí es un catálogo cerrado: lo calcula la
 // propia página, no la base de datos.
@@ -63,8 +68,7 @@ export default function FilterControls({ filters, onFilterChange, tipos = [], he
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="relative w-full bg-gradient-to-br from-gray-900/80 via-gray-900/90 to-black/90 
-                 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-sm border border-gray-800/50"
+      className="relative w-full bg-surface rounded-2xl shadow-xl overflow-hidden border border-line"
     >
       {/* Content wrapper */}
       <div className="relative">
@@ -72,36 +76,33 @@ export default function FilterControls({ filters, onFilterChange, tipos = [], he
         <motion.div 
           className="flex items-center justify-between p-5 cursor-pointer group"
           onClick={() => setIsExpanded(!isExpanded)}
-          whileHover={{ backgroundColor: 'rgba(31, 41, 55, 0.5)' }}
+          whileHover={{ backgroundColor: 'rgba(42, 44, 50, 0.5)' }}
           transition={{ duration: 0.2 }}
         >
           <div className="flex items-center gap-3">
             <motion.div
-              className="flex items-center justify-center w-10 h-10 rounded-xl 
-                       bg-gradient-to-br from-green-500/20 to-emerald-500/20 
-                       border border-green-500/30"
+              className="flex items-center justify-center w-10 h-10 rounded-xl bg-brand-soft border border-brand/30"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              <Filter size={20} className="text-green-400" />
+              <Filter size={20} className="text-brand" />
             </motion.div>
-            
+
             <div>
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <h2 className="text-base font-bold text-fg flex items-center gap-2">
                 Filtros de Búsqueda
                 {activeFilters.length > 0 && (
-                  <motion.span 
+                  <motion.span
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
-                    className="bg-gradient-to-r from-green-500 to-emerald-500 
-                             text-white text-xs font-bold rounded-full h-6 w-6 
+                    className="bg-brand text-bg text-xs font-bold rounded-full h-6 w-6
                              flex items-center justify-center shadow-lg"
                   >
                     {activeFilters.length}
                   </motion.span>
                 )}
               </h2>
-              <p className="text-xs text-gray-400 mt-0.5">
+              <p className="text-xs text-muted mt-0.5">
                 {activeFilters.length === 0 ? 'Personaliza tu búsqueda' : `${activeFilters.length} filtro${activeFilters.length > 1 ? 's' : ''} activo${activeFilters.length > 1 ? 's' : ''}`}
               </p>
             </div>
@@ -111,7 +112,7 @@ export default function FilterControls({ filters, onFilterChange, tipos = [], he
             animate={{ rotate: isExpanded ? 180 : 0 }}
             transition={{ duration: 0.3, ease: 'easeInOut' }}
           >
-            <ChevronDown size={24} className="text-green-400" />
+            <ChevronDown size={24} className="text-brand" />
           </motion.div>
         </motion.div>
         
@@ -131,12 +132,12 @@ export default function FilterControls({ filters, onFilterChange, tipos = [], he
                   animate={{ scale: 1, opacity: 1 }}
                   exit={{ scale: 0, opacity: 0 }}
                   transition={{ delay: index * 0.05 }}
-                  className="flex items-center gap-2 bg-gradient-to-r from-green-500/20 to-emerald-500/20 
-                           border border-green-500/30 text-sm text-white rounded-full px-4 py-2
-                           backdrop-blur-sm shadow-lg hover:from-green-500/30 hover:to-emerald-500/30 
-                           transition-all duration-200"
+                  // Chip de filtro activo: SUAVE con borde (como los tags de
+                  // categoría), a propósito distinto del badge sólido de estado
+                  // de las tarjetas — antes eran el mismo verde y se confundían.
+                  className="flex items-center gap-2 bg-brand-soft border border-brand/30 text-sm
+                           text-brand rounded-full px-3.5 py-1.5 transition-colors hover:bg-brand/20"
                 >
-                  <Sparkles size={14} className="text-green-400" />
                   <span className="font-medium">{filter.label}</span>
                   <motion.button
                     whileHover={{ scale: 1.2, rotate: 90 }}
@@ -145,7 +146,7 @@ export default function FilterControls({ filters, onFilterChange, tipos = [], he
                       e.stopPropagation();
                       removeFilter(filter.type);
                     }}
-                    className="ml-1 hover:text-red-400 transition-colors"
+                    className="ml-0.5 hover:text-danger transition-colors"
                   >
                     <X size={16} />
                   </motion.button>
@@ -163,24 +164,20 @@ export default function FilterControls({ filters, onFilterChange, tipos = [], he
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.3 }}
-              className="border-t border-gray-800/50 bg-gradient-to-b from-gray-900/50 to-transparent"
+              className="border-t border-line"
             >
               <div className="p-5">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {/* Tipo de Evento */}
                   <div>
-                    <label htmlFor={`${idBase}-tipo`} className="block text-sm font-semibold text-gray-300 mb-2">
+                    <label htmlFor={`${idBase}-tipo`} className="block text-sm font-medium text-muted mb-2">
                       Tipo de Evento
                     </label>
                     <select
                       id={`${idBase}-tipo`}
                       value={filters.tipo}
                       onChange={(e) => onFilterChange('tipo', e.target.value)}
-                      className="w-full p-3 text-sm rounded-xl bg-gray-800/80 text-white 
-                               border border-gray-700/50 focus:border-green-500/50 
-                               focus:ring-2 focus:ring-green-500/20 focus:outline-none
-                               transition-all duration-200 cursor-pointer backdrop-blur-sm
-                               hover:border-green-500/30"
+                      className={selectClasses}
                     >
                       {opcionesTipo.map(tipo => (
                         <option key={tipo.value} value={tipo.value}>
@@ -192,18 +189,14 @@ export default function FilterControls({ filters, onFilterChange, tipos = [], he
 
                   {/* Estado */}
                   <div>
-                    <label htmlFor={`${idBase}-estado`} className="block text-sm font-semibold text-gray-300 mb-2">
+                    <label htmlFor={`${idBase}-estado`} className="block text-sm font-medium text-muted mb-2">
                       Estado
                     </label>
                     <select
                       id={`${idBase}-estado`}
                       value={filters.estado}
                       onChange={(e) => onFilterChange('estado', e.target.value)}
-                      className="w-full p-3 text-sm rounded-xl bg-gray-800/80 text-white 
-                               border border-gray-700/50 focus:border-green-500/50 
-                               focus:ring-2 focus:ring-green-500/20 focus:outline-none
-                               transition-all duration-200 cursor-pointer backdrop-blur-sm
-                               hover:border-green-500/30"
+                      className={selectClasses}
                     >
                       {estadosEvento.map(estado => (
                         <option key={estado.value} value={estado.value}>
@@ -215,18 +208,14 @@ export default function FilterControls({ filters, onFilterChange, tipos = [], he
 
                   {/* Comunidades */}
                   <div className="sm:col-span-2 lg:col-span-1">
-                    <label htmlFor={`${idBase}-hermandad`} className="block text-sm font-semibold text-gray-300 mb-2">
+                    <label htmlFor={`${idBase}-hermandad`} className="block text-sm font-medium text-muted mb-2">
                       Comunidades
                     </label>
                     <select
                       id={`${idBase}-hermandad`}
                       value={filters.hermandad}
                       onChange={(e) => onFilterChange('hermandad', e.target.value)}
-                      className="w-full p-3 text-sm rounded-xl bg-gray-800/80 text-white 
-                               border border-gray-700/50 focus:border-green-500/50 
-                               focus:ring-2 focus:ring-green-500/20 focus:outline-none
-                               transition-all duration-200 cursor-pointer backdrop-blur-sm
-                               hover:border-green-500/30"
+                      className={selectClasses}
                     >
                       {opcionesHermandad.map(hermandad => (
                         <option key={hermandad.value} value={hermandad.value}>

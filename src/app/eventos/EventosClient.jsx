@@ -12,8 +12,14 @@ import LoadingSpinner from '@/components/LoadingSpinner';
 import FilterControls from '@/components/FilterControls';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
-import Select from '@/components/ui/Select';
+import {
+  CamposInvitado,
+  TallaModal,
+  INVITADO_VACIO,
+  validarInvitado,
+  limpiarInvitadoPayload,
+} from '@/components/eventos/RegistroInvitado';
+import ComprobantePagoModal from '@/components/eventos/ComprobantePago';
 
 import { UserPlus, LogIn } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -58,28 +64,23 @@ function EventosContent({ eventosIniciales }) {
   const [selectedEventForRegistration, setSelectedEventForRegistration] = useState(null);
   const [showRegistrationTypeModal, setShowRegistrationTypeModal] = useState(false);
   const [showGuestFormModal, setShowGuestFormModal] = useState(false);
-  
-  const [guestData, setGuestData] = useState({
-    nombre_completo: '',
-    correo_electronico: '',
-    numero_telefono: '',
-    semestre: '',
-    carrera: ''
-  });
+  // Talla de un MIEMBRO en eventos con `solicitar_talla`: su registro es de un
+  // clic, así que se le pregunta en un mini-modal antes de confirmar.
+  const [showTallaModal, setShowTallaModal] = useState(false);
+  // Comprobante de pago del evento con costo recién inscrito. Se guarda el
+  // ticket firmado que devolvió el registro: es la credencial con la que se
+  // sube el archivo (quien se inscribe como invitado no tiene sesión).
+  const [pagoPendiente, setPagoPendiente] = useState(null);
+
+  // Los campos del invitado (nivel de estudios, edad, talla…) viven en el
+  // componente compartido RegistroInvitado, el mismo del detalle y de programas.
+  const [guestData, setGuestData] = useState(INVITADO_VACIO);
   const [formErrors, setFormErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, isAuthenticated, loading: authLoading } = useAuth();
-
-  const carreras = [
-    'Ingeniería en Sistemas Computacionales', 'Ingeniería en Electronica', 
-    'Ingeniería Industrial', 'Ingeniería Quimica', 
-    'Ingeniería en Logistica', 'Ingeniería en Mecatronica',
-  ];
-  const semestres = Array.from({ length: 14 }, (_, i) => ({ value: (i + 1).toString(), label: `${i + 1}° Semestre` }));
-
 
   // SWR: la lista de eventos se cachea y revalida sola; al volver a la página
   // se muestra al instante desde caché en lugar de refetch bloqueante.
@@ -211,14 +212,9 @@ function EventosContent({ eventosIniciales }) {
   };
 
   const validateGuestForm = () => {
-    const errors = {};
-    if (!guestData.nombre_completo.trim()) errors.nombre_completo = 'Nombre es requerido';
-    if (!guestData.correo_electronico.trim()) errors.correo_electronico = 'Email es requerido';
-    else if (!/\S+@\S+\.\S+/.test(guestData.correo_electronico)) errors.correo_electronico = 'Email no válido';
-    if (!guestData.numero_telefono.trim()) errors.numero_telefono = 'Teléfono es requerido';
-    else if (!/^[0-9]{10}$/.test(guestData.numero_telefono)) errors.numero_telefono = 'Teléfono debe ser de 10 dígitos';
-    if (!guestData.carrera) errors.carrera = 'Carrera es requerida';
-    if (!guestData.semestre) errors.semestre = 'Semestre es requerido';
+    const errors = validarInvitado(guestData, {
+      requiereTalla: Boolean(selectedEventForRegistration?.solicitar_talla),
+    });
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -249,20 +245,36 @@ function EventosContent({ eventosIniciales }) {
       toast.info('Un momento, verificando tu sesión…', { theme: 'dark' });
       return;
     }
+    // Concurso por equipos: el formulario de equipo vive en el detalle. Antes
+    // la tarjeta abría el flujo individual genérico y el evento "de concurso"
+    // se inscribía como si fuera una conferencia.
+    if (evento.permite_equipos && evento.id_concurso && evento.modalidad === 'equipos') {
+      router.push(`/eventos/${evento.id_evento}`);
+      return;
+    }
     if (isAuthenticated) {
-      handleMemberRegistration(evento);
+      if (evento.solicitar_talla) {
+        setShowTallaModal(true);
+      } else {
+        handleMemberRegistration(evento);
+      }
     } else {
       setShowRegistrationTypeModal(true);
     }
   };
 
-  const handleMemberRegistration = async (evento) => {
+  const handleMemberRegistration = async (evento, tallaPlayera) => {
     setIsSubmitting(true);
     try {
       const response = await fetch('/api/eventos/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventoId: evento.id_evento, userId: user.id_miembro, tipo: 'miembro' }),
+        body: JSON.stringify({
+          eventoId: evento.id_evento,
+          userId: user.id_miembro,
+          tipo: 'miembro',
+          ...(tallaPlayera ? { talla_playera: tallaPlayera } : {}),
+        }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Error al registrar');
@@ -270,10 +282,19 @@ function EventosContent({ eventosIniciales }) {
       setRegistrationOverrides(prev => ({ ...prev, [evento.id_evento]: true }));
       mutateEventos(); // refresca cupos desde el servidor
       mutateBatch();   // revalida estado de registro real
-      toast.success('¡Registro exitoso!', { theme: "dark" });
+      // Evento con costo: la inscripción nace 'pendiente' y lo siguiente es el
+      // comprobante. Anunciar "¡Registro exitoso!" a secas hacía creer que el
+      // lugar ya estaba confirmado.
+      if (result.requiere_pago && result.qrToken) {
+        setPagoPendiente({ evento, qrToken: result.qrToken });
+        toast.info('Falta subir tu comprobante de pago.', { theme: 'dark' });
+      } else {
+        toast.success('¡Registro exitoso!', { theme: "dark" });
+      }
       sendEventRegistrationEmail(user.correo_electronico, user.nombre_completo, result.event, result.qrToken)
         .catch(() => toast.warning('Te inscribiste, pero no pudimos enviar el correo de confirmación.', { theme: 'dark' }));
       setShowRegistrationTypeModal(false);
+      setShowTallaModal(false);
     } catch (error) {
       toast.error(`Error: ${error.message}`, { theme: "dark" });
     } finally {
@@ -285,12 +306,10 @@ function EventosContent({ eventosIniciales }) {
     if (!validateGuestForm()) return;
     setIsSubmitting(true);
     try {
-      // Los campos vacíos no se envían: `semestre: ''` se convertía en 0 al
-      // validarlo con zod en el servidor y devolvía un 400 antes de dar de alta
-      // al invitado.
-      const datosInvitado = Object.fromEntries(
-        Object.entries(guestData).filter(([, v]) => v !== '' && v != null),
-      );
+      // `limpiarInvitadoPayload` descarta los campos vacíos (un `semestre: ''`
+      // se convertía en 0 en zod y devolvía 400) y los que no aplican al nivel
+      // de estudios elegido.
+      const datosInvitado = limpiarInvitadoPayload(guestData);
       const guestRes = await fetch('/api/invitados', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -317,13 +336,18 @@ function EventosContent({ eventosIniciales }) {
 
       setRegistrationOverrides(prev => ({ ...prev, [selectedEventForRegistration.id_evento]: true }));
       mutateEventos(); // refresca cupos desde el servidor
-      toast.success('¡Registro como invitado exitoso!', { theme: "dark" });
+      if (attendanceResult.requiere_pago && attendanceResult.qrToken) {
+        setPagoPendiente({ evento: selectedEventForRegistration, qrToken: attendanceResult.qrToken });
+        toast.info('Falta subir tu comprobante de pago.', { theme: 'dark' });
+      } else {
+        toast.success('¡Registro como invitado exitoso!', { theme: "dark" });
+      }
       sendEventRegistrationEmail(guestData.correo_electronico, guestData.nombre_completo, attendanceResult.event, attendanceResult.qrToken)
         .catch(() => toast.warning('Te inscribiste, pero no pudimos enviar el correo de confirmación.', { theme: 'dark' }));
       
       setShowGuestFormModal(false);
       setShowRegistrationTypeModal(false);
-      setGuestData({ nombre_completo: '', correo_electronico: '', numero_telefono: '', semestre: '', carrera: '' });
+      setGuestData(INVITADO_VACIO);
       setFormErrors({});
     } catch (error) {
       toast.error(`Error: ${error.message}`, { theme: "dark" });
@@ -421,9 +445,9 @@ function EventosContent({ eventosIniciales }) {
         onClose={() => { setShowGuestFormModal(false); setFormErrors({}); }}
         title="Registro como invitado"
         description={selectedEventForRegistration?.nombre_evento}
-        size="md"
-        // Barra de acciones fija: el formulario tiene cinco campos y en móvil
-        // los botones quedaban por debajo del área visible.
+        size="lg"
+        // Barra de acciones fija: el formulario es largo y en móvil los botones
+        // quedaban por debajo del área visible.
         footer={
           <>
             <Button onClick={() => { setShowGuestFormModal(false); setFormErrors({}); }} variant="secondary" disabled={isSubmitting}>Cancelar</Button>
@@ -433,14 +457,39 @@ function EventosContent({ eventosIniciales }) {
           </>
         }
       >
-        <div className="space-y-4">
-          <Input label="Nombre completo" name="nombre_completo" required value={guestData.nombre_completo} onChange={(e) => setGuestData({...guestData, nombre_completo: e.target.value})} error={formErrors.nombre_completo} placeholder="Nombre Completo" />
-          <Input label="Correo electrónico" type="email" name="correo_electronico" required value={guestData.correo_electronico} onChange={(e) => setGuestData({...guestData, correo_electronico: e.target.value})} error={formErrors.correo_electronico} placeholder="correo@ejemplo.com" />
-          <Input label="Teléfono" name="numero_telefono" required value={guestData.numero_telefono} onChange={(e) => setGuestData({...guestData, numero_telefono: e.target.value.replace(/\D/g, '').slice(0, 10)})} placeholder="10 dígitos" error={formErrors.numero_telefono} />
-          <Select label="Carrera" name="carrera" required value={guestData.carrera} onChange={(e) => setGuestData({...guestData, carrera: e.target.value})} options={carreras.map(c => ({ value: c, label: c }))} placeholder="Selecciona tu carrera" error={formErrors.carrera} />
-          <Select label="Semestre" name="semestre" required value={guestData.semestre} onChange={(e) => setGuestData({...guestData, semestre: e.target.value})} options={semestres} placeholder="Selecciona tu semestre" error={formErrors.semestre} />
-        </div>
+        <CamposInvitado
+          data={guestData}
+          errors={formErrors}
+          onChange={setGuestData}
+          requiereTalla={Boolean(selectedEventForRegistration?.solicitar_talla)}
+        />
       </Modal>
+
+      {/* Comprobante de pago del evento con costo recién inscrito. Quien lo
+          aplace puede subirlo luego desde la ficha del evento. */}
+      <ComprobantePagoModal
+        isOpen={Boolean(pagoPendiente)}
+        onClose={() => setPagoPendiente(null)}
+        evento={{
+          nombre: pagoPendiente?.evento?.nombre_evento,
+          costo: pagoPendiente?.evento?.costo,
+          instrucciones_pago: pagoPendiente?.evento?.instrucciones_pago,
+        }}
+        qrToken={pagoPendiente?.qrToken}
+        recienInscrito
+        onSaved={() => {
+          setPagoPendiente(null);
+          toast.success('Comprobante enviado. Lo validaremos antes del evento.', { theme: 'dark' });
+        }}
+      />
+
+      <TallaModal
+        isOpen={showTallaModal}
+        onClose={() => setShowTallaModal(false)}
+        titulo={selectedEventForRegistration?.nombre_evento}
+        loading={isSubmitting}
+        onConfirm={(talla) => handleMemberRegistration(selectedEventForRegistration, talla)}
+      />
     </div>
   );
 }

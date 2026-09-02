@@ -33,6 +33,13 @@ Léelo antes de tocar la base.
 | `004_hash_codigo_verificacion.sql` | **aplicada** | `password_reset_token.codigo_verificacion` a `varchar(64)` (hash SHA-256) |
 | `005_puntajes_sync_avatar.sql` | **aplicada** | `cuenta_plataforma.avatar_url`, `estado_sync`, `ultimo_intento` |
 | `006_limpieza_esquema_muerto.sql` | **PENDIENTE — revisar antes de aplicar** | borra tabla, vista y columnas que ningún código lee ni escribe |
+| `007_talla_edad_nivel_estudios.sql` | **aplicada** (2026-09-01) | `solicitar_talla` en evento/programa, `talla_playera`, `invitado.edad`, CHECK de `nivel_estudios` ampliado |
+| `008_asesores_concurso.sql` | **aplicada** (2026-09-01) | `concurso.asesor_participa`/`max_asesores`, tabla `asesor_equipo` + backfill |
+| `009_checkin_playera.sql` | **aplicada** (2026-09-01) | check-in por persona: `playera_entregada` en inscripción, asistencia y playera por integrante y por asesor |
+| `010_checkin_programas.sql` | **aplicada** (2026-09-01) | `inscripcion_programa.playera_entregada` (entrega única por participante en todo el programa) |
+| `011_talla_asesor.sql` | **aplicada** (2026-09-01) | `asesor_equipo.talla_playera` + CHECK: al asesor también se le entrega playera |
+| `012_numero_control_invitado.sql` | **aplicada** (2026-09-01) | `invitado.numero_control` para alumnos del ITLAC |
+| `013_comprobante_pago.sql` | **aplicada** (2026-09-02) | tabla `comprobante_pago` (imagen del pago por inscripción, estado y revisor) + `evento.instrucciones_pago` |
 
 ## Triggers activos en producción (verificado)
 
@@ -46,4 +53,14 @@ escribieron endpoints que ajustaban los cupos a mano, duplicando el descuento:
 - `trigger_estadisticas_prog_miembro` / `trigger_estadisticas_prog_invitado`
 - `trigger_actualizar_pago_inscripcion` — confirma la inscripción al completarse el pago.
 - `trigger_*_updated_at` en `evento`, `evidencia`, `inscripcion_evento`,
-  `invitado`, `miembro`, `pago`, `equipo_concurso`.
+  `invitado`, `miembro`, `pago`, `equipo_concurso` y —tras aplicar la 013—
+  `comprobante_pago`.
+
+## Nota sobre `pago` vs `comprobante_pago`
+
+La tabla `pago` es de la integración con Mercado Pago, que NO existe en el
+código. El cobro real se hace fuera de la plataforma y lo que se registra es
+el `comprobante_pago` (migración 013): la imagen que sube quien se inscribe y
+el veredicto de quien la valida. Aprobar un comprobante es lo que pone
+`inscripcion_evento.pago_completado = true`; ninguna de las dos tablas se
+escribe desde la otra.

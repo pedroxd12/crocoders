@@ -2,6 +2,9 @@
 import { createUploadthing } from "uploadthing/next";
 import { UploadThingError } from "uploadthing/server";
 import { verifyToken } from "@/lib/auth";
+import { z } from "zod";
+import { query } from "@/lib/db-server";
+import { resolverInscripcionDeToken } from "@/lib/comprobantes-pago";
 
 const f = createUploadthing({
   errorFormatter: (err) => {
@@ -98,6 +101,41 @@ export const ourFileRouter = {
       // USA file.ufsUrl EN LUGAR DE file.url
       console.log(`[eventoImageUploader] Upload successful for User ID: ${metadata.userId}, Key: ${file.key}`);
       return { uploadedBy: metadata.userId, fileUrl: file.ufsUrl, fileName: file.name, fileKey: file.key }; // Devuelve ufsUrl
+    }),
+
+  // Comprobante de pago de una inscripción (migración 013).
+  //
+  // ÚNICO uploader que NO exige rol administrador, y a propósito: quien sube el
+  // comprobante es la persona que acaba de inscribirse, y en eventos abiertos
+  // suele ser un invitado SIN cuenta. La autorización va por el ticket firmado
+  // de su inscripción (`qrToken`, el mismo del QR de acceso), que se valida
+  // aquí contra la base ANTES de aceptar el archivo: sin esa comprobación,
+  // publicar un endpoint abierto sería regalar la cuota de UploadThing.
+  comprobantePagoUploader: f({ image: { maxFileSize: "8MB", maxFileCount: 1 } })
+    .input(z.object({ qrToken: z.string().min(1).max(4096) }))
+    .middleware(async ({ input }) => {
+      const resuelto = await resolverInscripcionDeToken(
+        // `query()` de db-server (con reintentos); nunca pool.query() directo.
+        { query: (text, values) => query(text, values) },
+        input.qrToken,
+      );
+      if (!resuelto.ok) {
+        console.warn(`[comprobantePagoUploader] Rechazado: ${resuelto.error}`);
+        throw new UploadThingError(resuelto.error);
+      }
+      // Un comprobante ya aprobado no se reemplaza: si hiciera falta corregirlo,
+      // quien revisó tiene que devolverlo a 'pendiente' o rechazarlo primero.
+      if (resuelto.inscripcion.comprobante_estado === 'aprobado') {
+        throw new UploadThingError('Tu pago ya fue validado: no hace falta subir otro comprobante.');
+      }
+      return { inscripcionId: resuelto.inscripcion.id_inscripcion };
+    })
+    .onUploadComplete(async ({ metadata, file }) => {
+      // La fila la escribe POST /api/eventos/comprobante con la clave que se
+      // devuelve aquí (mismo patrón que las evidencias): así el guardado ocurre
+      // en una petición nuestra, con su validación y su limpieza de huérfanos.
+      console.log(`[comprobantePagoUploader] Subida OK para inscripción ${metadata.inscripcionId}`);
+      return { fileUrl: file.ufsUrl, fileName: file.name, fileKey: file.key };
     }),
 
   evidenciaUploader: f({ image: { maxFileSize: "8MB", maxFileCount: 1 } })

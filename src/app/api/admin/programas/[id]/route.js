@@ -50,6 +50,10 @@ const SELECT_PROGRAMA = `
     pr.dias_semana,
     pr.hora_inicio,
     pr.hora_fin,
+    -- Lo escribe el PUT desde hace tiempo, pero faltaba en el SELECT: sin él
+    -- ni el formulario de edición ni el panel de asistencia sabían si el
+    -- programa entrega playera.
+    pr.solicitar_talla,
     pr.created_at,
     pr.updated_at,
     te.nombre AS tipo_evento,
@@ -116,6 +120,7 @@ export async function PUT(request, { params }) {
       ubicacion,
       imagen_url,
       activo,
+      solicitar_talla,
       // El formulario SÍ enviaba estos tres campos, pero el PUT los descartaba en
       // silencio: se guardaba "Programa actualizado" y el horario seguía igual.
       dias_semana,
@@ -169,14 +174,15 @@ export async function PUT(request, { params }) {
         ubicacion = $9,
         imagen_url = $10,
         activo = COALESCE($11, activo),
+        solicitar_talla = COALESCE($12, solicitar_talla),
         -- Solo se sobrescribe el horario si el cuerpo lo trae: un cliente que no
         -- envíe estos campos no debe borrar el horario ya guardado. Y cuando sí
         -- los trae, un array vacío significa "sin días", no "no tocar".
-        dias_semana = CASE WHEN $12::boolean THEN $13::int[]  ELSE dias_semana END,
-        hora_inicio = CASE WHEN $14::boolean THEN $15::time   ELSE hora_inicio END,
-        hora_fin    = CASE WHEN $16::boolean THEN $17::time   ELSE hora_fin    END,
+        dias_semana = CASE WHEN $13::boolean THEN $14::int[]  ELSE dias_semana END,
+        hora_inicio = CASE WHEN $15::boolean THEN $16::time   ELSE hora_inicio END,
+        hora_fin    = CASE WHEN $17::boolean THEN $18::time   ELSE hora_fin    END,
         updated_at = NOW()
-      WHERE id_programa = $18
+      WHERE id_programa = $19
       RETURNING id_programa`,
       [
         nombre,
@@ -190,6 +196,7 @@ export async function PUT(request, { params }) {
         ubicacion ?? null,
         imagen_url ?? null,
         typeof activo === 'boolean' ? activo : null,
+        typeof solicitar_talla === 'boolean' ? solicitar_talla : null,
         dias_semana !== undefined,
         (Array.isArray(dias_semana) && dias_semana.length > 0) ? dias_semana : null,
         hora_inicio !== undefined,

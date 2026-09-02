@@ -42,6 +42,7 @@ const FORM_VACIO = {
   hora_inicio: '',
   hora_fin: '',
   activo: true,
+  solicitar_talla: false,
 };
 
 /**
@@ -105,6 +106,7 @@ export default function ProgramasRecurrentes() {
         hora_inicio: aHoraCorta(programa.hora_inicio),
         hora_fin: aHoraCorta(programa.hora_fin),
         activo: programa.activo !== false,
+        solicitar_talla: Boolean(programa.solicitar_talla),
       });
     } else {
       setEditingPrograma(null);
@@ -491,6 +493,13 @@ export default function ProgramasRecurrentes() {
             help="Si lo desmarcas, el programa deja de aparecer en /programas y nadie puede inscribirse. Los programas no se ocultan solos al terminar."
             checked={formData.activo}
             onChange={(e) => setFormData({ ...formData, activo: e.target.checked })}
+          />
+
+          <Checkbox
+            label="Pedir talla de playera al inscribirse"
+            help="Actívalo si el programa entrega playera o kit. El formulario público pedirá la talla a miembros e invitados."
+            checked={formData.solicitar_talla}
+            onChange={(e) => setFormData({ ...formData, solicitar_talla: e.target.checked })}
           />
         </form>
       </Modal>

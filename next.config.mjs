@@ -57,6 +57,10 @@ const CSP_DIRECTIVES = [
 const nextConfig = {
   poweredByHeader: false,
   compress: true,
+  // Permite abrir el servidor de desarrollo desde otros dispositivos de la red
+  // local (probar desde el móvil con la IP de la máquina) sin que Next bloquee
+  // los assets de dev por cross-origin. Sólo aplica a `next dev`.
+  allowedDevOrigins: ['192.168.1.*'],
   // Paquetes que NO deben pasar por el bundler del servidor. Además de los
   // nativos (pg/sharp/bcryptjs), 'isomorphic-dompurify' arrastra jsdom, que usa
   // requires dinámicos y revienta al inicializar la función serverless en Vercel

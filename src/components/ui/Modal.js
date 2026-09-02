@@ -48,11 +48,22 @@ export default function Modal({
 }) {
   const panelRef = useRef(null);
 
+  // `onClose` se lee a través de un ref A PROPÓSITO. Las páginas pasan
+  // `onClose={() => setX(false)}`, una función nueva en cada render; con
+  // `onClose` en las dependencias, el efecto se re-ejecutaba en CADA tecleo
+  // dentro del modal (el estado del formulario cambia → render → efecto) y su
+  // `panelRef.current?.focus()` le robaba el foco al input: se escribía una
+  // letra y la escritura "se cortaba". El efecto sólo debe correr al abrir.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+
   useEffect(() => {
     if (!isOpen) return;
 
     const onKeyDown = (e) => {
-      if (e.key === 'Escape') onClose?.();
+      if (e.key === 'Escape') onCloseRef.current?.();
     };
     document.addEventListener('keydown', onKeyDown);
 
@@ -67,7 +78,7 @@ export default function Modal({
       document.removeEventListener('keydown', onKeyDown);
       targets.forEach((el, i) => { el.style.overflow = previous[i]; });
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
   if (typeof document === 'undefined') return null;
@@ -110,7 +121,9 @@ export default function Modal({
           </div>
         )}
 
-        <div className={`flex-1 overflow-y-auto ${hideHeader ? '' : 'px-5 py-4'} ${bodyClassName}`}>
+        {/* `scrollbar-thin` (globals.css): la barra nativa gruesa rompía el
+            look del modal en formularios largos. */}
+        <div className={`flex-1 overflow-y-auto scrollbar-thin ${hideHeader ? '' : 'px-5 py-4'} ${bodyClassName}`}>
           {children}
         </div>
 

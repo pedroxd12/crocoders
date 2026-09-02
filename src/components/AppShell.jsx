@@ -13,8 +13,10 @@ export default function AppShell({ children }) {
   // (sidebar + header móvil) en admin/layout.jsx y ocupa toda la pantalla.
   // No debe llevar el Header ni el Footer globales del sitio público.
   const isAdmin = pathname === '/admin' || pathname.startsWith('/admin/');
+  // HackaItlac tiene su propio diseño full-bleed con navegación personalizada.
+  const isHackaitlac = pathname === '/hackaitlac' || pathname.startsWith('/hackaitlac/');
   // La home tiene su propio scroll container y renderiza su Footer internamente.
-  const showChrome = !isAdmin;
+  const showChrome = !isAdmin && !isHackaitlac;
   const showFooter = showChrome && pathname !== '/';
 
   return (

@@ -165,94 +165,99 @@ export default function Header() {
 
   return (
     <div className={styles.headerContainer}>
-        {/* Toggle Button */}
-        <div className={styles.toggleBtn} onClick={toggleMenu} ref={toggleBtnRef}>
-            <div ref={btnOutline1Ref} className={`${styles.btnOutline} ${styles.btnOutline1}`}></div>
-            <div ref={btnOutline2Ref} className={`${styles.btnOutline} ${styles.btnOutline2}`}></div>
-            <div className={`${styles.hamburger} ${isOpen ? styles.active : ''}`} ref={hamburgerRef}>
-                <span></span>
+      {/* Toggle Button */}
+      <div className={styles.toggleBtn} onClick={toggleMenu} ref={toggleBtnRef}>
+        <div ref={btnOutline1Ref} className={`${styles.btnOutline} ${styles.btnOutline1}`}></div>
+        <div ref={btnOutline2Ref} className={`${styles.btnOutline} ${styles.btnOutline2}`}></div>
+        <div className={`${styles.hamburger} ${isOpen ? styles.active : ''}`} ref={hamburgerRef}>
+          <span></span>
+        </div>
+      </div>
+
+      {/* Overlay SVG */}
+      <div className={styles.overlay}>
+        <svg viewBox="0 0 1000 1000" preserveAspectRatio="none">
+          <path ref={pathRef} d="M0 2S175 1 500 1s500 1 500 1V0H0Z"></path>
+        </svg>
+      </div>
+
+      {/* Full Screen Menu */}
+      <div className={styles.menu} ref={menuRef}>
+        <div className={styles.primaryMenu}>
+          <div className={styles.menuContainer}>
+            <div className={styles.wrapper}>
+              <div className={styles.menuItem}>
+                <Link href="/" onClick={handleLinkClick}>
+                  <span>I</span> Inicio
+                </Link>
+              </div>
+              <div className={styles.menuItem}>
+                <Link href="/capitulo" onClick={handleLinkClick}>
+                  <span>II</span> Computer Society
+                </Link>
+              </div>
+              <div className={styles.menuItem}>
+                <Link href="/eventos" onClick={handleLinkClick}>
+                  <span>III</span> Eventos
+                </Link>
+              </div>
+              <div className={styles.menuItem}>
+                <Link href="/programas" onClick={handleLinkClick}>
+                  <span>IV</span> Programas
+                </Link>
+              </div>
+              <div className={styles.menuItem}>
+                <Link href="/hackaitlac" onClick={handleLinkClick}>
+                  <span>V</span> HackaItlac
+                </Link>
+              </div>
             </div>
+          </div>
         </div>
 
-        {/* Overlay SVG */}
-        <div className={styles.overlay}>
-             <svg viewBox="0 0 1000 1000" preserveAspectRatio="none">
-                <path ref={pathRef} d="M0 2S175 1 500 1s500 1 500 1V0H0Z"></path>
-            </svg>
-        </div>
+        <div className={styles.secondaryMenu}>
+          <div className={styles.menuContainer}>
+            <div className={styles.wrapper}>
+              <div className={styles.menuItem}>
+                {isMounted && user ? (
+                  <Link href={user.role === 'administrador' ? '/admin' : '/dashboard'} onClick={handleLinkClick}>
+                    Mi Perfil
+                  </Link>
+                ) : (
+                  <Link href="/iniciar" onClick={handleLinkClick}>
+                    Iniciar Sesión
+                  </Link>
+                )}
+              </div>
 
-        {/* Full Screen Menu */}
-        <div className={styles.menu} ref={menuRef}>
-            <div className={styles.primaryMenu}>
-                <div className={styles.menuContainer}>
-                    <div className={styles.wrapper}>
-                        <div className={styles.menuItem}>
-                             <Link href="/" onClick={handleLinkClick}>
-                                <span>I</span> Inicio
-                             </Link>
-                        </div>
-                        <div className={styles.menuItem}>
-                             <Link href="/capitulo" onClick={handleLinkClick}>
-                                <span>II</span> Computer Society
-                             </Link>
-                        </div>
-                        <div className={styles.menuItem}>
-                             <Link href="/eventos" onClick={handleLinkClick}>
-                                <span>III</span> Eventos
-                             </Link>
-                        </div>
-                        <div className={styles.menuItem}>
-                             <Link href="/programas" onClick={handleLinkClick}>
-                                <span>IV</span> Programas
-                             </Link>
-                        </div>
-                    </div>
+              <div className={styles.menuItem}>
+                <Link href="/puntajes" onClick={handleLinkClick}>Puntajes</Link>
+              </div>
+
+              <div className={styles.menuItem}>
+                <Link href="/evidencias" onClick={handleLinkClick}>Evidencias</Link>
+              </div>
+
+              <div className={styles.menuItem}>
+                <Link href="/contacto" onClick={handleLinkClick}>Contacto</Link>
+              </div>
+              {isMounted && user && (
+                <div className={styles.menuItem}>
+                  <a href="#" onClick={handleLogout}>
+                    Cerrar Sesión
+                  </a>
                 </div>
+              )}
             </div>
 
-            <div className={styles.secondaryMenu}>
-                <div className={styles.menuContainer}>
-                    <div className={styles.wrapper}>
-                        <div className={styles.menuItem}>
-                            {isMounted && user ? (
-                                <Link href={user.role === 'administrador' ? '/admin' : '/dashboard'} onClick={handleLinkClick}>
-                                    Mi Perfil
-                                </Link>
-                            ) : (
-                                <Link href="/iniciar" onClick={handleLinkClick}>
-                                    Iniciar Sesión
-                                </Link>
-                            )}
-                        </div>
-
-                        <div className={styles.menuItem}>
-                             <Link href="/puntajes" onClick={handleLinkClick}>Puntajes</Link>
-                        </div>
-
-                         <div className={styles.menuItem}>
-                             <Link href="/evidencias" onClick={handleLinkClick}>Evidencias</Link>
-                        </div>
-
-                        <div className={styles.menuItem}>
-                             <Link href="/contacto" onClick={handleLinkClick}>Contacto</Link>
-                        </div>
-                         {isMounted && user && (
-                             <div className={styles.menuItem}>
-                                 <a href="#" onClick={handleLogout}>
-                                     Cerrar Sesión
-                                 </a>
-                             </div>
-                         )}
-                    </div>
-
-                    <div className={styles.wrapper} style={{ flex: 0, marginTop: 'auto' }}>
-                         <div className={styles.menuItem}>
-                             <span className="text-gray-500 text-sm">© 2026 Crocoders</span>
-                         </div>
-                    </div>
-                </div>
+            <div className={styles.wrapper} style={{ flex: 0, marginTop: 'auto' }}>
+              <div className={styles.menuItem}>
+                <span className="text-gray-500 text-sm">© 2026 Crocoders</span>
+              </div>
             </div>
+          </div>
         </div>
+      </div>
     </div>
   );
 }

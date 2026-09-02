@@ -9,12 +9,15 @@
 --   db/migrations/003_evidencia_programa.sql
 --   db/migrations/004_hash_codigo_verificacion.sql
 --   db/migrations/005_puntajes_sync_avatar.sql
+--   db/migrations/006_limpieza_esquema_muerto.sql
+--   db/migrations/007_talla_edad_nivel_estudios.sql
+--   db/migrations/008_asesores_concurso.sql
+--   db/migrations/009_checkin_playera.sql
+--   db/migrations/010_checkin_programas.sql
+--   db/migrations/011_talla_asesor.sql
 --
 -- Ver db/migrations/README.md para el estado de cada migración (aplicada o
--- pendiente). Este dump venía por detrás de 003 y 004: quien levantara una base
--- desde aquí obtenía evidencias sin `id_programa` y una columna
--- `codigo_verificacion varchar(6)` donde el código guarda un hash de 64
--- caracteres, así que la recuperación de contraseña reventaba.
+-- pendiente).
 --
 -- Para regenerarlo:
 --   pg_dump --schema-only --no-owner --no-privileges \
@@ -27,8 +30,9 @@
 -- PostgreSQL database dump
 --
 
+\restrict nVZuqatNOXDG5yzhHH0JAbB2xsDT1IGBckw1qYoSJvZrLXpXaSHanVZv0hp0Ywl
 
--- Dumped from database version 17.9 (Debian 17.9-1.pgdg13+1)
+-- Dumped from database version 17.11 (Debian 17.11-1.pgdg13+2)
 -- Dumped by pg_dump version 17.6
 
 SET statement_timeout = 0;
@@ -102,14 +106,14 @@ BEGIN
         v_id_sesion := NEW.id_sesion;
     END IF;
 
-    -- Â¿De quÃ© tabla de asistencia viene? (miembro o invitado)
+    -- ¿De qué tabla de asistencia viene? (miembro o invitado)
     IF TG_TABLE_NAME = 'asistencia_miembro' THEN
         v_id_miembro := COALESCE(NEW.id_miembro, OLD.id_miembro);
     ELSE
         v_id_invitado := COALESCE(NEW.id_invitado, OLD.id_invitado);
     END IF;
 
-    -- Programa al que pertenece la sesiÃ³n.
+    -- Programa al que pertenece la sesión.
     SELECT id_programa INTO v_id_programa
       FROM sesion_programa WHERE id_sesion = v_id_sesion;
     IF v_id_programa IS NULL THEN
@@ -143,7 +147,7 @@ BEGIN
                   THEN ROUND(100.0 * v_asistidas / v_total_oblig, 2)
                   ELSE 0 END;
 
-    -- Actualizar la inscripciÃ³n de programa correspondiente.
+    -- Actualizar la inscripción de programa correspondiente.
     -- No se toca certificado_emitido/fecha_certificado (eso lo decide el admin).
     UPDATE inscripcion_programa ip
        SET sesiones_asistidas    = v_asistidas,
@@ -302,6 +306,54 @@ CREATE SEQUENCE public.actividad_plataforma_semanal_id_actividad_seq
 --
 
 ALTER SEQUENCE public.actividad_plataforma_semanal_id_actividad_seq OWNED BY public.actividad_plataforma_semanal.id_actividad;
+
+
+--
+-- Name: asesor_equipo; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.asesor_equipo (
+    id_asesor integer NOT NULL,
+    id_equipo integer NOT NULL,
+    nombre character varying(150) NOT NULL,
+    correo character varying(200),
+    telefono character varying(20),
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    asistio boolean DEFAULT false NOT NULL,
+    hora_asistencia timestamp without time zone,
+    playera_entregada boolean DEFAULT false NOT NULL,
+    hora_entrega_playera timestamp without time zone,
+    talla_playera character varying(5),
+    CONSTRAINT asesor_equipo_talla_playera_check CHECK (((talla_playera IS NULL) OR ((talla_playera)::text = ANY ((ARRAY['XS'::character varying, 'S'::character varying, 'M'::character varying, 'L'::character varying, 'XL'::character varying, 'XXL'::character varying, 'XXXL'::character varying])::text[]))))
+);
+
+
+--
+-- Name: TABLE asesor_equipo; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.asesor_equipo IS 'Asesores de un equipo de concurso (hasta concurso.max_asesores). El primero se duplica en las columnas legadas *_asesor de equipo_concurso.';
+
+
+--
+-- Name: COLUMN asesor_equipo.talla_playera; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.asesor_equipo.talla_playera IS 'Talla del asesor cuando el evento entrega playera; los integrantes la llevan en su ficha de miembro/invitado.';
+
+
+--
+-- Name: asesor_equipo_id_asesor_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.asesor_equipo ALTER COLUMN id_asesor ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.asesor_equipo_id_asesor_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
 
 
 --
@@ -553,6 +605,9 @@ CREATE TABLE public.concurso (
     fecha_limite_registro timestamp without time zone,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     min_integrantes_equipo integer DEFAULT 1,
+    asesor_participa boolean DEFAULT false NOT NULL,
+    max_asesores integer DEFAULT 1 NOT NULL,
+    CONSTRAINT concurso_max_asesores_check CHECK (((max_asesores >= 1) AND (max_asesores <= 5))),
     CONSTRAINT concurso_max_integrantes_equipo_check CHECK ((max_integrantes_equipo > 0)),
     CONSTRAINT concurso_modalidad_check CHECK (((modalidad)::text = ANY (ARRAY[('individual'::character varying)::text, ('equipos'::character varying)::text]))),
     CONSTRAINT modalidad_equipos_valida CHECK (((((modalidad)::text = 'individual'::text) AND (max_integrantes_equipo IS NULL)) OR (((modalidad)::text = 'equipos'::text) AND (max_integrantes_equipo >= 2))))
@@ -563,7 +618,21 @@ CREATE TABLE public.concurso (
 -- Name: TABLE concurso; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.concurso IS 'ExtensiÃ³n de evento para concursos de programaciÃ³n';
+COMMENT ON TABLE public.concurso IS 'Extensión de evento para concursos de programación';
+
+
+--
+-- Name: COLUMN concurso.asesor_participa; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.concurso.asesor_participa IS 'true = el asesor compite como integrante del equipo; false = va aparte y no ocupa lugar (equipo de N integrantes + asesor).';
+
+
+--
+-- Name: COLUMN concurso.max_asesores; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.concurso.max_asesores IS 'Cuántos asesores puede registrar un equipo (el formulario ofrece "Agregar asesor" hasta este tope).';
 
 
 --
@@ -608,8 +677,29 @@ CREATE TABLE public.cuenta_plataforma (
     rank_usuario character varying(50),
     estado_sync character varying(20) DEFAULT 'pendiente'::character varying,
     ultimo_intento timestamp without time zone,
-    CONSTRAINT cuenta_plataforma_estado_sync_check CHECK (((estado_sync)::text = ANY (ARRAY[('pendiente'::character varying)::text, ('ok'::character varying)::text, ('no_encontrado'::character varying)::text, ('error'::character varying)::text])))
+    CONSTRAINT cuenta_plataforma_estado_sync_check CHECK (((estado_sync)::text = ANY ((ARRAY['pendiente'::character varying, 'ok'::character varying, 'no_encontrado'::character varying, 'error'::character varying])::text[])))
 );
+
+
+--
+-- Name: COLUMN cuenta_plataforma.rating; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.cuenta_plataforma.rating IS 'Dificultad del problema más difícil resuelto (NO es el rating del usuario).';
+
+
+--
+-- Name: COLUMN cuenta_plataforma.avatar_url; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.cuenta_plataforma.avatar_url IS 'Foto de perfil cacheada de la plataforma; evita depender de la API externa para mostrarla.';
+
+
+--
+-- Name: COLUMN cuenta_plataforma.estado_sync; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.cuenta_plataforma.estado_sync IS 'pendiente | ok | no_encontrado (el handle no existe) | error (fallo transitorio).';
 
 
 --
@@ -708,6 +798,7 @@ CREATE TABLE public.evento (
     deleted_at timestamp without time zone,
     fecha_limite_registro timestamp without time zone,
     listable boolean DEFAULT true NOT NULL,
+    solicitar_talla boolean DEFAULT false NOT NULL,
     CONSTRAINT costo_requerido CHECK ((((tiene_costo = false) AND (costo = (0)::numeric)) OR ((tiene_costo = true) AND (costo > (0)::numeric)))),
     CONSTRAINT evento_costo_check CHECK ((costo >= (0)::numeric)),
     CONSTRAINT evento_cupos_check CHECK ((cupos > 0)),
@@ -721,7 +812,14 @@ CREATE TABLE public.evento (
 -- Name: COLUMN evento.fecha_limite_registro; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.evento.fecha_limite_registro IS 'Fecha y hora lÃ­mite para registrarse en el evento. DespuÃ©s de esta fecha/hora no se permiten nuevas inscripciones.';
+COMMENT ON COLUMN public.evento.fecha_limite_registro IS 'Fecha y hora límite para registrarse en el evento. Después de esta fecha/hora no se permiten nuevas inscripciones.';
+
+
+--
+-- Name: COLUMN evento.solicitar_talla; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.evento.solicitar_talla IS 'Si es true, el formulario público de inscripción pide talla de playera (miembros, invitados y cada integrante de equipo).';
 
 
 --
@@ -786,7 +884,6 @@ ALTER SEQUENCE public.evento_imagenes_id_imagen_seq OWNED BY public.evento_image
 CREATE TABLE public.evidencia (
     id_evidencia integer NOT NULL,
     id_evento integer,
-    id_programa integer,
     titulo character varying(255) NOT NULL,
     descripcion text,
     tipo character varying(20),
@@ -800,7 +897,8 @@ CREATE TABLE public.evidencia (
     id_miembro_creador integer,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT evidencia_target_xor CHECK ((((((id_evento IS NOT NULL))::integer + ((id_programa IS NOT NULL))::integer) = 1))),
+    id_programa integer,
+    CONSTRAINT evidencia_target_xor CHECK (((((id_evento IS NOT NULL))::integer + ((id_programa IS NOT NULL))::integer) = 1)),
     CONSTRAINT evidencia_tipo_check CHECK (((tipo)::text = ANY (ARRAY[('imagen'::character varying)::text, ('video'::character varying)::text, ('documento'::character varying)::text, ('enlace'::character varying)::text])))
 );
 
@@ -809,21 +907,14 @@ CREATE TABLE public.evidencia (
 -- Name: TABLE evidencia; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.evidencia IS 'Evidencias multimedia de eventos para lÃ­nea de tiempo';
-
-
---
--- Name: COLUMN evidencia.id_programa; Type: COMMENT; Schema: public; Owner: -
---
-
-COMMENT ON COLUMN public.evidencia.id_programa IS 'Programa recurrente al que pertenece la evidencia. Exactamente uno de id_evento / id_programa debe estar presente (evidencia_target_xor).';
+COMMENT ON TABLE public.evidencia IS 'Evidencias multimedia de eventos para línea de tiempo';
 
 
 --
 -- Name: COLUMN evidencia.orden; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.evidencia.orden IS 'Orden de apariciÃ³n en la lÃ­nea de tiempo del evento';
+COMMENT ON COLUMN public.evidencia.orden IS 'Orden de aparición en la línea de tiempo del evento';
 
 
 --
@@ -864,6 +955,8 @@ CREATE TABLE public.inscripcion_evento (
     fecha_inscripcion timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    playera_entregada boolean DEFAULT false NOT NULL,
+    hora_entrega_playera timestamp without time zone,
     CONSTRAINT inscripcion_evento_estado_check CHECK (((estado)::text = ANY (ARRAY[('pendiente'::character varying)::text, ('confirmada'::character varying)::text, ('cancelada'::character varying)::text, ('en_espera'::character varying)::text]))),
     CONSTRAINT un_tipo_inscrito CHECK ((((((id_miembro IS NOT NULL))::integer + ((id_invitado IS NOT NULL))::integer) + ((id_equipo IS NOT NULL))::integer) = 1))
 );
@@ -880,7 +973,14 @@ COMMENT ON TABLE public.inscripcion_evento IS 'Registro unificado de inscripcion
 -- Name: COLUMN inscripcion_evento.requiere_pago; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.inscripcion_evento.requiere_pago IS 'Se determina automÃ¡ticamente segÃºn evento.tiene_costo';
+COMMENT ON COLUMN public.inscripcion_evento.requiere_pago IS 'Se determina automáticamente según evento.tiene_costo';
+
+
+--
+-- Name: COLUMN inscripcion_evento.playera_entregada; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inscripcion_evento.playera_entregada IS 'Sólo para inscripciones de miembro/invitado; en equipos la entrega se lleva por integrante/asesor.';
 
 
 --
@@ -921,6 +1021,8 @@ CREATE TABLE public.inscripcion_programa (
     fecha_certificado timestamp without time zone,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    playera_entregada boolean DEFAULT false NOT NULL,
+    hora_entrega_playera timestamp without time zone,
     CONSTRAINT un_tipo_inscrito_programa CHECK (((((id_miembro IS NOT NULL))::integer + ((id_invitado IS NOT NULL))::integer) = 1))
 );
 
@@ -930,6 +1032,13 @@ CREATE TABLE public.inscripcion_programa (
 --
 
 COMMENT ON TABLE public.inscripcion_programa IS 'Inscripciones a programas completos (cursos recurrentes)';
+
+
+--
+-- Name: COLUMN inscripcion_programa.playera_entregada; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inscripcion_programa.playera_entregada IS 'Entrega única por participante en todo el programa; se marca desde el escáner QR de una sesión.';
 
 
 --
@@ -963,6 +1072,10 @@ CREATE TABLE public.integrante_equipo (
     id_invitado integer,
     es_capitan boolean DEFAULT false,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    asistio boolean DEFAULT false NOT NULL,
+    hora_asistencia timestamp without time zone,
+    playera_entregada boolean DEFAULT false NOT NULL,
+    hora_entrega_playera timestamp without time zone,
     CONSTRAINT un_tipo_integrante CHECK ((((id_miembro IS NOT NULL) AND (id_invitado IS NULL)) OR ((id_miembro IS NULL) AND (id_invitado IS NOT NULL))))
 );
 
@@ -1002,8 +1115,12 @@ CREATE TABLE public.invitado (
     escuela_institucion character varying(255),
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT invitado_nivel_estudios_check CHECK (((nivel_estudios)::text = ANY (ARRAY[('preparatoria'::character varying)::text, ('universidad'::character varying)::text, ('otro'::character varying)::text]))),
-    CONSTRAINT invitado_semestre_check CHECK (((semestre >= 1) AND (semestre <= 14)))
+    edad integer,
+    talla_playera character varying(5),
+    CONSTRAINT invitado_edad_check CHECK (((edad IS NULL) OR ((edad >= 5) AND (edad <= 120)))),
+    CONSTRAINT invitado_nivel_estudios_check CHECK (((nivel_estudios IS NULL) OR ((nivel_estudios)::text = ANY (ARRAY['secundaria'::text, 'preparatoria'::text, 'universidad'::text, 'maestria'::text, 'otro'::text])))),
+    CONSTRAINT invitado_semestre_check CHECK (((semestre >= 1) AND (semestre <= 14))),
+    CONSTRAINT invitado_talla_playera_check CHECK (((talla_playera IS NULL) OR ((talla_playera)::text = ANY ((ARRAY['XS'::character varying, 'S'::character varying, 'M'::character varying, 'L'::character varying, 'XL'::character varying, 'XXL'::character varying, 'XXXL'::character varying])::text[]))))
 );
 
 
@@ -1091,10 +1208,12 @@ CREATE TABLE public.miembro (
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     deleted_at timestamp without time zone,
     rol character varying(20) DEFAULT 'usuario'::character varying,
+    talla_playera character varying(5),
     CONSTRAINT miembro_estado_check CHECK (((estado)::text = ANY (ARRAY[('activo'::character varying)::text, ('inactivo'::character varying)::text, ('egresado'::character varying)::text, ('baja'::character varying)::text]))),
     CONSTRAINT miembro_periodo_ingreso_check CHECK (((periodo_ingreso)::text = ANY (ARRAY[('enero-julio'::character varying)::text, ('agosto-diciembre'::character varying)::text]))),
     CONSTRAINT miembro_semestre_actual_check CHECK (((semestre_actual >= 1) AND (semestre_actual <= 14))),
     CONSTRAINT miembro_semestre_ingreso_check CHECK (((semestre_ingreso >= 1) AND (semestre_ingreso <= 14))),
+    CONSTRAINT miembro_talla_playera_check CHECK (((talla_playera IS NULL) OR ((talla_playera)::text = ANY ((ARRAY['XS'::character varying, 'S'::character varying, 'M'::character varying, 'L'::character varying, 'XL'::character varying, 'XXL'::character varying, 'XXXL'::character varying])::text[])))),
     CONSTRAINT numero_ieee_required_cs CHECK (((es_computer_society = false) OR ((es_computer_society = true) AND (numero_ieee IS NOT NULL))))
 );
 
@@ -1103,21 +1222,21 @@ CREATE TABLE public.miembro (
 -- Name: TABLE miembro; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.miembro IS 'Miembros del club de programaciÃ³n y/o Computer Society';
+COMMENT ON TABLE public.miembro IS 'Miembros del club de programación y/o Computer Society';
 
 
 --
 -- Name: COLUMN miembro.semestre_actual; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.miembro.semestre_actual IS 'Se actualiza automÃ¡ticamente cada inicio de semestre';
+COMMENT ON COLUMN public.miembro.semestre_actual IS 'Se actualiza automáticamente cada inicio de semestre';
 
 
 --
 -- Name: COLUMN miembro.periodo_ingreso; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.miembro.periodo_ingreso IS 'Define cuÃ¡ndo incrementar el semestre: enero o agosto';
+COMMENT ON COLUMN public.miembro.periodo_ingreso IS 'Define cuándo incrementar el semestre: enero o agosto';
 
 
 --
@@ -1175,14 +1294,14 @@ CREATE TABLE public.pago (
 -- Name: TABLE pago; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.pago IS 'GestiÃ³n de pagos integrada con Mercado Pago';
+COMMENT ON TABLE public.pago IS 'Gestión de pagos integrada con Mercado Pago';
 
 
 --
 -- Name: COLUMN pago.mp_response_json; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.pago.mp_response_json IS 'Almacena la respuesta completa de Mercado Pago para auditorÃ­a';
+COMMENT ON COLUMN public.pago.mp_response_json IS 'Almacena la respuesta completa de Mercado Pago para auditoría';
 
 
 --
@@ -1264,7 +1383,7 @@ CREATE TABLE public.password_reset_token (
 -- Name: COLUMN password_reset_token.codigo_verificacion; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.password_reset_token.codigo_verificacion IS 'Hash SHA-256 (hex) del cÃ³digo de verificaciÃ³n de 6 dÃ­gitos. Nunca en texto plano.';
+COMMENT ON COLUMN public.password_reset_token.codigo_verificacion IS 'Hash SHA-256 (hex) del código de verificación de 6 dígitos. Nunca en texto plano.';
 
 
 --
@@ -1308,7 +1427,8 @@ CREATE TABLE public.programa_recurrente (
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     dias_semana integer[],
     hora_inicio time without time zone,
-    hora_fin time without time zone
+    hora_fin time without time zone,
+    solicitar_talla boolean DEFAULT false NOT NULL
 );
 
 
@@ -1316,21 +1436,28 @@ CREATE TABLE public.programa_recurrente (
 -- Name: TABLE programa_recurrente; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON TABLE public.programa_recurrente IS 'Programas o cursos con mÃºltiples sesiones durante un periodo extendido';
+COMMENT ON TABLE public.programa_recurrente IS 'Programas o cursos con múltiples sesiones durante un periodo extendido';
 
 
 --
 -- Name: COLUMN programa_recurrente.sesiones_requeridas_certificado; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.programa_recurrente.sesiones_requeridas_certificado IS 'NÃºmero mÃ­nimo de sesiones que debe asistir para obtener certificado';
+COMMENT ON COLUMN public.programa_recurrente.sesiones_requeridas_certificado IS 'Número mínimo de sesiones que debe asistir para obtener certificado';
 
 
 --
 -- Name: COLUMN programa_recurrente.porcentaje_asistencia_minimo; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.programa_recurrente.porcentaje_asistencia_minimo IS 'Porcentaje mÃ­nimo de asistencia requerido para certificado';
+COMMENT ON COLUMN public.programa_recurrente.porcentaje_asistencia_minimo IS 'Porcentaje mínimo de asistencia requerido para certificado';
+
+
+--
+-- Name: COLUMN programa_recurrente.solicitar_talla; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.programa_recurrente.solicitar_talla IS 'Si es true, el formulario público de inscripción pide talla de playera.';
 
 
 --
@@ -1785,6 +1912,14 @@ ALTER TABLE ONLY public.actividad_plataforma_semanal
 
 
 --
+-- Name: asesor_equipo asesor_equipo_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asesor_equipo
+    ADD CONSTRAINT asesor_equipo_pkey PRIMARY KEY (id_asesor);
+
+
+--
 -- Name: asistencia_invitado asistencia_invitado_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2215,6 +2350,13 @@ CREATE INDEX idx_actividad_periodo ON public.actividad_plataforma_semanal USING 
 
 
 --
+-- Name: idx_asesor_equipo_equipo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_asesor_equipo_equipo ON public.asesor_equipo USING btree (id_equipo);
+
+
+--
 -- Name: idx_asistencia_invitado_invitado; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2264,17 +2406,17 @@ CREATE INDEX idx_cuenta_plataforma ON public.cuenta_plataforma USING btree (id_p
 
 
 --
--- Name: idx_cuenta_plataforma_sync; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_cuenta_plataforma_sync ON public.cuenta_plataforma USING btree (ultima_actualizacion NULLS FIRST) WHERE (activo = true);
-
-
---
 -- Name: idx_cuenta_plataforma_miembro_activo; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_cuenta_plataforma_miembro_activo ON public.cuenta_plataforma USING btree (id_miembro) WHERE (activo = true);
+
+
+--
+-- Name: idx_cuenta_plataforma_sync; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_cuenta_plataforma_sync ON public.cuenta_plataforma USING btree (ultima_actualizacion NULLS FIRST) WHERE (activo = true);
 
 
 --
@@ -2731,6 +2873,14 @@ ALTER TABLE ONLY public.actividad_plataforma_semanal
 
 
 --
+-- Name: asesor_equipo asesor_equipo_id_equipo_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asesor_equipo
+    ADD CONSTRAINT asesor_equipo_id_equipo_fkey FOREIGN KEY (id_equipo) REFERENCES public.equipo_concurso(id_equipo) ON DELETE CASCADE;
+
+
+--
 -- Name: asistencia_invitado asistencia_invitado_id_invitado_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2835,19 +2985,19 @@ ALTER TABLE ONLY public.evidencia
 
 
 --
--- Name: evidencia evidencia_id_programa_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.evidencia
-    ADD CONSTRAINT evidencia_id_programa_fkey FOREIGN KEY (id_programa) REFERENCES public.programa_recurrente(id_programa) ON DELETE CASCADE;
-
-
---
 -- Name: evidencia evidencia_id_miembro_creador_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.evidencia
     ADD CONSTRAINT evidencia_id_miembro_creador_fkey FOREIGN KEY (id_miembro_creador) REFERENCES public.miembro(id_miembro);
+
+
+--
+-- Name: evidencia evidencia_id_programa_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.evidencia
+    ADD CONSTRAINT evidencia_id_programa_fkey FOREIGN KEY (id_programa) REFERENCES public.programa_recurrente(id_programa) ON DELETE CASCADE;
 
 
 --
@@ -3062,5 +3212,5 @@ ALTER TABLE ONLY public.staff_evento
 -- PostgreSQL database dump complete
 --
 
-
+\unrestrict nVZuqatNOXDG5yzhHH0JAbB2xsDT1IGBckw1qYoSJvZrLXpXaSHanVZv0hp0Ywl
 

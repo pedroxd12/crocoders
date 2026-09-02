@@ -2,6 +2,7 @@
 'use client';
 import { useEffect, useMemo, useState, useCallback, Suspense } from 'react';
 import { useRouter, useParams, usePathname } from 'next/navigation';
+import useSWR from 'swr';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'react-toastify';
 import Image from 'next/image';
@@ -10,13 +11,29 @@ import DOMPurify from 'isomorphic-dompurify';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import Select from '@/components/ui/Select';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import EventoImagenes from '@/components/EventoImagenes';
+import { EstadoBadge, CategoriaTag, estadoDeEvento, rangoEquipos } from '@/components/eventos/EventoBadges';
+import {
+  CamposInvitado,
+  TallaModal,
+  INVITADO_VACIO,
+  validarInvitado,
+  limpiarInvitadoPayload,
+  INTEGRANTE_EQUIPO_VACIO,
+  CamposInstitucionIntegrante,
+  validarInstitucionIntegrantes,
+  integrantesEquipoPayload,
+} from '@/components/eventos/RegistroInvitado';
+import ComprobantePagoModal, { EstadoPago } from '@/components/eventos/ComprobantePago';
+import { TALLAS_PLAYERA, CARRERAS_ITLAC } from '@/lib/registro-campos';
+import { postFetcher } from '@/lib/fetcher';
 import { formatearFechaLarga, formatearHora, aDiaISO, combinarFechaHora } from '@/lib/fechas';
 import {
-  Calendar, Users, Clock, ArrowLeft, CheckCircle, UserPlus,
-  LogIn, AlertTriangle, Loader, BookOpen, PartyPopper, QrCode, Trash2, Plus,
-  Eye as EyeIcon, Shield, MapPin, Globe, ExternalLink
+  Calendar, Clock, ArrowLeft, UserPlus,
+  LogIn, AlertTriangle, Loader, PartyPopper, QrCode, Trash2, Plus,
+  Eye as EyeIcon, MapPin, Receipt
 } from 'lucide-react';
 
 async function sendEventRegistrationEmail(email, name, eventDetails, qrToken) {
@@ -54,26 +71,35 @@ function EventoDetalleContent() {
   const [showUnregisterModal, setShowUnregisterModal] = useState(false);
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
+  // Talla de un MIEMBRO en eventos con `solicitar_talla`: su registro es de un
+  // clic, así que se le pregunta en un mini-modal antes de confirmar.
+  const [showTallaModal, setShowTallaModal] = useState(false);
+  // Comprobante de pago (eventos con costo). `comprobanteRecien` distingue el
+  // paso que sigue al registro —donde el modal explica que el lugar quedó
+  // apartado— de abrirlo más tarde desde la ficha para corregirlo.
+  const [showComprobanteModal, setShowComprobanteModal] = useState(false);
+  const [comprobanteRecien, setComprobanteRecien] = useState(false);
 
   // Status & Actions
   const [actionLoading, setActionLoading] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState({ show: false, message: '', type: 'invitado' });
   const [selectedImageUrl, setSelectedImageUrl] = useState('');
 
-  // Forms Data
-  const [guestData, setGuestData] = useState({
-    nombre_completo: '',
-    correo_electronico: '',
-    numero_telefono: '',
-    semestre: '',
-    carrera: '',
-    escuela_institucion: ''
-  });
-  
+  // Forms Data. Los campos del invitado viven en el componente compartido
+  // RegistroInvitado (el mismo del listado y de programas).
+  const [guestData, setGuestData] = useState(INVITADO_VACIO);
+  const [guestErrors, setGuestErrors] = useState({});
+
   const [teamData, setTeamData] = useState({
     nombre: '',
-    integrantes: [{ nombre: '', email: '', telefono: '', institucion: '', carrera: '', semestre: '', es_capitan: true }],
-    asesor: { nombre: '', email: '', telefono: '', institucion: '' }
+    // Forma de la fila compartida con el registro manual del admin
+    // (RegistroInvitado.INTEGRANTE_EQUIPO_VACIO): institución elegible
+    // ITLAC/otra, carrera y número de control incluidos.
+    integrantes: [{ ...INTEGRANTE_EQUIPO_VACIO, es_capitan: true }],
+    // Varios asesores (hasta concurso.max_asesores). Sin institución: no se
+    // usa para nada y sólo alargaba el formulario. La talla sí, porque al
+    // asesor también se le entrega playera cuando el evento la da.
+    asesores: [{ nombre: '', email: '', telefono: '', talla_playera: '' }]
   });
 
   // ¿Este evento se inscribe por equipos?
@@ -93,6 +119,8 @@ function EventoDetalleContent() {
   // el modal anunciaba un mínimo y la validación exigía otro.
   const minEq = Number(evento?.min_integrantes_equipo) || 1;
   const maxEq = Number(evento?.max_integrantes_equipo) || null;
+  // Tope de asesores del concurso (1 si el evento no lo configura).
+  const maxAsesores = Math.min(5, Math.max(1, Number(evento?.max_asesores) || 1));
 
   const sanitizedDescripcion = useMemo(() => {
     const html = evento?.descripcion || '<p>Sin descripción disponible.</p>';
@@ -203,6 +231,17 @@ function EventoDetalleContent() {
 
   const qrImageSrc = qrImage?.token === qrToken ? qrImage.dataUrl : null;
 
+  // Estado del pago: qué comprobante subió esta inscripción y qué dijo el staff.
+  // Se consulta con el MISMO ticket firmado del QR, que es lo único que tiene a
+  // mano un invitado sin cuenta. Va por SWR (y no por un efecto propio) porque
+  // la clave cambia sola al emitirse un ticket nuevo tras inscribirse.
+  const { data: estadoPago, mutate: mutarEstadoPago } = useSWR(
+    qrToken && evento?.tiene_costo ? ['/api/eventos/comprobante/estado', { qrToken }] : null,
+    postFetcher,
+    { revalidateOnFocus: false },
+  );
+  const comprobante = estadoPago?.comprobante ?? null;
+
   useEffect(() => {
     if (!authLoading && !loading && evento && isAuthenticated && user) {
       checkUserRegistration(evento, user);
@@ -223,6 +262,12 @@ function EventoDetalleContent() {
         userId: user?.id_miembro,
       };
 
+      // Talla del miembro (eventos con `solicitar_talla`): la eligió en el
+      // mini-modal y se guarda en su ficha al confirmar la inscripción.
+      if (type === 'register' && isAuthenticated && payload.tallaPlayera) {
+        requestBody.talla_playera = payload.tallaPlayera;
+      }
+
       // Lógica específica por tipo
       if (type === 'register_team') {
           requestBody = {
@@ -230,7 +275,7 @@ function EventoDetalleContent() {
               tipo: 'equipo',
               equipo: payload.equipo,
               integrantes: payload.integrantes,
-              asesor: payload.asesor
+              asesores: payload.asesores
           };
       } else if (type === 'register' && !isAuthenticated) {
          // Registro Invitado Individual.
@@ -275,20 +320,32 @@ function EventoDetalleContent() {
       
       const successType = isAuthenticated ? 'miembro' : 'invitado';
       const isCancellation = type === 'unregister';
-      
-      setShowSuccessModal({ 
-        show: true, 
-        message: isCancellation ? 'Inscripción cancelada correctamente.' : 'Te has inscrito correctamente.', 
-        title: isCancellation ? 'Cancelación Exitosa' : '¡Registro Exitoso!',
-        type: successType,
-        isCancellation // Flag para UI condicional (icono, texto extra)
-      });
+
+      // Evento con costo: el registro NO termina en "¡listo!". La inscripción
+      // quedó 'pendiente' y lo siguiente es el comprobante, así que se abre ese
+      // paso en lugar del modal de éxito (que prometía un lugar confirmado).
+      const pideComprobante = !isCancellation && Boolean(result.requiere_pago) && Boolean(result.qrToken);
+
+      if (pideComprobante) {
+        setComprobanteRecien(true);
+        setShowComprobanteModal(true);
+      } else {
+        setShowSuccessModal({
+          show: true,
+          message: isCancellation ? 'Inscripción cancelada correctamente.' : 'Te has inscrito correctamente.',
+          title: isCancellation ? 'Cancelación Exitosa' : '¡Registro Exitoso!',
+          type: successType,
+          isCancellation // Flag para UI condicional (icono, texto extra)
+        });
+      }
+
       
       // Cerrar modales
       setShowRegistrationTypeModal(false);
       setShowGuestFormModal(false);
       setShowTeamFormModal(false);
       setShowUnregisterModal(false);
+      setShowTallaModal(false);
 
       // Enviar correo (no bloquea la UI; si falla, avisa al usuario)
       if (!isCancellation) {
@@ -309,6 +366,13 @@ function EventoDetalleContent() {
     }
   };
   
+  // Reabrir el paso de pago desde la ficha (para corregir un comprobante
+  // rechazado o subir el que se aplazó al inscribirse).
+  const abrirComprobante = () => {
+    setComprobanteRecien(false);
+    setShowComprobanteModal(true);
+  };
+
   const handleParticipateFlow = () => {
     if (isRegistered) {
       setShowUnregisterModal(true);
@@ -324,13 +388,20 @@ function EventoDetalleContent() {
 
       // Pre-llenar datos del capitán si está autenticado
       if (isAuthenticated && nuevosIntegrantes[0].nombre === '') {
+          // Los miembros del club son alumnos del ITLAC casi siempre: si su
+          // carrera está en el catálogo se preselecciona la institución (el
+          // número de control sí lo teclea, no lo tenemos en su ficha).
+          const carreraUser = user.carrera || '';
+          const esDelItlac = CARRERAS_ITLAC.includes(carreraUser);
           nuevosIntegrantes[0] = {
+              ...INTEGRANTE_EQUIPO_VACIO,
               nombre: user.nombre_completo || '',
               email: user.correo_electronico || '',
               telefono: user.numero_telefono || '',
+              institucion_tipo: esDelItlac ? 'itlac' : '',
               // Dejar vacío si no tenemos el dato exacto, evitar autocompletado incorrecto
-              institucion: user.escuela_institucion || '',
-              carrera: user.carrera || '',
+              institucion: esDelItlac ? '' : (user.escuela_institucion || ''),
+              carrera: carreraUser,
               semestre: user.semestre?.toString() || '',
               es_capitan: true,
               es_miembro: true
@@ -340,13 +411,18 @@ function EventoDetalleContent() {
       // El equipo arranca ya con el mínimo de filas exigido. Antes abría con
       // una sola y al enviar saltaba "Debes registrar al menos 2 integrantes".
       while (nuevosIntegrantes.length < minEq) {
-          nuevosIntegrantes.push({ nombre: '', email: '', telefono: '', institucion: '', carrera: '', semestre: '', es_capitan: false });
+          nuevosIntegrantes.push({ ...INTEGRANTE_EQUIPO_VACIO });
       }
 
       setTeamData({ ...teamData, integrantes: nuevosIntegrantes });
       setShowTeamFormModal(true);
     } else if (isAuthenticated) {
-      handleApiRegistration('register');
+      if (evento.solicitar_talla) {
+        // El evento entrega playera/kit: pedir la talla antes de confirmar.
+        setShowTallaModal(true);
+      } else {
+        handleApiRegistration('register');
+      }
     } else {
       setShowRegistrationTypeModal(true);
     }
@@ -360,7 +436,7 @@ function EventoDetalleContent() {
     }
     setTeamData({
         ...teamData,
-        integrantes: [...teamData.integrantes, { nombre: '', email: '', telefono: '', institucion: '', carrera: '', semestre: '', es_capitan: false }]
+        integrantes: [...teamData.integrantes, { ...INTEGRANTE_EQUIPO_VACIO }]
     });
   };
 
@@ -376,10 +452,35 @@ function EventoDetalleContent() {
     setTeamData({ ...teamData, integrantes: newIntegrantes });
   };
  
+  // Mezcla un parche de varios campos en un integrante. Lo necesita el bloque
+  // de institución: al cambiar ITLAC↔otra se limpian carrera y número de
+  // control en UNA actualización (dos setState seguidos se pisarían).
+  const patchTeamMember = (index, patch) => {
+    setTeamData((prev) => ({
+      ...prev,
+      integrantes: prev.integrantes.map((m, i) => (i === index ? { ...m, ...patch } : m)),
+    }));
+  };
+
   const updateTeamMember = (index, field, value) => {
-    const newIntegrantes = [...teamData.integrantes];
-    newIntegrantes[index] = { ...newIntegrantes[index], [field]: value };
-    setTeamData({ ...teamData, integrantes: newIntegrantes });
+    patchTeamMember(index, { [field]: value });
+  };
+
+  // --- Handlers para Asesores (hasta maxAsesores) ---
+  const addAsesor = () => {
+    if (teamData.asesores.length >= maxAsesores) return;
+    setTeamData({ ...teamData, asesores: [...teamData.asesores, { nombre: '', email: '', telefono: '', talla_playera: '' }] });
+  };
+
+  const removeAsesor = (index) => {
+    if (index === 0) return; // siempre queda al menos la primera fila
+    setTeamData({ ...teamData, asesores: teamData.asesores.filter((_, i) => i !== index) });
+  };
+
+  const updateAsesor = (index, field, value) => {
+    const nuevos = [...teamData.asesores];
+    nuevos[index] = { ...nuevos[index], [field]: value };
+    setTeamData({ ...teamData, asesores: nuevos });
   };
   
   // Validaciones extra antes de enviar
@@ -391,22 +492,41 @@ function EventoDetalleContent() {
     }
 
     // Verificar campos vacíos en integrantes
-    const missingInfo = teamData.integrantes.some((m, i) => !m.nombre || !m.email); 
+    const missingInfo = teamData.integrantes.some((m, i) => !m.nombre || !m.email);
     if (missingInfo) {
         toast.error("Por favor completa Nombre y Email de todos los integrantes.");
         return;
     }
-    
-    // Si se requiere asesor, verificar que esta completo (el HTML required lo hace, pero doble check no duele)
-    if (evento.requiere_asesor && (!teamData.asesor.nombre || !teamData.asesor.email)) {
+
+    // Evento con playera/kit: cada integrante necesita su talla.
+    if (evento.solicitar_talla && teamData.integrantes.some((m) => !m.talla_playera)) {
+        toast.error('Indica la talla de playera de cada integrante.');
+        return;
+    }
+
+    // Institución completa: ITLAC exige carrera del catálogo y número de
+    // control; otra institución exige al menos el nombre de la escuela.
+    const errorInstitucion = validarInstitucionIntegrantes(teamData.integrantes);
+    if (errorInstitucion) {
+        toast.error(errorInstitucion);
+        return;
+    }
+
+    // Se envían sólo los asesores con algo escrito (el formulario siempre
+    // pinta una fila vacía). Si el evento exige asesor, el primero debe estar
+    // completo (el HTML required lo hace, pero doble check no duele).
+    const asesores = teamData.asesores.filter((a) => a.nombre || a.email || a.telefono);
+    if (evento.requiere_asesor && (!asesores[0]?.nombre || !asesores[0]?.email)) {
         toast.error("La información del asesor es obligatoria para este evento.");
         return;
     }
 
-    handleApiRegistration('register_team', { 
-        equipo: { nombre: teamData.nombre }, 
-        integrantes: teamData.integrantes, 
-        asesor: teamData.asesor 
+    handleApiRegistration('register_team', {
+        equipo: { nombre: teamData.nombre },
+        // Traduce `institucion_tipo` (estado de la interfaz) al nombre real de
+        // la institución y descarta el número de control fuera del ITLAC.
+        integrantes: integrantesEquipoPayload(teamData.integrantes),
+        asesores
     });
   };
 
@@ -420,9 +540,9 @@ function EventoDetalleContent() {
     !evento.isPastEvent && !evento.registroCerrado && (evento.cupos === null || evento.cupos_disponibles > 0);
 
   return (
-    <motion.main 
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} 
-      className="min-h-screen bg-[#0f1014] text-white pb-20 font-sans"
+    <motion.main
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+      className="min-h-screen bg-bg text-fg pb-20 font-sans"
     >
       {/* Hero Header */}
       <div className="relative h-[55vh] min-h-[500px] w-full overflow-hidden">
@@ -434,7 +554,7 @@ function EventoDetalleContent() {
                 sizes="100vw"
                 className="object-cover opacity-60 blur-sm scale-105"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0f1014] via-[#0f1014]/60 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/60 to-transparent" />
           </div>
 
           <div className="absolute top-0 left-0 w-full p-6 z-20 pointer-events-none">
@@ -446,7 +566,7 @@ function EventoDetalleContent() {
           </div>
 
           <div className="absolute bottom-0 left-0 w-full p-6 md:p-12 max-w-7xl mx-auto flex flex-col md:flex-row items-end gap-8 z-10 w-full left-1/2 -translate-x-1/2">
-              <div className="relative w-48 h-64 md:w-64 md:h-80 shadow-2xl rounded-xl overflow-hidden border-4 border-[#0f1014] hidden md:block flex-shrink-0 cursor-pointer group" onClick={() => { setSelectedImageUrl(evento.imagen_url || '/placeholder-event.jpg'); setShowImageModal(true); }}>
+              <div className="relative w-48 h-64 md:w-64 md:h-80 shadow-2xl rounded-xl overflow-hidden border-4 border-bg hidden md:block flex-shrink-0 cursor-pointer group" onClick={() => { setSelectedImageUrl(evento.imagen_url || '/placeholder-event.jpg'); setShowImageModal(true); }}>
                   <Image src={evento.imagen_url || '/placeholder-event.jpg'} alt="Flyer" fill sizes="256px" className="object-cover group-hover:scale-105 transition-transform duration-500"/>
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
                      <EyeIcon className="text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-lg" size={32} />
@@ -454,22 +574,37 @@ function EventoDetalleContent() {
               </div>
 
               <div className="flex-1 mb-4">
-                  <div className="flex flex-wrap gap-2 mb-4">
-                      <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-green-500/20 text-green-400 border border-green-500/30 backdrop-blur-md">
-                          {evento.tipo_evento_display}
-                      </span>
-                      {evento.isPastEvent && <span className="px-3 py-1 rounded-full text-xs font-bold uppercase bg-red-500/20 text-red-400 border border-red-500/30">Finalizado</span>}
-                      {isRegistered && <span className="px-3 py-1 rounded-full text-xs font-bold uppercase bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center"><CheckCircle size={12} className="mr-1"/> Inscrito</span>}
+                  {/* Dos sistemas separados: tag de CATEGORÍA (outline) + badge
+                      de ESTADO (sólido, mismo mapeo de color que las tarjetas).
+                      Antes categoría y estado eran pastillas outline gemelas. */}
+                  <div className="flex flex-wrap items-center gap-2 mb-4">
+                      <CategoriaTag className="backdrop-blur-md">{evento.tipo_evento_display}</CategoriaTag>
+                      {esRegistroPorEquipos && (
+                        <CategoriaTag className="backdrop-blur-md">{rangoEquipos(minEq, maxEq)}</CategoriaTag>
+                      )}
+                      <EstadoBadge estado={estadoDeEvento(evento, isRegistered)} />
                   </div>
-                  
-                  <h1 className="text-4xl md:text-6xl font-black mb-4 leading-tight tracking-tight text-white drop-shadow-xl">
+
+                  <h1 className="text-4xl md:text-6xl font-black mb-5 leading-tight tracking-tight text-white drop-shadow-xl">
                       {evento.nombre_evento}
                   </h1>
 
-                  <div className="flex flex-wrap gap-x-8 gap-y-4 text-gray-300 text-sm md:text-base font-medium">
-                      <div className="flex items-center gap-2"><Calendar className="text-green-400" size={20}/> {formatearFechaLarga(evento.fecha)}</div>
-                      <div className="flex items-center gap-2"><Clock className="text-blue-400" size={20}/> {formatearHora(evento.hora_inicio)} – {formatearHora(evento.hora_fin)}</div>
-                      <div className="flex items-center gap-2"><MapPin className="text-red-400" size={20}/> {evento.ubicacion || 'Por definir'}</div>
+                  {/* Mismo tratamiento de iconografía que las tarjetas: cajita
+                      con fondo suave y paleta semántica fija (fecha→brand,
+                      hora→info, ubicación→accent). */}
+                  <div className="flex flex-wrap gap-x-6 gap-y-3 text-sm md:text-base font-medium text-gray-200">
+                      <div className="flex items-center gap-2.5">
+                          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-soft text-brand backdrop-blur-sm"><Calendar size={17} aria-hidden="true"/></span>
+                          {formatearFechaLarga(evento.fecha)}
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-info-soft text-info backdrop-blur-sm"><Clock size={17} aria-hidden="true"/></span>
+                          {formatearHora(evento.hora_inicio)} – {formatearHora(evento.hora_fin)}
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10 text-accent backdrop-blur-sm"><MapPin size={17} aria-hidden="true"/></span>
+                          {evento.ubicacion || 'Por definir'}
+                      </div>
                   </div>
               </div>
           </div>
@@ -484,9 +619,7 @@ function EventoDetalleContent() {
               </div>
 
               <div className="bg-surface p-6 md:p-8 rounded-2xl border border-line shadow-xl">
-                  <h2 className="text-2xl font-bold mb-6 flex items-center text-fg">
-                      <BookOpen className="mr-3 text-purple-400" /> Sobre el evento
-                  </h2>
+                  <h2 className="text-2xl font-bold mb-6 text-fg">Sobre el evento</h2>
                   <div
                     className="prose prose-invert prose-lg max-w-none prose-p:text-gray-400 prose-headings:text-gray-200 prose-a:text-green-400 hover:prose-a:text-green-300 prose-strong:text-white"
                     dangerouslySetInnerHTML={{ __html: sanitizedDescripcion }}
@@ -499,53 +632,50 @@ function EventoDetalleContent() {
                   nada si el evento aún no tiene fotos. */}
               <EventoImagenes eventoId={id} />
 
-              {/* Requirements/Details Grid - Minimalist Redesign */}
+              {/* Datos del concurso. Minimalista a propósito: un solo panel con
+                  etiqueta + valor, sin iconos ni chips de color (los tenía y
+                  competían con el contenido en vez de informar). */}
               {evento.id_concurso && (
-                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-8">
-                        {/* Participación */}
-                        <div className="bg-zinc-900/50 p-4 rounded-2xl border border-white/5 flex flex-col justify-center items-center text-center hover:bg-zinc-900 transition-colors">
-                            <Users className="text-gray-400 mb-2 h-6 w-6" strokeWidth={1.5} />
-                            <span className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">Equipo</span>
-                            <span className="text-gray-200 font-medium text-sm">
+                   <div className="mt-8 grid grid-cols-1 overflow-hidden rounded-2xl border border-line bg-surface divide-y divide-line sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+                        <div className="p-5 text-center">
+                            <p className="text-xs uppercase tracking-wider text-faint">Participación</p>
+                            <p className="mt-1.5 text-sm font-medium text-fg">
                                 {evento.modalidad === 'equipos'
-                                    ? `${minEq} - ${maxEq ?? '∞'} pax`
+                                    ? `${rangoEquipos(minEq, maxEq)}${evento.requiere_asesor && !evento.asesor_participa ? ' + asesor' : ''}`
                                     : 'Individual'}
-                            </span>
+                            </p>
                         </div>
 
-                        {/* Requerimientos - Asesor */}
-                        <div className="bg-zinc-900/50 p-4 rounded-2xl border border-white/5 flex flex-col justify-center items-center text-center hover:bg-zinc-900 transition-colors">
-                            <Shield className={`mb-2 h-6 w-6 ${evento.requiere_asesor ? 'text-orange-400' : 'text-gray-400'}`} strokeWidth={1.5} />
-                            <span className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">Asesor</span>
-                            <span className={`font-medium text-sm ${evento.requiere_asesor ? 'text-orange-300' : 'text-gray-200'}`}>
+                        <div className="p-5 text-center">
+                            <p className="text-xs uppercase tracking-wider text-faint">
+                                {maxAsesores > 1 ? 'Asesores' : 'Asesor'}
+                            </p>
+                            <p className="mt-1.5 text-sm font-medium text-fg">
                                 {evento.requiere_asesor ? 'Requerido' : 'Opcional'}
-                            </span>
+                                {maxAsesores > 1 ? ` · hasta ${maxAsesores}` : ''}
+                            </p>
+                            {evento.modalidad === 'equipos' && (
+                              <p className="mt-0.5 text-xs text-faint">
+                                  {evento.asesor_participa ? 'Participa como integrante' : 'No ocupa lugar en el equipo'}
+                              </p>
+                            )}
                         </div>
 
-                        {/* Plataforma CTA */}
-                        {evento.url_concurso ? (
-                            <a 
-                                href={evento.url_concurso} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="col-span-2 md:col-span-1 bg-blue-600/10 p-4 rounded-2xl border border-blue-500/20 flex flex-col justify-center items-center text-center group hover:bg-blue-600/20 transition-all cursor-pointer"
-                            >
-                                <div className="flex items-center gap-2 mb-1">
-                                    <Globe className="text-blue-400 h-5 w-5 group-hover:scale-110 transition-transform" />
-                                    <ExternalLink className="text-blue-500 h-3 w-3" />
-                                </div>
-                                <span className="text-xs text-blue-300/80 uppercase tracking-wider font-semibold mb-1">Concurso</span>
-                                <span className="text-blue-100 font-bold text-sm group-hover:text-white transition-colors">
-                                    Ir a la Plataforma
-                                </span>
-                            </a>
-                        ) : (
-                             <div className="col-span-2 md:col-span-1 bg-zinc-900/50 p-4 rounded-2xl border border-white/5 flex flex-col justify-center items-center text-center opacity-50">
-                                <Globe className="text-gray-500 mb-2 h-6 w-6" strokeWidth={1.5} />
-                                <span className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-1">Plataforma</span>
-                                <span className="text-gray-400 text-sm">No especificada</span>
-                            </div>
-                        )}
+                        <div className="p-5 text-center">
+                            <p className="text-xs uppercase tracking-wider text-faint">Plataforma</p>
+                            {evento.url_concurso ? (
+                                <a
+                                    href={evento.url_concurso}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="mt-1.5 inline-block text-sm font-medium text-brand underline decoration-brand/40 underline-offset-4 transition-colors hover:decoration-brand"
+                                >
+                                    Ir a la plataforma
+                                </a>
+                            ) : (
+                                <p className="mt-1.5 text-sm text-muted">No especificada</p>
+                            )}
+                        </div>
                    </div>
               )}
           </div>
@@ -561,34 +691,77 @@ function EventoDetalleContent() {
                                 <span className="text-xl font-bold text-white">${evento.costo}</span>
                             </div>
                             
+                            {/* Antes este bloque decía siempre "Pago pendiente de
+                                verificación", tanto a quien no había pagado como a
+                                quien ya tenía el pago validado. Ahora refleja el
+                                comprobante real de la inscripción. */}
                             {isRegistered ? (
-                                <div className="flex items-center gap-2 mt-2 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-sm">
-                                    <AlertTriangle size={16}/>
-                                    <span>Pago pendiente de verificación</span>
+                                <div className="mt-3 space-y-3">
+                                    {comprobante ? (
+                                        <EstadoPago comprobante={comprobante} />
+                                    ) : (
+                                        <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+                                            <AlertTriangle size={16} aria-hidden="true" />
+                                            <span>Falta tu comprobante de pago</span>
+                                        </div>
+                                    )}
+                                    {comprobante?.estado !== 'aprobado' && (
+                                        <Button variant="secondary" className="w-full justify-center" onClick={abrirComprobante}>
+                                            <Receipt size={16} className="mr-2" aria-hidden="true" />
+                                            {comprobante ? 'Actualizar comprobante' : 'Subir comprobante'}
+                                        </Button>
+                                    )}
                                 </div>
                             ) : (
                                 <div className="text-xs text-gray-500 mt-1">
-                                    * El pago se realiza después de la inscripción.
+                                    * Al inscribirte se te pedirá una imagen del comprobante de pago.
                                 </div>
+                            )}
+
+                            {evento.instrucciones_pago && (
+                                <p className="mt-3 whitespace-pre-line border-t border-line pt-3 text-xs text-muted">
+                                    {evento.instrucciones_pago}
+                                </p>
                             )}
                         </div>
                    )}
 
+                   {/* Aforo en términos de OCUPACIÓN: la barra se llena conforme
+                       se llena el evento. Antes representaba disponibilidad
+                       ("147/150 disponibles" = barra llena de verde), que
+                       comunicaba justo lo contrario. */}
                    <div className="mb-6 pb-6 border-b border-line">
-                       <div className="flex justify-between items-center mb-2">
-                           <span className="text-gray-400 font-medium h-6">Cupos disponibles</span>
-                           <span className={`font-bold text-xl ${evento.cupos_disponibles > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                {evento.cupos_disponibles !== null ? evento.cupos_disponibles : '∞'}
-                           </span>
-                       </div>
-                       {evento.cupos && (
-                           <div className="w-full bg-surface-2 h-2 rounded-full overflow-hidden">
-                               <div 
-                                 className="bg-green-500 h-full" 
-                                 style={{ width: `${Math.max(0, Math.min(100, (evento.cupos_disponibles / evento.cupos) * 100))}%` }}
-                               />
+                       {evento.cupos === null ? (
+                           <div className="flex justify-between items-center">
+                               <span className="text-muted font-medium">Aforo</span>
+                               <span className="font-bold text-fg">Ilimitado</span>
                            </div>
-                       )}
+                       ) : (() => {
+                           const cupos = Number(evento.cupos);
+                           const ocupados = Math.min(
+                             cupos,
+                             Number(evento.lugares_ocupados ?? Math.max(0, cupos - (evento.cupos_disponibles ?? 0))),
+                           );
+                           const libres = Math.max(0, cupos - ocupados);
+                           const pct = Math.max(0, Math.min(100, (ocupados / cupos) * 100));
+                           const colorBarra = libres === 0 ? 'bg-danger' : pct >= 80 ? 'bg-warning' : 'bg-brand';
+                           return (
+                               <>
+                                   <div className="flex justify-between items-baseline mb-2">
+                                       <span className="text-muted font-medium">Aforo</span>
+                                       <span className="text-sm text-muted">
+                                           <span className="text-xl font-bold text-fg">{ocupados}</span> de {cupos} inscritos
+                                       </span>
+                                   </div>
+                                   <div className="w-full bg-surface-2 h-2 rounded-full overflow-hidden">
+                                       <div className={`${colorBarra} h-full transition-all`} style={{ width: `${pct}%` }} />
+                                   </div>
+                                   <p className={`mt-2 text-xs ${libres === 0 ? 'text-danger' : libres <= cupos * 0.2 ? 'text-warning' : 'text-faint'}`}>
+                                       {libres === 0 ? 'No quedan lugares' : `Quedan ${libres} lugares`}
+                                   </p>
+                               </>
+                           );
+                       })()}
                    </div>
 
                    <div className="mb-6">
@@ -640,64 +813,139 @@ function EventoDetalleContent() {
       
       {/* ... Modals mantenidos igual ... */}
       
-      {/* Modal Equipos */}
-      <Modal isOpen={showTeamFormModal} onClose={() => setShowTeamFormModal(false)} title="Registro de Equipo" size="2xl">
-         <form onSubmit={handleTeamSubmit} className="space-y-6 max-h-[70vh] overflow-y-auto pr-2">
+      {/* Modal Equipos. Un SOLO contenedor con scroll (el cuerpo del modal):
+          antes el formulario traía su propio max-h + overflow dentro del cuerpo
+          que ya scrollea, y ese doble scroll anidado cortaba los campos al
+          escribir. Los botones viven en el footer fijo del modal. */}
+      <Modal
+        isOpen={showTeamFormModal}
+        onClose={() => setShowTeamFormModal(false)}
+        title="Registro de Equipo"
+        description={evento.modalidad === 'equipos' ? rangoEquipos(minEq, maxEq) : undefined}
+        size="2xl"
+        footer={
+          <>
+            <Button type="button" onClick={() => setShowTeamFormModal(false)} variant="secondary" disabled={actionLoading}>Cancelar</Button>
+            <Button type="submit" form="form-equipo" loading={actionLoading}>Registrar Equipo</Button>
+          </>
+        }
+      >
+         <form id="form-equipo" onSubmit={handleTeamSubmit} className="space-y-6">
             <div className="space-y-4">
                 <h3 className="text-brand font-bold border-b border-line pb-2">Datos del Equipo</h3>
                 <Input label="Nombre del equipo" value={teamData.nombre} onChange={e => setTeamData({...teamData, nombre: e.target.value})} required/>
-                
+
                 <div className="space-y-3 bg-surface-2 p-4 rounded-xl border border-line">
-                    <h4 className="text-sm font-bold text-gray-300">
-                        Datos del Asesor {evento.requiere_asesor ? <span className="text-danger">*</span> : <span className="text-gray-500 font-normal">(Opcional)</span>}
-                    </h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <Input label="Nombre" value={teamData.asesor.nombre} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, nombre: e.target.value}})} required={evento.requiere_asesor}/>
-                        <Input label="Email" type="email" value={teamData.asesor.email} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, email: e.target.value}})} required={evento.requiere_asesor}/>
-                        <Input label="Teléfono" value={teamData.asesor.telefono} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, telefono: e.target.value}})} required={evento.requiere_asesor}/>
-                        <Input label="Institución" value={teamData.asesor.institucion} onChange={e => setTeamData({...teamData, asesor: {...teamData.asesor, institucion: e.target.value}})} required={evento.requiere_asesor}/>
+                    <div className="flex items-center justify-between gap-3">
+                        <h4 className="text-sm font-bold text-fg">
+                            {teamData.asesores.length > 1 ? 'Asesores' : 'Asesor'}
+                            {evento.requiere_asesor
+                              ? <span className="text-danger"> *</span>
+                              : <span className="text-faint font-normal"> (opcional)</span>}
+                        </h4>
+                        {maxAsesores > 1 && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={addAsesor}
+                            disabled={teamData.asesores.length >= maxAsesores}
+                          >
+                            <Plus size={14} aria-hidden="true"/> Agregar asesor ({teamData.asesores.length}/{maxAsesores})
+                          </Button>
+                        )}
                     </div>
+                    {evento.asesor_participa ? (
+                      <p className="text-xs text-muted">
+                        En este concurso el asesor participa como integrante: inclúyelo también en la lista de integrantes.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted">
+                        El asesor acompaña al equipo y no ocupa lugar entre los integrantes.
+                      </p>
+                    )}
+
+                    {teamData.asesores.map((asesor, idx) => (
+                        <div key={idx} className="relative rounded-lg border border-line bg-surface p-3">
+                            {idx > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeAsesor(idx)}
+                                  aria-label={`Quitar asesor ${idx + 1}`}
+                                  className="absolute top-2 right-2 rounded p-1 text-danger hover:bg-surface-2"
+                                >
+                                    <Trash2 size={15} aria-hidden="true"/>
+                                </button>
+                            )}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                <Input label="Nombre" value={asesor.nombre} onChange={e => updateAsesor(idx, 'nombre', e.target.value)} required={evento.requiere_asesor && idx === 0}/>
+                                <Input label="Email" type="email" value={asesor.email} onChange={e => updateAsesor(idx, 'email', e.target.value)} required={evento.requiere_asesor && idx === 0}/>
+                                <Input label="Teléfono" value={asesor.telefono} onChange={e => updateAsesor(idx, 'telefono', e.target.value.replace(/\D/g, '').slice(0, 15))} placeholder="10 dígitos"/>
+                                {/* Al asesor también se le entrega playera: sin
+                                    talla el staff la marca a ciegas en la puerta. */}
+                                {evento.solicitar_talla && (
+                                  <Select
+                                    label="Talla de playera"
+                                    value={asesor.talla_playera || ''}
+                                    onChange={e => updateAsesor(idx, 'talla_playera', e.target.value)}
+                                    options={TALLAS_PLAYERA}
+                                    placeholder="Selecciona la talla"
+                                  />
+                                )}
+                            </div>
+                        </div>
+                    ))}
                 </div>
-                
+
                 <div className="space-y-4">
                     <div className="flex justify-between items-center border-b border-line pb-2">
                         <h3 className="text-brand font-bold">
-                            Integrantes del Equipo <span className="text-gray-400 text-sm font-normal ml-2">({minEq} - {maxEq ?? '∞'} miembros)</span>
+                            Integrantes <span className="text-muted text-sm font-normal ml-2">{rangoEquipos(minEq, maxEq)}</span>
                         </h3>
                         <Button type="button" size="sm" onClick={addTeamMember} disabled={Boolean(maxEq) && teamData.integrantes.length >= maxEq} variant="secondary">
-                            <Plus size={14} className="mr-1"/> Agregar Integrante ({teamData.integrantes.length}/{maxEq ?? '∞'})
+                            <Plus size={14} aria-hidden="true"/> Agregar integrante ({teamData.integrantes.length}{maxEq ? `/${maxEq}` : ''})
                         </Button>
                     </div>
-                    
+
                     {teamData.integrantes.map((member, idx) => (
                         <div key={idx} className="bg-surface-2 p-4 rounded-xl border border-line relative">
                             {idx > 0 && (
-                                <button type="button" onClick={() => removeTeamMember(idx)} className="absolute top-2 right-2 text-red-400 hover:text-red-300">
-                                    <Trash2 size={16}/>
+                                <button
+                                  type="button"
+                                  onClick={() => removeTeamMember(idx)}
+                                  aria-label={`Quitar integrante ${idx + 1}`}
+                                  className="absolute top-2 right-2 rounded p-1 text-danger hover:bg-surface"
+                                >
+                                    <Trash2 size={16} aria-hidden="true"/>
                                 </button>
                             )}
-                            <h4 className="text-xs uppercase font-bold text-gray-400 mb-2">Integrante {idx + 1} {idx === 0 ? '(Capitán)' : ''}</h4>
+                            <h4 className="text-xs uppercase font-bold text-muted mb-2">Integrante {idx + 1} {idx === 0 ? '(Capitán)' : ''}</h4>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <Input label="Email" type="email" value={member.email} onChange={e => updateTeamMember(idx, 'email', e.target.value)} required placeholder="Correo personal o institucional"/>
                                 <Input label="Nombre" value={member.nombre} onChange={e => updateTeamMember(idx, 'nombre', e.target.value)} required/>
                                 <div className="md:col-span-2">
-                                    <p className="text-xs text-blue-300 mb-2">* Si el integrante es miembro del club, asegúrese de usar su correo registrado para vincular su cuenta automáticamente.</p>
+                                    <p className="text-xs text-muted mb-2">Si el integrante es miembro del club, usa su correo registrado para vincular su cuenta automáticamente.</p>
                                 </div>
-                                {/* Campos extendidos: obligatorios para asegurar datos del concurso.
-                                    El label lleva '*' para que la obligatoriedad sea visible (antes
-                                    sólo el atributo HTML required la imponía, sin pista visual). */}
                                 <Input label="Teléfono" value={member.telefono} onChange={e => updateTeamMember(idx, 'telefono', e.target.value.replace(/\D/g, '').slice(0, 15))} required placeholder="10 dígitos"/>
-                                <Input label="Institución" value={member.institucion} onChange={e => updateTeamMember(idx, 'institucion', e.target.value)} required/>
-                                <Input label="Carrera/Bachillerato" value={member.carrera} onChange={e => updateTeamMember(idx, 'carrera', e.target.value)} required/>
+                                {/* Institución elegible (ITLAC → catálogo de carreras +
+                                    número de control; otra → escuela y carrera opcional).
+                                    Mismo bloque que usa el registro manual del admin. */}
+                                <CamposInstitucionIntegrante data={member} onPatch={(patch) => patchTeamMember(idx, patch)} />
+                                {/* Sólo cuando el evento entrega playera/kit. */}
+                                {evento.solicitar_talla && (
+                                  <Select
+                                    label="Talla de playera"
+                                    value={member.talla_playera || ''}
+                                    onChange={e => updateTeamMember(idx, 'talla_playera', e.target.value)}
+                                    options={TALLAS_PLAYERA}
+                                    placeholder="Selecciona la talla"
+                                    required
+                                  />
+                                )}
                              </div>
                         </div>
                     ))}
                 </div>
-            </div>
-            
-            <div className="flex justify-end pt-4 gap-3">
-                <Button type="button" onClick={() => setShowTeamFormModal(false)} variant="secondary">Cancelar</Button>
-                <Button type="submit" loading={actionLoading}>Registrar Equipo</Button>
             </div>
          </form>
       </Modal>
@@ -736,17 +984,75 @@ function EventoDetalleContent() {
         </div>
       </Modal>
 
-      {/* Formulario Invitado (simplificado) */}
-      <Modal isOpen={showGuestFormModal} onClose={() => setShowGuestFormModal(false)} title="Registro Invitado">
-          <form onSubmit={(e) => { e.preventDefault(); handleApiRegistration('register', { guestData }); }} className="space-y-3">
-             <Input label="Nombre" value={guestData.nombre_completo} onChange={e => setGuestData({...guestData, nombre_completo: e.target.value})} required/>
-             <Input label="Email" type="email" value={guestData.correo_electronico} onChange={e => setGuestData({...guestData, correo_electronico: e.target.value})} required/>
-             <Input label="Teléfono" value={guestData.numero_telefono} onChange={e => setGuestData({...guestData, numero_telefono: e.target.value})} required/>
-             <Input label="Escuela/Institución" value={guestData.escuela_institucion} onChange={e => setGuestData({...guestData, escuela_institucion: e.target.value})} required/>
-             <Input label="Carrera" value={guestData.carrera} onChange={e => setGuestData({...guestData, carrera: e.target.value})} required/>
-             <Button type="submit" loading={actionLoading} className="w-full mt-4">Confirmar</Button>
-          </form>
+      {/* Formulario Invitado: mismos campos compartidos que el listado y los
+          programas (nivel de estudios, edad, talla si el evento la pide). */}
+      <Modal
+        isOpen={showGuestFormModal}
+        onClose={() => { setShowGuestFormModal(false); setGuestErrors({}); }}
+        title="Registro como invitado"
+        description={evento.nombre_evento}
+        size="lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => { setShowGuestFormModal(false); setGuestErrors({}); }} disabled={actionLoading}>
+              Cancelar
+            </Button>
+            <Button
+              loading={actionLoading}
+              onClick={() => {
+                const errors = validarInvitado(guestData, { requiereTalla: Boolean(evento.solicitar_talla) });
+                setGuestErrors(errors);
+                if (Object.keys(errors).length > 0) {
+                  toast.error('Revisa los campos marcados en rojo.', { theme: 'dark' });
+                  return;
+                }
+                handleApiRegistration('register', { guestData: limpiarInvitadoPayload(guestData) });
+              }}
+            >
+              Confirmar registro
+            </Button>
+          </>
+        }
+      >
+          <CamposInvitado
+            data={guestData}
+            errors={guestErrors}
+            onChange={setGuestData}
+            requiereTalla={Boolean(evento.solicitar_talla)}
+          />
       </Modal>
+
+      {/* Talla del miembro (eventos con solicitar_talla): el registro de
+          miembro es de un clic y éste es el único punto donde preguntarla. */}
+      <TallaModal
+        isOpen={showTallaModal}
+        onClose={() => setShowTallaModal(false)}
+        titulo={evento.nombre_evento}
+        loading={actionLoading}
+        onConfirm={(talla) => handleApiRegistration('register', { tallaPlayera: talla })}
+      />
+
+      {/* Comprobante de pago: paso siguiente al registro en eventos con costo,
+          y también la vía para corregirlo si el staff lo rechaza. */}
+      <ComprobantePagoModal
+        isOpen={showComprobanteModal}
+        onClose={() => setShowComprobanteModal(false)}
+        evento={{
+          nombre: evento.nombre || evento.nombre_evento,
+          costo: evento.costo,
+          instrucciones_pago: evento.instrucciones_pago,
+        }}
+        qrToken={qrToken}
+        comprobante={comprobante}
+        recienInscrito={comprobanteRecien}
+        onSaved={(guardado) => {
+          // Se parchea la caché de SWR con lo que acaba de devolver el servidor
+          // en vez de volver a preguntar por el estado completo.
+          mutarEstadoPago((previo) => ({ ...(previo || {}), comprobante: guardado }), { revalidate: false });
+          setShowComprobanteModal(false);
+          toast.success('Comprobante enviado. Lo validaremos antes del evento.', { theme: 'dark' });
+        }}
+      />
 
       {/* Modal Éxito / Confirmación */}
       <AnimatePresence>

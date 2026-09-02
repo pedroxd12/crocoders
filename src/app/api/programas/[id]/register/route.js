@@ -1,13 +1,16 @@
 // src/app/api/programas/[id]/register/route.js
 // Inscripción PÚBLICA a un programa recurrente. Igual que eventos: miembro (con
 // sesión) o invitado (id_invitado creado vía /api/invitados). Los programas no
-// tienen cupos ni QR (la asistencia se toma por sesión, no por ticket de acceso).
+// tienen cupos, pero SÍ ticket QR: el mismo código sirve para todas las
+// sesiones y el escáner marca la asistencia de LA SESIÓN desde la que se abre
+// (/api/programas/verify-qr).
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server';
 import { getSession } from '@/lib/auth';
 import { programaRegisterSchema, parseOrError } from '@/lib/validation';
 import { rateLimit } from '@/lib/rate-limit';
 import { verificarInvitado } from '@/lib/invitado-token';
+import { firmarQrToken } from '@/lib/qr-token';
 
 export async function POST(request, { params }) {
   // Inscripción mayormente pública (invitados sin cuenta): limitar por IP.
@@ -79,6 +82,21 @@ export async function POST(request, { params }) {
     }
   }
 
+  // Igual que /api/eventos/register: si no se puede emitir el ticket, se falla
+  // ANTES de tocar la base para no dejar una inscripción sin QR ni correo.
+  const payloadSecret = process.env.PAYLOAD_SECRET;
+  if (!payloadSecret) {
+    console.error('[programa-register] PAYLOAD_SECRET no configurado');
+    return NextResponse.json(
+      { success: false, error: 'Servidor mal configurado', code: 'QR_SECRET_MISSING' },
+      { status: 500 },
+    );
+  }
+  // Payload de PROGRAMA (`pid`, no `eid`): un ticket de programa no pasa por
+  // verify-qr de eventos ni al revés.
+  const emitirTicket = (idInscripcion) =>
+    firmarQrToken({ id: idInscripcion, pid: programaId, ts: Date.now() }, payloadSecret);
+
   try {
     // El programa debe existir, estar activo y NO haber terminado. La barrera de
     // "finalizado" era solo visual (el botón deshabilitado en la tarjeta), así que
@@ -87,7 +105,7 @@ export async function POST(request, { params }) {
     // La comparación se hace en SQL (CURRENT_DATE) para no depender de la hora del
     // proceso de Node ni abrir una ventana entre la lectura y la escritura.
     const prog = await sql`
-      SELECT id_programa, nombre, activo, (fecha_fin >= CURRENT_DATE) AS vigente
+      SELECT id_programa, nombre, activo, solicitar_talla, (fecha_fin >= CURRENT_DATE) AS vigente
         FROM programa_recurrente WHERE id_programa = ${programaId}
     `;
     if (prog.length === 0) {
@@ -101,6 +119,21 @@ export async function POST(request, { params }) {
     }
 
     if (memberId) {
+      // Talla de playera: si el programa la pide, tiene que venir en el payload
+      // o estar ya en la ficha del miembro. Si viene, se guarda (es el propio
+      // miembro autenticado actualizando su dato). Mismo criterio que eventos.
+      if (data.talla_playera) {
+        await sql`UPDATE miembro SET talla_playera = ${data.talla_playera} WHERE id_miembro = ${memberId}`;
+      } else if (prog[0].solicitar_talla) {
+        const tallaRes = await sql`SELECT talla_playera FROM miembro WHERE id_miembro = ${memberId}`;
+        if (!tallaRes[0]?.talla_playera) {
+          return NextResponse.json(
+            { success: false, error: 'Este programa requiere indicar tu talla de playera.' },
+            { status: 400 },
+          );
+        }
+      }
+
       // Reactivar si estaba cancelada (ON CONFLICT por el UNIQUE de miembro).
       const ins = await sql`
         INSERT INTO inscripcion_programa (id_programa, id_miembro, estado, fecha_inscripcion)
@@ -109,12 +142,25 @@ export async function POST(request, { params }) {
         DO UPDATE SET estado = 'activo', updated_at = NOW()
         RETURNING id_inscripcion_programa, estado, (xmax = 0) AS insertada
       `;
-      return NextResponse.json({ success: true, message: 'Inscripción al programa exitosa', id_inscripcion: ins[0].id_inscripcion_programa });
+      return NextResponse.json({
+        success: true,
+        message: 'Inscripción al programa exitosa',
+        id_inscripcion: ins[0].id_inscripcion_programa,
+        qrToken: emitirTicket(ins[0].id_inscripcion_programa),
+      });
     } else {
       // Invitado: verificar que exista para un 404 claro.
-      const inv = await sql`SELECT 1 FROM invitado WHERE id_invitado = ${guestId}`;
+      const inv = await sql`SELECT talla_playera FROM invitado WHERE id_invitado = ${guestId}`;
       if (inv.length === 0) {
         return NextResponse.json({ success: false, error: 'Invitado no encontrado. Vuelve a completar tus datos.' }, { status: 404 });
+      }
+      // La talla la guardó POST /api/invitados un momento antes; si el programa
+      // la exige y la ficha no la tiene, el cliente se saltó el formulario.
+      if (prog[0].solicitar_talla && !inv[0].talla_playera) {
+        return NextResponse.json(
+          { success: false, error: 'Este programa requiere indicar tu talla de playera.' },
+          { status: 400 },
+        );
       }
       const ins = await sql`
         INSERT INTO inscripcion_programa (id_programa, id_invitado, estado, fecha_inscripcion)
@@ -123,7 +169,12 @@ export async function POST(request, { params }) {
         DO UPDATE SET estado = 'activo', updated_at = NOW()
         RETURNING id_inscripcion_programa
       `;
-      return NextResponse.json({ success: true, message: 'Inscripción al programa exitosa', id_inscripcion: ins[0].id_inscripcion_programa });
+      return NextResponse.json({
+        success: true,
+        message: 'Inscripción al programa exitosa',
+        id_inscripcion: ins[0].id_inscripcion_programa,
+        qrToken: emitirTicket(ins[0].id_inscripcion_programa),
+      });
     }
   } catch (error) {
     console.error('Error en inscripción a programa:', error);

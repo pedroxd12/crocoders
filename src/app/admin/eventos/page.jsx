@@ -60,14 +60,18 @@ const FORM_VACIO = {
   cupos: 50,
   costo: 0,
   tiene_costo: false,
+  instrucciones_pago: '',
   imagen_flyer_url: null,
   imagen_flyer_key: undefined,
+  solicitar_talla: false,
   es_concurso: false,
   modalidad: 'individual',
   max_integrantes_equipo: 3,
   min_integrantes_equipo: MIN_INTEGRANTES,
   id_plataforma: '',
   requiere_asesor: false,
+  asesor_participa: false,
+  max_asesores: 1,
   url_concurso: '',
 };
 
@@ -317,6 +321,7 @@ export default function EventosAdmin() {
       cupos: evento.cupos ?? 0,
       costo: evento.costo ?? 0,
       tiene_costo: Boolean(evento.tiene_costo),
+      instrucciones_pago: evento.instrucciones_pago || '',
       imagen_flyer_url: evento.imagen_flyer_url ?? null,
       // Se lee `imagen_flyer_key` (el nombre real de la columna); antes se leía
       // `imagen_key`, que la API nunca ha devuelto. `undefined` a propósito: si
@@ -324,12 +329,15 @@ export default function EventosAdmin() {
       // y el PUT conserva la que ya hay en la base. Sólo se envía cuando el
       // admin sube otro flyer o lo quita.
       imagen_flyer_key: evento.imagen_flyer_key ?? undefined,
+      solicitar_talla: Boolean(evento.solicitar_talla),
       es_concurso: evento.id_concurso != null,
       modalidad: evento.modalidad || 'individual',
       max_integrantes_equipo: evento.max_integrantes_equipo || 3,
       min_integrantes_equipo: evento.min_integrantes_equipo || MIN_INTEGRANTES,
       id_plataforma: evento.id_plataforma || '',
       requiere_asesor: evento.requiere_asesor || false,
+      asesor_participa: Boolean(evento.asesor_participa),
+      max_asesores: evento.max_asesores || 1,
       url_concurso: evento.url_concurso || '',
     });
     setIsModalOpen(true);
@@ -638,25 +646,45 @@ export default function EventosAdmin() {
             </div>
 
             <Casilla
+              id="solicitar_talla"
+              name="solicitar_talla"
+              checked={formData.solicitar_talla}
+              onChange={handleInputChange}
+              label="Pedir talla de playera al inscribirse"
+              help="Actívalo si el evento entrega playera o kit. El formulario público pedirá la talla a miembros, invitados y a cada integrante de equipo."
+            />
+
+            <Casilla
               id="tiene_costo"
               name="tiene_costo"
               checked={formData.tiene_costo}
               onChange={handleInputChange}
               label="El evento tiene costo de acceso"
-              help="El cobro se gestiona fuera de la plataforma; aquí sólo se muestra el importe."
+              help="El cobro se hace fuera de la plataforma. Al activarlo, quien se inscriba deberá subir una imagen de su comprobante y el staff la validará."
             />
             {formData.tiene_costo && (
-              <Input
-                label="Costo (MXN)"
-                type="number"
-                name="costo"
-                min="0"
-                step="0.01"
-                value={formData.costo}
-                onChange={handleInputChange}
-                error={formErrors.costo}
-                wrapperClassName="max-w-xs"
-              />
+              <>
+                <Input
+                  label="Costo (MXN)"
+                  type="number"
+                  name="costo"
+                  min="0"
+                  step="0.01"
+                  value={formData.costo}
+                  onChange={handleInputChange}
+                  error={formErrors.costo}
+                  wrapperClassName="max-w-xs"
+                />
+                <Textarea
+                  label="Instrucciones de pago"
+                  name="instrucciones_pago"
+                  rows={4}
+                  value={formData.instrucciones_pago}
+                  onChange={handleInputChange}
+                  placeholder={'Ej. Transferencia a BBVA 0123456789 a nombre de… o pago en efectivo en el cubículo K-12.'}
+                  help="Se muestran en la ficha del evento y en el paso donde se pide el comprobante. Al inscribirse, la persona sube una imagen del pago y el staff la valida."
+                />
+              </>
             )}
           </Seccion>
 
@@ -728,6 +756,27 @@ export default function EventosAdmin() {
                   onChange={handleInputChange}
                   label="Requerir asesor"
                   help="El formulario de inscripción pedirá los datos del asesor como obligatorios."
+                />
+
+                <Casilla
+                  id="asesor_participa"
+                  name="asesor_participa"
+                  checked={formData.asesor_participa}
+                  onChange={handleInputChange}
+                  label="El asesor participa como integrante"
+                  help="Si NO participa, el evento se anuncia como «equipos de N integrantes + asesor» y el asesor no ocupa lugar del equipo."
+                />
+
+                <Input
+                  label="Máx. asesores por equipo"
+                  type="number"
+                  name="max_asesores"
+                  min="1"
+                  max="5"
+                  value={formData.max_asesores}
+                  onChange={handleInputChange}
+                  help="El formulario de equipo permitirá «Agregar asesor» hasta este tope."
+                  wrapperClassName="max-w-xs"
                 />
 
                 <Input

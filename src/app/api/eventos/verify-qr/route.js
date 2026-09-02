@@ -1,8 +1,22 @@
-// API para verificar y marcar asistencia mediante QR
+// API para verificar el ticket QR y registrar el acceso.
+//
+// Individual (miembro/invitado): el primer escaneo marca la asistencia; los
+// siguientes responden alreadyRegistered. La respuesta trae talla y estado de
+// entrega de playera para que el staff la entregue en el momento.
+//
+// Equipo: el QR es UNO por equipo (lo recibe el capitán), así que escanearlo NO
+// marca a nadie: devuelve el roster (integrantes + asesores, cada uno con su
+// asistencia, talla y playera) y el staff marca persona por persona vía
+// /api/eventos/checkin.
 import { NextResponse } from 'next/server';
 import { connectWithRetry } from '@/lib/db-server';
 import { requireAuth } from '@/lib/auth';
-import { sqlFinEvento } from '@/lib/eventos-fechas';
+import { verificarQrToken } from '@/lib/qr-token';
+import {
+  autorizarStaffEvento,
+  cargarInscripcionCheckin,
+  cargarRosterEquipo,
+} from '@/lib/checkin-eventos';
 
 // Tolerancia frente a relojes desincronizados / sellos generados ligeramente en el "futuro".
 const QR_FUTURE_SKEW_MS = 5 * 60 * 1000;
@@ -16,7 +30,7 @@ export async function POST(request) {
   let client;
 
   try {
-    const { qrToken } = await request.json();
+    const { qrToken, eventoId: eventoEsperado } = await request.json();
 
     if (!qrToken) {
       return NextResponse.json({
@@ -34,60 +48,34 @@ export async function POST(request) {
       }, { status: 500 });
     }
 
-    const crypto = await import('crypto');
-
-    let qrData;
-    try {
-      const decoded = JSON.parse(Buffer.from(qrToken, 'base64').toString('utf-8'));
-      const { data, sig } = decoded;
-
-      if (!data || typeof sig !== 'string') throw new Error('Estructura inválida');
-
-      // Verify signature con comparación de tiempo constante
-      const expectedHash = crypto.createHmac('sha256', secret).update(data).digest('hex');
-      const sigBuf = Buffer.from(sig, 'hex');
-      const expectedBuf = Buffer.from(expectedHash, 'hex');
-      if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
-        return NextResponse.json({
-          success: false,
-          error: 'Token inválido o manipulado'
-        }, { status: 401 });
-      }
-
-      qrData = JSON.parse(data);
-    } catch (e) {
+    const qrData = verificarQrToken(qrToken, secret);
+    if (!qrData) {
       return NextResponse.json({
         success: false,
-        error: 'Token QR inválido'
-      }, { status: 400 });
+        error: 'Token QR inválido o manipulado'
+      }, { status: 401 });
     }
 
     const { id: inscripcionId, eid: eventoId, ts } = qrData;
 
-    if (!inscripcionId || !eventoId) {
+    // La misma guarda que hace el cliente, ahora también en el servidor: si el
+    // escáner se abrió desde la pantalla de UN evento, un ticket de otro evento
+    // se rechaza en vez de marcar asistencia donde nadie está mirando.
+    if (eventoEsperado != null && Number(eventoEsperado) !== eventoId) {
       return NextResponse.json({
         success: false,
-        error: 'Datos incompletos en el token'
+        error: 'Este ticket pertenece a otro evento.'
       }, { status: 400 });
     }
 
-    // Validar timestamp del QR (frescura/replay window)
-    const tsNum = Number(ts);
-    if (!Number.isFinite(tsNum)) {
-      return NextResponse.json({
-        success: false,
-        error: 'Marca de tiempo inválida en QR'
-      }, { status: 400 });
-    }
-    const now = Date.now();
-    if (tsNum > now + QR_FUTURE_SKEW_MS) {
+    if (ts > Date.now() + QR_FUTURE_SKEW_MS) {
       return NextResponse.json({
         success: false,
         error: 'QR con fecha futura inválida'
       }, { status: 400 });
     }
     // La caducidad NO se mide en horas desde la emisión, sino contra el fin del
-    // evento (se comprueba más abajo, con los datos ya cargados). La ventana fija
+    // evento (`ticket_vencido`, ya cargado con la inscripción). La ventana fija
     // de 24 h dejaba fuera a los invitados: no tienen cuenta, su único ticket es
     // el del correo y no existe ninguna pantalla para pedir otro, así que quien
     // se inscribía con más de un día de antelación llegaba a la puerta con un QR
@@ -106,77 +94,21 @@ export async function POST(request) {
 
     await client.query('BEGIN');
 
-    // Autorización por evento: un administrador puede marcar cualquier evento;
-    // el staff solo los eventos donde está asignado.
-    const role = (guard.session.role || '').toLowerCase();
-    if (role !== 'administrador') {
-      // No basta con estar en staff_evento: el rol tiene que poder ESCRIBIR.
-      // `catalogo_rol_staff` define puede_administrar/puede_editar/puede_ver y
-      // hasta ahora nadie los leía, así que un rol de sólo consulta marcaba
-      // asistencia igual que el coordinador.
-      const staffRes = await client.query(
-        `SELECT r.puede_administrar, r.puede_editar
-           FROM staff_evento se
-           LEFT JOIN catalogo_rol_staff r ON se.id_rol = r.id_rol
-          WHERE se.id_evento = $1 AND se.id_miembro = $2`,
-        [eventoId, Number(guard.session.id)],
-      );
-      if (staffRes.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return NextResponse.json(
-          { success: false, error: 'No tienes permiso para registrar asistencia en este evento.' },
-          { status: 403 },
-        );
-      }
-      // Si la asignación no tiene rol (id_rol NULL) se conserva el comportamiento
-      // anterior y se permite: negarlo dejaría fuera al staff ya asignado sin rol.
-      const puedeEscribir = staffRes.rows.some(
-        (r) => r.puede_administrar === null || r.puede_administrar || r.puede_editar,
-      );
-      if (!puedeEscribir) {
-        await client.query('ROLLBACK');
-        return NextResponse.json(
-          { success: false, error: 'Tu rol en este evento es de solo consulta; no puedes registrar asistencia.' },
-          { status: 403 },
-        );
-      }
+    const auth = await autorizarStaffEvento(client, guard.session, eventoId);
+    if (!auth.ok) {
+      await client.query('ROLLBACK');
+      return NextResponse.json({ success: false, error: auth.error }, { status: auth.status });
     }
 
-    // Verify inscription exists and get details
-    const inscripcionRes = await client.query(`
-      SELECT
-        ie.id_inscripcion,
-        ie.id_evento,
-        ie.asistio,
-        ie.hora_registro_asistencia,
-        ie.pago_completado,
-        e.tiene_costo,
-        e.nombre as nombre_evento,
-        e.fecha_inicio,
-        e.hora_inicio,
-        e.hora_fin,
-        -- El ticket vale hasta 6 h después del fin del evento (margen para el
-        -- cierre). Comparado en SQL con la zona fija del club, no en JS.
-        ((${sqlFinEvento('e')} + INTERVAL '6 hours') < NOW()) AS ticket_vencido,
-        COALESCE(m.nombre || ' ' || m.apellido_paterno, i.nombre_completo) as nombre_completo,
-        COALESCE(m.correo_electronico, i.correo_electronico) as correo,
-        ie.estado
-      FROM inscripcion_evento ie
-      JOIN evento e ON ie.id_evento = e.id_evento
-      LEFT JOIN miembro m ON ie.id_miembro = m.id_miembro
-      LEFT JOIN invitado i ON ie.id_invitado = i.id_invitado
-      WHERE ie.id_inscripcion = $1 AND ie.id_evento = $2
-    `, [inscripcionId, eventoId]);
+    const inscripcion = await cargarInscripcionCheckin(client, inscripcionId, eventoId);
 
-    if (inscripcionRes.rows.length === 0) {
+    if (!inscripcion) {
       await client.query('ROLLBACK');
       return NextResponse.json({
         success: false,
         error: 'Inscripción no encontrada'
       }, { status: 404 });
     }
-
-    const inscripcion = inscripcionRes.rows[0];
 
     if (inscripcion.estado === 'cancelada') {
       await client.query('ROLLBACK');
@@ -206,7 +138,28 @@ export async function POST(request) {
       }, { status: 402 });
     }
 
-    // Check if already attended
+    const base = {
+      tipo: inscripcion.tipo,
+      nombre: inscripcion.nombre_completo,
+      correo: inscripcion.correo,
+      evento: inscripcion.nombre_evento,
+      fecha_evento: inscripcion.fecha_inicio,
+      solicitar_talla: Boolean(inscripcion.solicitar_talla),
+    };
+
+    // Equipo: el escaneo no escribe nada; devuelve el roster para que el staff
+    // marque asistencia y entrega de playera persona por persona.
+    if (inscripcion.tipo === 'equipo') {
+      await client.query('ROLLBACK');
+      const roster = await cargarRosterEquipo(client, inscripcion.id_equipo);
+      return NextResponse.json({
+        success: true,
+        alreadyRegistered: false,
+        message: 'Equipo verificado',
+        data: { ...base, equipo: roster },
+      });
+    }
+
     if (inscripcion.asistio) {
       await client.query('ROLLBACK');
       return NextResponse.json({
@@ -214,14 +167,16 @@ export async function POST(request) {
         alreadyRegistered: true,
         message: 'Asistencia ya registrada previamente',
         data: {
-          nombre: inscripcion.nombre_completo,
-          evento: inscripcion.nombre_evento,
-          fecha_registro: inscripcion.hora_registro_asistencia
+          ...base,
+          fecha_registro: inscripcion.hora_registro_asistencia,
+          talla_playera: inscripcion.talla_playera,
+          playera_entregada: inscripcion.playera_entregada,
+          hora_entrega_playera: inscripcion.hora_entrega_playera,
         }
       });
     }
 
-    // Mark attendance
+    // Primera vez: se marca la asistencia.
     const attendanceTime = new Date();
     await client.query(`
       UPDATE inscripcion_evento
@@ -238,11 +193,11 @@ export async function POST(request) {
       alreadyRegistered: false,
       message: 'Asistencia registrada exitosamente',
       data: {
-        nombre: inscripcion.nombre_completo,
-        correo: inscripcion.correo,
-        evento: inscripcion.nombre_evento,
-        fecha_evento: inscripcion.fecha_inicio,
-        fecha_registro: attendanceTime
+        ...base,
+        fecha_registro: attendanceTime,
+        talla_playera: inscripcion.talla_playera,
+        playera_entregada: inscripcion.playera_entregada,
+        hora_entrega_playera: inscripcion.hora_entrega_playera,
       }
     });
 

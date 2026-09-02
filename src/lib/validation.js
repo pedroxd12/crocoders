@@ -1,5 +1,10 @@
 import { z } from 'zod';
 import { PLATAFORMAS, limpiarUsuario } from './plataformas';
+import { TALLAS_PLAYERA, NIVELES_ESTUDIO_VALUES } from './registro-campos';
+
+// Talla de playera: los valores válidos viven en registro-campos.js y coinciden
+// con los CHECK de la base (invitado/miembro.talla_playera).
+const tallaSchema = z.enum(TALLAS_PLAYERA, { message: 'Talla de playera no válida' });
 
 const emailSchema = z.string().trim().toLowerCase().email('Email no válido').max(200);
 const phoneSchema = z.string().trim().regex(/^[0-9]{10,15}$/, 'Teléfono debe tener 10-15 dígitos');
@@ -28,7 +33,12 @@ export const integranteSchema = z.object({
   telefono: optionalString(20),
   institucion: optionalString(150),
   carrera: optionalString(150),
+  // Sólo alumnos del ITLAC (el formulario lo pide al elegir esa institución).
+  numero_control: optionalString(20),
   semestre: z.union([z.string(), z.number()]).optional().nullable(),
+  // Obligatoria sólo cuando el evento tiene `solicitar_talla` (lo comprueba el
+  // endpoint contra la fila del evento, no el esquema).
+  talla_playera: z.union([tallaSchema, z.literal('')]).optional(),
   es_capitan: z.boolean().optional().default(false),
   es_miembro: z.boolean().optional(),
 });
@@ -38,6 +48,10 @@ export const asesorSchema = z.object({
   email: z.union([emailSchema, z.literal('')]).optional(),
   telefono: optionalString(20),
   institucion: optionalString(150),
+  // Al asesor también se le entrega playera cuando el evento la da. Sin esta
+  // clave zod la descartaba (descarta las desconocidas) y la talla no llegaba
+  // nunca a asesor_equipo.
+  talla_playera: z.union([tallaSchema, z.literal('')]).optional(),
 });
 
 export const equipoSchema = z.object({
@@ -48,6 +62,9 @@ export const eventoRegisterSchema = z.discriminatedUnion('tipo', [
   z.object({
     tipo: z.literal('miembro'),
     eventoId: z.coerce.number().int().positive(),
+    // La pide el flujo cuando el evento tiene `solicitar_talla`; se guarda en
+    // la ficha del miembro.
+    talla_playera: tallaSchema.optional(),
   }),
   z.object({
     tipo: z.literal('invitado'),
@@ -60,7 +77,10 @@ export const eventoRegisterSchema = z.discriminatedUnion('tipo', [
     eventoId: z.coerce.number().int().positive(),
     equipo: equipoSchema,
     integrantes: z.array(integranteSchema).min(1).max(10),
+    // `asesores` es la forma actual (hasta concurso.max_asesores); `asesor`
+    // se acepta por compatibilidad con clientes viejos (equivale a [asesor]).
     asesor: asesorSchema.optional().nullable(),
+    asesores: z.array(asesorSchema).max(5).optional(),
   }),
 ]);
 
@@ -71,7 +91,12 @@ export const invitadoSchema = z.object({
   numero_telefono: z.union([phoneSchema, z.literal('')]).optional(),
   escuela_institucion: optionalString(255),
   carrera: optionalString(100),
+  // Sólo alumnos del ITLAC (el formulario lo pide al elegir esa institución).
+  numero_control: optionalString(20),
   semestre: z.coerce.number().int().min(1).max(14).optional().nullable(),
+  nivel_estudios: z.enum(NIVELES_ESTUDIO_VALUES, { message: 'Nivel de estudios no válido' }).optional(),
+  edad: z.coerce.number().int().min(5, 'Edad no válida').max(120, 'Edad no válida').optional().nullable(),
+  talla_playera: tallaSchema.optional(),
 });
 
 // Tipos de evidencia válidos (coincide con el CHECK de la tabla `evidencia`).
@@ -193,6 +218,8 @@ export const programaRegisterSchema = z.discriminatedUnion('tipo', [
   z.object({
     tipo: z.literal('miembro'),
     programaId: z.coerce.number().int().positive(),
+    // Igual que en eventos: se pide cuando el programa tiene `solicitar_talla`.
+    talla_playera: tallaSchema.optional(),
   }),
   z.object({
     tipo: z.literal('invitado'),
@@ -200,6 +227,44 @@ export const programaRegisterSchema = z.discriminatedUnion('tipo', [
     userId: z.coerce.number().int().positive(),
   }),
 ]);
+
+// Comprobante de pago de una inscripción a un evento con costo (migración 013).
+// El archivo YA está en UploadThing cuando llega este payload: esto valida sólo
+// la metadata. `qrToken` es la credencial firmada del inscrito (ver
+// src/lib/comprobantes-pago.js); viaja en el cuerpo porque quien sube el
+// comprobante puede no tener cuenta.
+export const comprobantePagoSchema = z.object({
+  qrToken: z.string().trim().min(1, 'Falta la credencial de la inscripción').max(4096),
+  imagen_url: z.string().trim().url('La URL de la imagen no es válida').max(500),
+  imagen_key: z.string().trim().min(1, 'Falta la clave del archivo').max(255),
+  nombre_archivo: optionalString(255),
+  // Folio o referencia de la transferencia, tal cual lo teclea quien paga.
+  referencia: optionalString(120),
+  monto_declarado: z.coerce
+    .number('El monto no es válido')
+    .min(0, 'El monto no puede ser negativo')
+    .max(1000000, 'El monto no es válido')
+    .optional()
+    .nullable(),
+});
+
+// Revisión del comprobante por staff o administrador. Rechazar EXIGE motivo:
+// sin él, quien pagó recibe un "rechazado" sin saber qué corregir y vuelve a
+// subir el mismo archivo.
+export const comprobanteRevisionSchema = z
+  .object({
+    estado: z.enum(['aprobado', 'rechazado', 'pendiente'], { message: 'Estado de revisión no válido' }),
+    motivo_rechazo: z.string().trim().max(500, 'Máximo 500 caracteres').optional().or(z.literal('')),
+  })
+  .superRefine((d, ctx) => {
+    if (d.estado === 'rechazado' && !d.motivo_rechazo) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['motivo_rechazo'],
+        message: 'Indica por qué se rechaza el comprobante',
+      });
+    }
+  });
 
 // El mensaje de error viaja tal cual hasta un toast del usuario, así que el
 // prefijo no puede ser el nombre técnico de la columna ("usuario_codeforces:").
@@ -223,9 +288,18 @@ const ETIQUETAS_CAMPO = {
   es_computer_society: 'Afiliación',
   nombre_completo: 'Nombre completo',
   escuela_institucion: 'Escuela o institución',
+  institucion: 'Institución',
+  numero_control: 'Número de control',
+  nivel_estudios: 'Nivel de estudios',
+  edad: 'Edad',
+  talla_playera: 'Talla de playera',
   titulo: 'Título',
   descripcion: 'Descripción',
   imagen_url: 'Imagen',
+  qrToken: 'Credencial de la inscripción',
+  referencia: 'Referencia del pago',
+  monto_declarado: 'Monto pagado',
+  motivo_rechazo: 'Motivo del rechazo',
 };
 
 /**

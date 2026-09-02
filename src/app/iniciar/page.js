@@ -23,21 +23,16 @@ import Select from '@/components/ui/Select';
 import Button from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import PasswordField, { fuerzaContrasena, FUERZA_MINIMA } from './components/PasswordField';
+import { CARRERAS_ITLAC } from '@/lib/registro-campos';
 import styles from './page.module.css';
 
 /* ---------------------------------------------------------------------------
    Datos fijos, fuera del componente para no recrearlos en cada render.
 --------------------------------------------------------------------------- */
 
-const CARRERAS = [
-  'Ingeniería en Sistemas Computacionales',
-  'Ingeniería en Electrónica',
-  'Ingeniería Industrial',
-  'Ingeniería Química',
-  'Ingeniería en Logística',
-  'Ingeniería en Mecatrónica',
-  'Otra',
-];
+// Catálogo compartido con los formularios de inscripción a eventos (única
+// fuente de las carreras del ITLAC); "Otra" es propio de este formulario.
+const CARRERAS = [...CARRERAS_ITLAC, 'Otra'];
 
 // La BD acepta 1..14 (miembro_semestre_actual_check) y el servidor valida
 // min(1).max(14). El desplegable ofrecía solo 1..10, así que un alumno de 11º

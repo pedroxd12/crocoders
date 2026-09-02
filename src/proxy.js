@@ -16,6 +16,7 @@ const PUBLIC_PATHS = [
   '/contacto',
   '/puntajes',
   '/evidencias',
+  '/hackaitlac',
   '/favicon.ico',
 ];
 
@@ -37,12 +38,13 @@ const PUBLIC_PATH_PREFIXES = [
   '/teclado/',
   '/capitulo/',
   '/club/',
+  '/hackaitlac/',
 ];
 
 // El matcher excluye archivos estáticos para que el proxy ni se invoque en ellos.
 export const config = {
   matcher: [
-    '/((?!api|_next/static|_next/image|_next/data|favicon.ico|img/|fonts/|teclado/|evidencia/|capitulo/|club/|uploads/|video/).*)',
+    '/((?!api|_next/static|_next/image|_next/data|favicon.ico|img/|fonts/|teclado/|evidencia/|capitulo/|club/|uploads/|video/|hackaitlac/).*)',
   ],
 };
 

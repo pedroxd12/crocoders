@@ -34,12 +34,23 @@ const SQL_EVENTOS_PUBLICOS = `
     (e.fecha_limite_registro AT TIME ZONE '${ZONA_EVENTOS}') AS fecha_limite_registro,
     ${sqlRegistroCerrado('e')} AS registro_cerrado,
     ${sqlEventoTerminado('e')} AS evento_terminado,
+    e.tiene_costo,
     e.costo,
+    e.instrucciones_pago,
     e.cupos,
     e.ubicacion,
     e.cupos_disponibles,
     e.imagen_flyer_url as imagen_url,
     e.estado,
+    e.solicitar_talla,
+    -- Datos de concurso: la tarjeta necesita saber si el evento se inscribe por
+    -- equipos para mandar ese flujo al detalle (el formulario de equipo vive
+    -- allí) en lugar de abrir el registro individual genérico.
+    t.permite_equipos,
+    c.id_concurso,
+    c.modalidad,
+    c.min_integrantes_equipo,
+    c.max_integrantes_equipo,
     (
       SELECT COALESCE(SUM(
                CASE WHEN ie.id_equipo IS NOT NULL
@@ -52,6 +63,7 @@ const SQL_EVENTOS_PUBLICOS = `
   FROM evento e
   JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
   JOIN catalogo_alcance_evento a ON e.id_alcance = a.id_alcance
+  LEFT JOIN concurso c ON e.id_evento = c.id_evento
   WHERE e.estado IN ('publicado', 'en_curso')
     AND e.deleted_at IS NULL
     AND e.listable = TRUE
