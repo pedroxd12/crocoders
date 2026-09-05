@@ -1,11 +1,17 @@
+import { cookies } from 'next/headers';
+import { notFound } from 'next/navigation';
+
 import HackaitlacLanding from '@/components/hackaitlac/HackaitlacLanding';
 import { DESAFIOS_FALLBACK } from '@/components/hackaitlac/desafios-fallback';
 import { obtenerLandingEvento } from '@/lib/hackaitlac';
+import { HACKAITLAC_PUBLICA } from '@/lib/hackaitlac-publica';
+import { COOKIE_SESION, verifyToken } from '@/lib/auth';
+import { APP_ROLES } from '@/lib/roles';
 
 const description =
   'Hackatón de 24 horas del Instituto Tecnológico de Lázaro Cárdenas. Desafíos reales de la industria y el gobierno de la región, equipos de estudiantes y premio al primer lugar de cada desafío.';
 
-export const metadata = {
+const metadataPublica = {
   title: 'HackaItlac 2026 — Segunda Edición',
   description,
   keywords: [
@@ -36,6 +42,17 @@ export const metadata = {
   },
 };
 
+// Mientras la convocatoria esté oculta (ver src/lib/hackaitlac-publica.js) no se
+// publica NADA de ella en las etiquetas de la página: ni el título ni la imagen
+// de previsualización, que es justo lo que copian los buscadores y lo que
+// desplegarían WhatsApp o Twitter al pegar el enlace. Sólo queda el `noindex`.
+export async function generateMetadata() {
+  if (!HACKAITLAC_PUBLICA) {
+    return { robots: { index: false, follow: false, googleBot: { index: false, follow: false } } };
+  }
+  return metadataPublica;
+}
+
 export const viewport = {
   themeColor: '#0A1E49',
 };
@@ -46,7 +63,28 @@ export const viewport = {
 // cupos congelados hasta el siguiente despliegue.
 export const dynamic = 'force-dynamic';
 
+/**
+ * Vista previa para el panel: con la página oculta, un administrador con sesión
+ * sigue pudiendo abrirla para revisar la convocatoria.
+ *
+ * Basta con verificar la firma del JWT (no se revalida contra la base como en
+ * `requireAuth`): esto no protege datos, sólo decide si se enseña una landing
+ * que aún no se ha anunciado.
+ */
+async function puedeVerPreestreno() {
+  const token = (await cookies()).get(COOKIE_SESION.name)?.value;
+  if (!token) return false;
+  const usuario = await verifyToken(token);
+  return usuario?.role === APP_ROLES.ADMIN;
+}
+
 export default async function HackaitlacPage() {
+  // Con la convocatoria oculta la página no existe para el público: 404 de
+  // verdad, antes de tocar la base de datos.
+  if (!HACKAITLAC_PUBLICA && !(await puedeVerPreestreno())) {
+    notFound();
+  }
+
   // El evento que alimenta esta página es el que el panel marcó con
   // `slug = 'hackaitlac'` (campo «Identificador de página propia»).
   let datos = null;

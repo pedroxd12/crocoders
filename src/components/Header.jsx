@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import styles from "./Header.module.css";
 import { useAuth } from "@/context/AuthContext";
+import { HACKAITLAC_PUBLICA } from "@/lib/hackaitlac-publica";
+import { APP_ROLES } from "@/lib/roles";
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
@@ -206,11 +208,19 @@ export default function Header() {
                   <span>IV</span> Programas
                 </Link>
               </div>
-              <div className={styles.menuItem}>
-                <Link href="/hackaitlac" onClick={handleLinkClick}>
-                  <span>V</span> HackaItlac
-                </Link>
-              </div>
+              {/* La convocatoria del HackaItlac está oculta hasta que se
+                  anuncie (src/lib/hackaitlac-publica.js). Mientras tanto el
+                  enlace sólo aparece para los administradores, que son los
+                  únicos a quienes /hackaitlac responde con la página en vez de
+                  un 404, y se marca como oculta para que nadie la comparta
+                  creyendo que ya es pública. */}
+              {(HACKAITLAC_PUBLICA || (isMounted && user?.role === APP_ROLES.ADMIN)) && (
+                <div className={styles.menuItem}>
+                  <Link href="/hackaitlac" onClick={handleLinkClick}>
+                    <span>V</span> HackaItlac{HACKAITLAC_PUBLICA ? "" : " (oculta)"}
+                  </Link>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -16,6 +16,10 @@ const PUBLIC_PATHS = [
   '/contacto',
   '/puntajes',
   '/evidencias',
+  // Sigue listada como pública aunque la convocatoria esté oculta: así quien
+  // la abra sin sesión llega a la página, que responde 404 (ver
+  // src/lib/hackaitlac-publica.js). Si se quitara de aquí, el proxy la mandaría
+  // a /iniciar y ese "inicia sesión" delataría que la página existe.
   '/hackaitlac',
   '/favicon.ico',
 ];
