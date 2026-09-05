@@ -9,13 +9,17 @@ import {
   invitadoSchema, equipoSchema, integranteSchema, asesorSchema, parseOrError,
 } from '@/lib/validation';
 import { TALLAS_PLAYERA } from '@/lib/registro-campos';
+import { MAX_INTEGRANTES_EQUIPO, MAX_ASESORES_EQUIPO } from '@/lib/concurso-reglas';
+import { esPorEquipos } from '@/lib/aforo';
+import { firmarQrToken } from '@/lib/qr-token';
+import { enviarConfirmacionEvento } from '@/lib/correo-inscripcion';
 
 // Mismo contrato que el flujo público de equipos, validado con las mismas
 // piezas zod (los CHECK de la base son los mismos venga de donde venga).
 const equipoPayloadSchema = z.object({
   equipo: equipoSchema,
-  integrantes: z.array(integranteSchema).min(1).max(10),
-  asesores: z.array(asesorSchema).max(5).optional(),
+  integrantes: z.array(integranteSchema).min(1).max(MAX_INTEGRANTES_EQUIPO),
+  asesores: z.array(asesorSchema).max(MAX_ASESORES_EQUIPO).optional(),
 });
 
 // POST: un administrador inscribe manualmente en un evento. Debe pedir los
@@ -28,6 +32,8 @@ const equipoPayloadSchema = z.object({
 //     con la diferencia de que el admin no tiene que formar parte del equipo.
 // `forzar` permite registrar por encima del aforo (se amplía `cupos` para que
 // el número no mienta); `pago_completado` marca el cobro en eventos con costo.
+// Al terminar se envía el correo con el ticket QR (a todo el equipo si lo es),
+// salvo que el admin mande `enviar_correo: false`.
 export async function POST(request) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
@@ -40,6 +46,7 @@ export async function POST(request) {
   }
 
   const { id_evento, id_usuario, tipo_usuario, forzar, pago_completado, id_reto } = body;
+  const enviarCorreo = body.enviar_correo !== false;
 
   const eventoId = Number(id_evento);
   if (!Number.isInteger(eventoId) || eventoId <= 0) {
@@ -58,6 +65,16 @@ export async function POST(request) {
     : null;
   if (tallaPayload && !TALLAS_PLAYERA.includes(tallaPayload)) {
     return NextResponse.json({ error: 'Talla de playera no válida' }, { status: 400 });
+  }
+
+  // El ticket se emite dentro de la transacción: sin secreto no hay registro.
+  const payloadSecret = process.env.PAYLOAD_SECRET;
+  if (!payloadSecret) {
+    console.error('PAYLOAD_SECRET no configurado: no se puede emitir el QR de inscripción.');
+    return NextResponse.json(
+      { error: 'El servidor no está configurado para emitir el ticket de acceso.', code: 'QR_SECRET_MISSING' },
+      { status: 500 },
+    );
   }
 
   const client = await connectWithRetry();
@@ -86,6 +103,17 @@ export async function POST(request) {
     }
 
     const evento = eventRes.rows[0];
+    const porEquipos = esPorEquipos(evento);
+
+    // Misma regla que el flujo público: en un concurso por equipos sólo entran
+    // equipos (una persona suelta ocuparía el cupo de un equipo entero).
+    if (porEquipos && tipo_usuario !== 'equipo') {
+      await client.query('ROLLBACK');
+      return NextResponse.json(
+        { error: 'Este evento se inscribe por equipos: usa el formulario de equipo.' },
+        { status: 400 },
+      );
+    }
 
     // Para eventos con costo, el pago lo marca explícitamente el admin.
     // Coherencia con el registro público: en un evento con costo la inscripción
@@ -121,14 +149,14 @@ export async function POST(request) {
 
       const resuelto = await resolverEquipo(client, evento, datosEquipo, { capitanId: null });
 
+      // Un equipo ocupa UN cupo (el aforo de un concurso por equipos se cuenta
+      // en equipos, src/lib/aforo.js).
       if (!forzar) {
-        const disponibilidad = await verificarDisponibilidad(
-          client, eventoId, evento.cupos, resuelto.lugaresSolicitados,
-        );
+        const disponibilidad = await verificarDisponibilidad(client, eventoId, evento.cupos);
         if (!disponibilidad.cabe) {
           await client.query('ROLLBACK');
           return NextResponse.json({
-            error: `No hay cupos suficientes: quedan ${disponibilidad.libres} lugares y el equipo necesita ${resuelto.lugaresSolicitados}.`,
+            error: 'Ya no hay cupo para más equipos. Marca «Forzar registro» para inscribirlo de todos modos.',
           }, { status: 400 });
         }
       }
@@ -289,11 +317,9 @@ export async function POST(request) {
 
       // 5. Cupos. El admin puede forzar (forzar=true) por encima del aforo.
       //    La disponibilidad se calcula contra las INSCRIPCIONES REALES, no
-      //    contra el contador `cupos_disponibles`: éste podía venir desfasado
-      //    y, además, `null <= 0` daba true, así que los eventos de aforo
-      //    ilimitado (cupos IS NULL) rechazaban cualquier alta.
+      //    contra el contador `cupos_disponibles`.
       if (!forzar) {
-        const disponibilidad = await verificarDisponibilidad(client, eventoId, evento.cupos, 1);
+        const disponibilidad = await verificarDisponibilidad(client, eventoId, evento.cupos);
         if (!disponibilidad.cabe) {
           await client.query('ROLLBACK');
           return NextResponse.json({ error: 'El evento ya no tiene cupos disponibles' }, { status: 400 });
@@ -319,12 +345,12 @@ export async function POST(request) {
         );
         inscripcionId = ins.rows[0].id_inscripcion;
       } else if (existing.rows[0].estado === 'cancelada') {
-        // Reactivar una inscripción cancelada.
+        // Reactivar una inscripción cancelada (la mesa anterior ya no vale).
         inscripcionId = existing.rows[0].id_inscripcion;
         await client.query(
           `UPDATE inscripcion_evento
               SET estado = $3, fecha_inscripcion = NOW(),
-                  requiere_pago = $4, pago_completado = $2, id_reto = $5, updated_at = NOW()
+                  requiere_pago = $4, pago_completado = $2, id_reto = $5, mesa = NULL, updated_at = NOW()
             WHERE id_inscripcion = $1`,
           [inscripcionId, pago, estadoInicial, requierePago, reto.idReto],
         );
@@ -343,13 +369,30 @@ export async function POST(request) {
     //    trigger no descontaba al forzar (sólo lo hacía con cupos_disponibles>0)
     //    pero sí devolvía +1 sin tope al cancelar, y el evento acababa con cupos
     //    fantasma que volvían a admitir gente que no cabía.
-    const { lugares_ocupados: ocupados } = await recalcularCupos(client, eventoId);
-    if (forzar && evento.cupos !== null && ocupados > Number(evento.cupos)) {
-      await client.query('UPDATE evento SET cupos = $2, updated_at = NOW() WHERE id_evento = $1', [eventoId, ocupados]);
-      await recalcularCupos(client, eventoId);
+    //    OJO: si el aforo lo dictan los desafíos, `recalcularCupos` lo vuelve a
+    //    derivar de ellos y el forzado queda como sobrecupo (disponibles = 0).
+    let cupos = await recalcularCupos(client, eventoId);
+    if (forzar && cupos.cupo_por_retos == null && cupos.cupos !== null && cupos.lugares_ocupados > Number(cupos.cupos)) {
+      await client.query('UPDATE evento SET cupos = $2, updated_at = NOW() WHERE id_evento = $1', [eventoId, cupos.lugares_ocupados]);
+      cupos = await recalcularCupos(client, eventoId);
     }
 
+    const qrToken = firmarQrToken({ id: inscripcionId, eid: eventoId, ts: Date.now() }, payloadSecret);
+
     await client.query('COMMIT');
+
+    // Correo con el ticket, ya con la inscripción confirmada en la base. Un
+    // fallo del SMTP no deshace el registro: se informa y el admin puede
+    // reenviarlo desde la lista.
+    let correo = { ok: false, enviados: 0, fallidos: 0, destinatarios: 0, motivo: 'no solicitado' };
+    if (enviarCorreo) {
+      try {
+        correo = await enviarConfirmacionEvento({ inscripcionId, eventoId, qrToken });
+      } catch (error) {
+        console.error('Admin register: no se pudo enviar la confirmación:', error.message);
+        correo = { ok: false, enviados: 0, fallidos: 1, destinatarios: 0, motivo: error.message };
+      }
+    }
 
     return NextResponse.json({
       message: tipo_usuario === 'equipo' ? 'Equipo registrado exitosamente' : 'Usuario registrado exitosamente',
@@ -357,6 +400,10 @@ export async function POST(request) {
       estado_inscripcion: estadoInicial,
       requiere_pago: requierePago,
       id_reto: reto.idReto,
+      qrToken,
+      correo,
+      lugares_ocupados: cupos.lugares_ocupados,
+      cupos: cupos.cupos,
     });
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch {}

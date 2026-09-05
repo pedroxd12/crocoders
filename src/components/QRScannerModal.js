@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
-import { ScanLine, Keyboard, CircleCheck, CircleX, CameraOff, Check, ClipboardPaste } from 'lucide-react';
+import { ScanLine, Keyboard, CircleCheck, CircleX, CameraOff, Check, ClipboardPaste, MapPin } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { formatearFechaHora } from '@/lib/fechas';
 
@@ -608,6 +608,11 @@ export default function QRScannerModal({ isOpen, onClose, onSuccess, onUpdate, e
                   {esPrograma ? datos.programa : datos.evento}
                   {esPrograma && etiquetaSesion ? ` · ${etiquetaSesion}` : ''}
                 </p>
+                {datos.mesa && (
+                  <p className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-info/30 bg-info-soft px-2 py-1 text-sm font-semibold text-info">
+                    <MapPin size={14} aria-hidden="true" /> {datos.mesa}
+                  </p>
+                )}
                 {result.alreadyRegistered && datos.fecha_registro && (
                   <p className="mt-2 text-xs text-warning">
                     Ya se había registrado el {formatearFechaHora(datos.fecha_registro)}
@@ -676,6 +681,11 @@ export default function QRScannerModal({ isOpen, onClose, onSuccess, onUpdate, e
                   </p>
                 </div>
                 <p className="mt-0.5 text-sm text-muted">{datos.evento}</p>
+                {datos.mesa && (
+                  <p className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-info/30 bg-info-soft px-2 py-1 text-sm font-semibold text-info">
+                    <MapPin size={14} aria-hidden="true" /> {datos.mesa}
+                  </p>
+                )}
 
                 <ul className="mt-3 divide-y divide-line border-t border-line">
                   {integrantes.map((p) => filaPersona(p, 'integrante'))}

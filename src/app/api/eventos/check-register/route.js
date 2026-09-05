@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db-server';
 import { requireAuth } from '@/lib/auth';
+import { firmarQrToken } from '@/lib/qr-token';
 
 export async function GET(request) {
   const auth = await requireAuth(request);
@@ -19,8 +20,11 @@ export async function GET(request) {
       );
     }
 
+    // Inscripción directa o como integrante de un equipo. Además del id se
+    // devuelve la mesa asignada y, en equipos, el nombre del equipo: es lo que
+    // el ticket de la ficha pública muestra al participante.
     const registros = await sql`
-      SELECT DISTINCT ie.id_inscripcion, ie.id_evento, ie.fecha_inscripcion
+      SELECT ie.id_inscripcion, ie.id_evento, ie.fecha_inscripcion, ie.mesa, NULL::text AS nombre_equipo
       FROM inscripcion_evento ie
       WHERE ie.id_evento = ${eventoId}
         AND ie.id_miembro = ${userId}
@@ -28,7 +32,7 @@ export async function GET(request) {
 
       UNION
 
-      SELECT DISTINCT ie.id_inscripcion, ie.id_evento, ie.fecha_inscripcion
+      SELECT ie.id_inscripcion, ie.id_evento, ie.fecha_inscripcion, ie.mesa, eq.nombre_equipo
       FROM inscripcion_evento ie
       INNER JOIN equipo_concurso eq ON ie.id_equipo = eq.id_equipo
       INNER JOIN integrante_equipo int_eq ON eq.id_equipo = int_eq.id_equipo
@@ -43,7 +47,6 @@ export async function GET(request) {
 
     let qrToken = null;
     if (registro) {
-         const crypto = await import('crypto');
          const secret = process.env.PAYLOAD_SECRET;
          if (secret) {
              // El `ts` alimenta el control anti-replay de verify-qr (que ya no
@@ -55,20 +58,18 @@ export async function GET(request) {
              //  - además el QR debe seguir siendo válido cuando el usuario abre su
              //    ticket días después de inscribirse, no expirar 24h tras la inscripción.
              // Se genera fresco en cada lectura, igual que en /api/eventos/register.
-             const ts = Date.now();
-             const qrPayload = JSON.stringify({
-                 id: registro.id_inscripcion,
-                 eid: registro.id_evento,
-                 ts: ts
-             });
-             const hash = crypto.createHmac('sha256', secret).update(qrPayload).digest('hex');
-             qrToken = Buffer.from(JSON.stringify({ data: qrPayload, sig: hash })).toString('base64');
+             qrToken = firmarQrToken(
+               { id: registro.id_inscripcion, eid: registro.id_evento, ts: Date.now() },
+               secret,
+             );
          }
     }
 
     return NextResponse.json({
       registered: !!registro,
-      qrToken: qrToken
+      qrToken: qrToken,
+      mesa: registro?.mesa ?? null,
+      nombre_equipo: registro?.nombre_equipo ?? null,
     });
 
   } catch (error) {

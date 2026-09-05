@@ -5,9 +5,10 @@ import { useParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { toast } from 'react-toastify';
 import {
-  ArrowLeft, Download, QrCode, Receipt, Search, Shirt, UserPlus, UserRoundCheck, Users,
+  ArrowLeft, Download, LayoutGrid, Mail, QrCode, Receipt, Search, Shirt, UserPlus, UserRoundCheck, Users,
 } from 'lucide-react';
 import Button from '@/components/ui/Button';
+import IconButton from '@/components/ui/IconButton';
 import Input from '@/components/ui/Input';
 import Select from '@/components/ui/Select';
 import Table from '@/components/ui/Table';
@@ -17,17 +18,19 @@ import EmptyState from '@/components/ui/EmptyState';
 import QRScannerModal from '@/components/QRScannerModal';
 import RegistroManualModal from '@/components/admin/RegistroManualModal';
 import ComprobanteRevisionModal from '@/components/eventos/ComprobanteRevisionModal';
-import FichaEvento, { esPorEquipos } from '@/components/asistentes/FichaEvento';
+import FichaEvento from '@/components/asistentes/FichaEvento';
 import ResumenTallas from '@/components/asistentes/ResumenTallas';
 import ResumenRetos from '@/components/asistentes/ResumenRetos';
 import EquipoModal from '@/components/asistentes/EquipoModal';
+import AsignarMesasModal from '@/components/asistentes/AsignarMesasModal';
 import { useMarcasInscripcion, ModalConfirmarPago } from '@/components/asistentes/MarcasInscripcion';
 import {
-  colNombre, colCorreo, colTipo, colDesafio, colPerfil, colTalla, colPlayera,
+  colNombre, colCorreo, colTipo, colDesafio, colPerfil, colTalla, colPlayera, colMesa,
   colAsistencia, colPago, colComprobante,
 } from '@/components/asistentes/columnas';
 import { fetcher } from '@/lib/fetcher';
 import { formatearFechaDia } from '@/lib/fechas';
+import { esPorEquipos, UNIDAD_AFORO, unidadAforo } from '@/lib/aforo';
 import {
   resumenAsistentes, filtrosDisponibles, aplicarFiltro, coincideBusqueda,
   filasCsvAsistentes, descargarCsv, nombreArchivoCsv,
@@ -39,10 +42,10 @@ import {
  * La tabla se adapta a la configuración del evento: en concursos por equipos
  * cada fila es un equipo y se abre su roster; la talla y la playera sólo
  * aparecen si el evento las pide; el pago y el comprobante sólo si tiene
- * costo; el desafío sólo si el evento reparte por retos. Arriba, la ficha con
- * los datos generales y el resumen de tallas para pedir las playeras. Las
- * columnas y los cálculos son los MISMOS que ve el staff
- * (src/components/asistentes, src/lib/asistentes-resumen.js).
+ * costo; el desafío sólo si el evento reparte por retos; la mesa sólo si el
+ * evento las asigna. Arriba, la ficha con los datos generales y el resumen de
+ * tallas para pedir las playeras. Las columnas y los cálculos son los MISMOS
+ * que ve el staff (src/components/asistentes, src/lib/asistentes-resumen.js).
  */
 export default function EventoAsistentes() {
   const { id } = useParams();
@@ -50,7 +53,7 @@ export default function EventoAsistentes() {
 
   // El evento se pide por su propia vía: un evento sin inscritos también
   // necesita cabecera y ficha.
-  const { data: evento } = useSWR(id ? `/api/admin/eventos/${id}` : null, fetcher, {
+  const { data: evento, mutate: mutarEvento } = useSWR(id ? `/api/admin/eventos/${id}` : null, fetcher, {
     revalidateOnFocus: false,
   });
 
@@ -66,20 +69,24 @@ export default function EventoAsistentes() {
   const lista = useMemo(() => (Array.isArray(asistentes) ? asistentes : []), [asistentes]);
   const resumen = useMemo(() => resumenAsistentes(lista), [lista]);
   const porEquipos = esPorEquipos(evento);
+  const unidad = UNIDAD_AFORO[unidadAforo(evento)];
   // ¿Reparte por desafíos? Lo dice el evento; si aún no cargó, las propias
   // inscripciones (en cuanto una trae reto, la columna tiene sentido).
   const hayRetos = useMemo(
     () => Number(evento?.total_retos) > 0 || lista.some((a) => a.id_reto != null),
     [evento, lista],
   );
+  const conMesas = Boolean(evento?.asignar_mesas);
 
   const [busqueda, setBusqueda] = useState('');
   const [filtro, setFiltro] = useState('');
   const [registroAbierto, setRegistroAbierto] = useState(false);
   const [escanerAbierto, setEscanerAbierto] = useState(false);
+  const [mesasAbierto, setMesasAbierto] = useState(false);
   // Fila cuyo comprobante se revisa / equipo que se está viendo (null = cerrado).
   const [comprobanteAbierto, setComprobanteAbierto] = useState(null);
   const [equipoAbierto, setEquipoAbierto] = useState(null);
+  const [reenviando, setReenviando] = useState(null);
 
   // Parche local de una fila: el servidor ya devolvió el resultado, no hace
   // falta volver a pedir la lista entera (la de un evento grande es cara).
@@ -105,8 +112,44 @@ export default function EventoAsistentes() {
       conTalla: Boolean(evento?.solicitar_talla),
       conCosto: Boolean(evento?.tiene_costo),
       conRetos: hayRetos,
+      conMesas,
     });
     descargarCsv(nombreArchivoCsv(evento?.nombre), cabeceras, filas);
+  };
+
+  // Reenvío del ticket QR por correo (a todo el equipo si lo es): el envío
+  // automático puede fallar y un invitado sin cuenta no tiene otra vía.
+  const reenviarTicket = async (fila) => {
+    setReenviando(fila.id_inscripcion);
+    try {
+      const res = await fetch(`/api/admin/inscripciones/${fila.id_inscripcion}/reenviar-ticket`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'No se pudo reenviar el ticket');
+      const c = data.correo || {};
+      toast.success(
+        c.destinatarios > 1
+          ? `Ticket enviado a ${c.enviados} de ${c.destinatarios} personas del equipo.`
+          : 'Ticket enviado por correo.',
+      );
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setReenviando(null);
+    }
+  };
+
+  const colReenvio = {
+    header: 'Ticket',
+    align: 'center',
+    render: (fila) => (
+      <IconButton
+        icon={Mail}
+        label={porEquipos && fila.tipo === 'equipo' ? 'Reenviar el ticket a todo el equipo' : 'Reenviar el ticket por correo'}
+        tone="info"
+        disabled={reenviando === fila.id_inscripcion}
+        onClick={() => reenviarTicket(fila)}
+      />
+    ),
   };
 
   const columnas = [
@@ -114,6 +157,7 @@ export default function EventoAsistentes() {
     colCorreo,
     colTipo,
     ...(hayRetos ? [colDesafio] : []),
+    ...(conMesas ? [colMesa({ puedeEditar: true, onGuardar: marcas.guardarMesa })] : []),
     colPerfil,
     ...(evento?.solicitar_talla ? [colTalla, colPlayera] : []),
     ...(evento?.tiene_costo
@@ -123,9 +167,11 @@ export default function EventoAsistentes() {
         ]
       : []),
     colAsistencia({ puedeMarcar: true, onToggle: marcas.toggleAsistencia }),
+    colReenvio,
   ];
 
   const pctLlegadas = resumen.personas ? Math.round((resumen.asistieron / resumen.personas) * 100) : 0;
+  const sinMesa = conMesas ? lista.filter((a) => !a.mesa).length : 0;
 
   return (
     <div>
@@ -141,11 +187,16 @@ export default function EventoAsistentes() {
             <Button variant="secondary" onClick={exportar} disabled={lista.length === 0} title="Una fila por persona, con talla y estado">
               <Download size={16} aria-hidden="true" /> Exportar CSV
             </Button>
+            {conMesas && (
+              <Button variant="secondary" onClick={() => setMesasAbierto(true)} disabled={lista.length === 0}>
+                <LayoutGrid size={16} aria-hidden="true" /> Asignar mesas
+              </Button>
+            )}
             <Button variant="secondary" onClick={() => setEscanerAbierto(true)}>
               <QrCode size={16} aria-hidden="true" /> Escanear QR
             </Button>
             <Button onClick={() => setRegistroAbierto(true)}>
-              <UserPlus size={16} aria-hidden="true" /> Registrar manualmente
+              <UserPlus size={16} aria-hidden="true" /> {porEquipos ? 'Registrar equipo' : 'Registrar manualmente'}
             </Button>
           </>
         }
@@ -156,14 +207,14 @@ export default function EventoAsistentes() {
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
           icon={Users}
-          label="Inscripciones"
+          label={porEquipos ? 'Equipos inscritos' : 'Inscripciones'}
           value={resumen.inscripciones}
           tone="info"
           hint={
             porEquipos
-              ? `${resumen.equipos} ${resumen.equipos === 1 ? 'equipo' : 'equipos'} · ${resumen.personas} personas${
+              ? `${resumen.personas} personas${
                   resumen.asesores ? ` · ${resumen.asesores} ${resumen.asesores === 1 ? 'asesor' : 'asesores'}` : ''
-                }`
+                }${evento?.cupos != null ? ` · aforo ${evento.cupos} ${unidad.plural}` : ''}`
               : `${resumen.porTipo.miembro} miembros · ${resumen.porTipo.invitado} invitados`
           }
         />
@@ -196,6 +247,15 @@ export default function EventoAsistentes() {
             }
           />
         )}
+        {conMesas && !evento?.tiene_costo && (
+          <StatCard
+            icon={LayoutGrid}
+            label="Mesas asignadas"
+            value={`${lista.length - sinMesa}/${lista.length}`}
+            tone="neutral"
+            hint={sinMesa > 0 ? `${sinMesa} sin mesa` : lista.length ? 'Todas asignadas' : undefined}
+          />
+        )}
       </div>
 
       {evento?.solicitar_talla && <ResumenTallas resumen={resumen} className="mb-6" />}
@@ -204,7 +264,7 @@ export default function EventoAsistentes() {
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end">
         <Input
           type="search"
-          placeholder={porEquipos ? 'Buscar equipo, integrante, correo o desafío…' : 'Buscar por nombre, correo o número IEEE…'}
+          placeholder={porEquipos ? 'Buscar equipo, integrante, correo, mesa o desafío…' : 'Buscar por nombre, correo, mesa o número IEEE…'}
           value={busqueda}
           onChange={(e) => setBusqueda(e.target.value)}
           icon={<Search size={16} />}
@@ -253,7 +313,10 @@ export default function EventoAsistentes() {
         evento={evento}
         eventoId={id}
         asistentes={lista}
-        onRegistered={() => mutarAsistentes()}
+        onRegistered={() => {
+          mutarAsistentes();
+          mutarEvento();
+        }}
       />
 
       <ModalConfirmarPago marcas={marcas} />
@@ -263,6 +326,17 @@ export default function EventoAsistentes() {
         conTalla={Boolean(evento?.solicitar_talla)}
         onClose={() => setEquipoAbierto(null)}
       />
+
+      {conMesas && (
+        <AsignarMesasModal
+          isOpen={mesasAbierto}
+          onClose={() => setMesasAbierto(false)}
+          evento={evento}
+          eventoId={id}
+          hayRetos={hayRetos}
+          onAsignado={() => mutarAsistentes()}
+        />
+      )}
 
       {/* Revisión del comprobante: la misma pantalla que usa el panel de staff. */}
       <ComprobanteRevisionModal

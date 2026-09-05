@@ -159,6 +159,7 @@ const FILTROS = [
   { value: 'comprobante_pendiente', label: 'Comprobante por revisar', requiere: 'costo' },
   { value: 'sin_talla', label: 'Falta alguna talla', requiere: 'talla' },
   { value: 'playera_pendiente', label: 'Playera sin entregar', requiere: 'talla' },
+  { value: 'sin_mesa', label: 'Sin mesa asignada', requiere: 'mesas' },
 ];
 
 /** Filtros que tienen sentido para este evento (según costo y talla). */
@@ -167,7 +168,8 @@ export function filtrosDisponibles(evento) {
     (f) =>
       !f.requiere ||
       (f.requiere === 'costo' && evento?.tiene_costo) ||
-      (f.requiere === 'talla' && evento?.solicitar_talla),
+      (f.requiere === 'talla' && evento?.solicitar_talla) ||
+      (f.requiere === 'mesas' && evento?.asignar_mesas),
   );
 }
 
@@ -187,6 +189,8 @@ export function aplicarFiltro(filas, filtro) {
       return lista.filter((f) => personasDeFila(f).some((p) => p.rol !== 'asesor' && !p.talla_playera));
     case 'playera_pendiente':
       return lista.filter((f) => personasDeFila(f).some((p) => !p.playera_entregada));
+    case 'sin_mesa':
+      return lista.filter((f) => !f.mesa);
     default:
       return lista;
   }
@@ -204,6 +208,7 @@ export function coincideBusqueda(fila, termino) {
   if (fila.correo?.toLowerCase().includes(q)) return true;
   if (fila.numero_ieee && String(fila.numero_ieee).includes(q)) return true;
   if (fila.reto_titulo?.toLowerCase().includes(q)) return true;
+  if (fila.mesa && String(fila.mesa).toLowerCase().includes(q)) return true;
   if (!esEquipo(fila)) return false;
   return personasDeFila(fila).some(
     (p) => p.nombre?.toLowerCase().includes(q) || p.correo?.toLowerCase().includes(q),
@@ -223,7 +228,7 @@ const ETIQUETA_TIPO_PERSONA = {
  * necesita para pedir playeras, imprimir gafetes o pasar lista en la mesa.
  * Las columnas de talla, pago y desafío sólo aparecen si el evento las usa.
  */
-export function filasCsvAsistentes(filas, { conTalla = false, conCosto = false, conRetos = false } = {}) {
+export function filasCsvAsistentes(filas, { conTalla = false, conCosto = false, conRetos = false, conMesas = false } = {}) {
   const cabeceras = [
     'Inscripción',
     'Tipo de inscripción',
@@ -233,6 +238,7 @@ export function filasCsvAsistentes(filas, { conTalla = false, conCosto = false, 
     'Origen',
     'Institución',
     ...(conRetos ? ['Desafío'] : []),
+    ...(conMesas ? ['Mesa'] : []),
     ...(conTalla ? ['Talla', 'Playera entregada'] : []),
     'Llegó',
     ...(conCosto ? ['Pago', 'Comprobante'] : []),
@@ -258,6 +264,7 @@ export function filasCsvAsistentes(filas, { conTalla = false, conCosto = false, 
         ETIQUETA_TIPO_PERSONA[p.tipo] || p.tipo || '',
         p.institucion || '',
         ...(conRetos ? [fila.reto_titulo || ''] : []),
+        ...(conMesas ? [fila.mesa || ''] : []),
         ...(conTalla ? [p.talla_playera || '', si(p.playera_entregada)] : []),
         si(p.asistio),
         ...(conCosto

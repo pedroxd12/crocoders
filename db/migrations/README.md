@@ -41,6 +41,7 @@ Léelo antes de tocar la base.
 | `012_numero_control_invitado.sql` | **aplicada** (2026-09-01) | `invitado.numero_control` para alumnos del ITLAC |
 | `013_comprobante_pago.sql` | **aplicada** (2026-09-02) | tabla `comprobante_pago` (imagen del pago por inscripción, estado y revisor) + `evento.instrucciones_pago` |
 | `014_retos_evento.sql` | **aplicada** (2026-09-02) | tabla `reto_evento` (desafíos con cupo propio de equipos), `inscripcion_evento.id_reto` y `evento.slug` |
+| `015_aforo_equipos_ganadores_mesas_documentos.sql` | **aplicada** (2026-09-02) | unidad del aforo documentada (equipos en concursos por equipos), `asignar_mesas` + `mesa` (eventos y programas), `evento.resultados_publicados`, tablas `ganador_evento` y `plantilla_documento` |
 
 ## Triggers activos en producción (verificado)
 
@@ -60,6 +61,16 @@ escribieron endpoints que ajustaban los cupos a mano, duplicando el descuento:
 El cupo de un reto (`reto_evento.cupo_equipos`) NO tiene contador
 denormalizado ni trigger: se deriva siempre de las inscripciones reales en
 `src/lib/retos.js`. Es a propósito, por lo que costó `evento.cupos_disponibles`.
+
+## Unidad del aforo (desde la 015)
+
+`evento.cupos` cuenta INSCRIPCIONES: en un concurso por equipos una inscripción
+es un equipo (un equipo de 3 ocupa 1 cupo), en el resto es una persona. Si
+todos los desafíos activos tienen cupo, `evento.cupos` se deriva de su suma en
+`recalcularCupos` (src/lib/eventos-cupos.js), que corre al final de cada
+registro, baja, edición del evento y alta/edición/baja de desafíos. El trigger
+`trigger_actualizar_cupos` (±1 por inscripción) coincide con esa unidad, pero
+`recalcularCupos` sigue siendo quien manda.
 
 ## Nota sobre `pago` vs `comprobante_pago`
 

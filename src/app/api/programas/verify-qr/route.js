@@ -102,6 +102,7 @@ export async function POST(request) {
           ip.estado,
           ip.playera_entregada,
           ip.hora_entrega_playera,
+          ip.mesa,
           p.nombre AS nombre_programa,
           p.solicitar_talla,
           -- El ticket vale hasta 6 h después del último día del programa
@@ -148,6 +149,7 @@ export async function POST(request) {
       tipo: inscripcion.tipo,
       nombre: inscripcion.nombre_completo,
       correo: inscripcion.correo,
+      mesa: inscripcion.mesa ?? null,
       programa: inscripcion.nombre_programa,
       sesion: {
         numero: sesion.numero_sesion,

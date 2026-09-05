@@ -63,6 +63,8 @@ const SQL_ASISTENTES = `
         e.tiene_costo AS requiere_pago,
         e.solicitar_talla,
         ie.fecha_inscripcion,
+        -- Mesa o lugar asignado (migración 015); NULL si no hay.
+        ie.mesa,
         ie.id_miembro,
         ie.id_invitado,
         ie.id_equipo,

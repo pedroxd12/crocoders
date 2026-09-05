@@ -35,6 +35,7 @@ export async function GET(request) {
         pr.imagen_url,
         pr.activo,
         pr.solicitar_talla,
+        pr.asignar_mesas,
         pr.dias_semana,
         pr.hora_inicio,
         pr.hora_fin,
@@ -85,6 +86,7 @@ export async function POST(request) {
       hora_fin,
       activo,
       solicitar_talla,
+      asignar_mesas,
     } = await request.json();
 
     if (!nombre) return NextResponse.json({ error: 'El nombre del programa es obligatorio.' }, { status: 400 });
@@ -121,8 +123,8 @@ export async function POST(request) {
         nombre, descripcion, fecha_inicio, fecha_fin,
         id_tipo_evento, id_alcance, sesiones_requeridas_certificado,
         porcentaje_asistencia_minimo, ubicacion, imagen_url,
-        dias_semana, hora_inicio, hora_fin, activo, solicitar_talla
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        dias_semana, hora_inicio, hora_fin, activo, solicitar_talla, asignar_mesas
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING *`,
       [
         nombre,
@@ -143,6 +145,7 @@ export async function POST(request) {
         hora_fin || null,
         typeof activo === 'boolean' ? activo : true,
         Boolean(solicitar_talla),
+        Boolean(asignar_mesas),
       ],
     );
 

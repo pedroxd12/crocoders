@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { Check, Users, X } from 'lucide-react';
 import Badge from '@/components/ui/Badge';
 import { NIVELES_ESTUDIO } from '@/lib/registro-campos';
@@ -145,6 +146,73 @@ export const colPlayera = {
       <span className="text-xs text-faint">—</span>
     ),
 };
+
+/**
+ * Mesa o lugar. Editable en línea (Enter o al salir del campo guarda; vacío
+ * la quita). Se remonta con `key` cuando el servidor cambia el valor, así el
+ * estado local nunca pisa una asignación hecha desde otro sitio.
+ */
+export function MesaEditable({ valor, onGuardar, deshabilitado = false, placeholder = 'Sin mesa' }) {
+  const [texto, setTexto] = useState(valor ?? '');
+  const [guardando, setGuardando] = useState(false);
+
+  const confirmar = async () => {
+    const limpio = texto.trim().slice(0, 40);
+    if (limpio === (valor ?? '')) return;
+    setGuardando(true);
+    try {
+      await onGuardar(limpio || null);
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      value={texto}
+      onChange={(e) => setTexto(e.target.value)}
+      onBlur={confirmar}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          setTexto(valor ?? '');
+          e.currentTarget.blur();
+        }
+      }}
+      disabled={deshabilitado || guardando}
+      placeholder={placeholder}
+      maxLength={40}
+      aria-label="Mesa o lugar asignado"
+      title="Escribe la mesa y pulsa Enter"
+      className={`h-8 w-24 rounded-md border px-2 text-center text-xs tabular-nums transition-colors focus:outline-none focus:ring-2 focus:ring-brand/25 ${
+        texto ? 'border-info/30 bg-info-soft font-semibold text-info' : 'border-dashed border-line bg-transparent text-faint'
+      } disabled:opacity-60`}
+    />
+  );
+}
+
+/** Mesa asignada; editable en línea sólo si `puedeEditar`. */
+export function colMesa({ puedeEditar = false, onGuardar } = {}) {
+  return {
+    header: 'Mesa',
+    align: 'center',
+    render: (fila) =>
+      puedeEditar ? (
+        <MesaEditable
+          key={`${fila.id_inscripcion}-${fila.mesa ?? ''}`}
+          valor={fila.mesa}
+          onGuardar={(mesa) => onGuardar?.(fila, mesa)}
+        />
+      ) : fila.mesa ? (
+        <Badge tone="info">{fila.mesa}</Badge>
+      ) : (
+        <span className="text-xs text-faint">—</span>
+      ),
+  };
+}
 
 export const colFechaInscripcion = {
   header: 'Se inscribió',

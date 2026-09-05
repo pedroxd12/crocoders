@@ -5,8 +5,9 @@
 // 150 cupos, 147 "disponibles" y UNA sola inscripción) y hasta ahora no había
 // forma de repararlo: el panel sólo recalculaba al cambiar el número de cupos.
 //
-// La fuente de verdad son las inscripciones reales, contando los integrantes de
-// cada equipo. Ver src/lib/eventos-cupos.js.
+// La fuente de verdad son las inscripciones reales (equipos en concursos por
+// equipos, personas en el resto) y, si dictan el aforo, los cupos de los
+// desafíos. Ver src/lib/eventos-cupos.js.
 import { NextResponse } from 'next/server';
 import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
@@ -46,10 +47,11 @@ export async function POST(request, context) {
       success: true,
       message: anterior === resultado.cupos_disponibles
         ? 'El aforo ya estaba al día.'
-        : `Aforo corregido: de ${anterior} a ${resultado.cupos_disponibles} lugares disponibles.`,
+        : `Aforo corregido: de ${anterior} a ${resultado.cupos_disponibles} cupos disponibles.`,
       cupos: resultado.cupos,
       cupos_disponibles: resultado.cupos_disponibles,
       lugares_ocupados: resultado.lugares_ocupados,
+      cupo_por_retos: resultado.cupo_por_retos,
       cupos_disponibles_anterior: anterior,
     });
   } catch (error) {

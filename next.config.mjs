@@ -21,7 +21,9 @@ const CSP_DIRECTIVES = [
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'self'",
-  "frame-src 'none'",
+  // 'self' y blob: para la vista previa de las plantillas de certificados y
+  // gafetes (un PDF generado en memoria que se muestra dentro de un <iframe>).
+  "frame-src 'self' blob:",
   "form-action 'self'",
   "manifest-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:",

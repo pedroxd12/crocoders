@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 import { sanitizeHtml } from '@/lib/sanitize';
-import { UTApi } from "uploadthing/server";
+import { deleteFromUploadThing } from '@/lib/uploadthing-server';
 import { rangoFechasInvalido } from '@/lib/programas-fechas';
 import {
   validarDiasSemana,
@@ -12,17 +12,6 @@ import {
   renumerarSesiones,
   recalcularEstadisticasPrograma,
 } from '@/lib/programas-db';
-
-const utapi = new UTApi();
-
-async function deleteFromUploadThing(keys) {
-  if (!keys || keys.length === 0) return;
-  try {
-    await utapi.deleteFiles(keys);
-  } catch (e) {
-    console.error('Error eliminando archivos de UploadThing:', e);
-  }
-}
 
 // Un id no numérico llegaba a Postgres y explotaba con 22P02 → 500. Es un 400.
 function idInvalido(id) {
@@ -54,6 +43,7 @@ const SELECT_PROGRAMA = `
     -- ni el formulario de edición ni el panel de asistencia sabían si el
     -- programa entrega playera.
     pr.solicitar_talla,
+    pr.asignar_mesas,
     pr.created_at,
     pr.updated_at,
     te.nombre AS tipo_evento,
@@ -121,6 +111,7 @@ export async function PUT(request, { params }) {
       imagen_url,
       activo,
       solicitar_talla,
+      asignar_mesas,
       // El formulario SÍ enviaba estos tres campos, pero el PUT los descartaba en
       // silencio: se guardaba "Programa actualizado" y el horario seguía igual.
       dias_semana,
@@ -175,6 +166,7 @@ export async function PUT(request, { params }) {
         imagen_url = $10,
         activo = COALESCE($11, activo),
         solicitar_talla = COALESCE($12, solicitar_talla),
+        asignar_mesas = COALESCE($20, asignar_mesas),
         -- Solo se sobrescribe el horario si el cuerpo lo trae: un cliente que no
         -- envíe estos campos no debe borrar el horario ya guardado. Y cuando sí
         -- los trae, un array vacío significa "sin días", no "no tocar".
@@ -204,6 +196,7 @@ export async function PUT(request, { params }) {
         hora_fin !== undefined,
         hora_fin || null,
         id,
+        typeof asignar_mesas === 'boolean' ? asignar_mesas : null,
       ],
     );
 

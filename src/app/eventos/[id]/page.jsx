@@ -29,24 +29,14 @@ import {
 import ComprobantePagoModal, { EstadoPago } from '@/components/eventos/ComprobantePago';
 import { TALLAS_PLAYERA, CARRERAS_ITLAC } from '@/lib/registro-campos';
 import { fetcher, postFetcher } from '@/lib/fetcher';
+import { enviarCorreoConfirmacion } from '@/lib/confirmacion-cliente';
+import { esPorEquipos, ocupacionDeEvento, UNIDAD_AFORO, textoRestantes } from '@/lib/aforo';
 import { formatearFechaLarga, formatearHora, aDiaISO, combinarFechaHora } from '@/lib/fechas';
 import {
   Calendar, Clock, ArrowLeft, UserPlus,
   LogIn, AlertTriangle, Loader, PartyPopper, QrCode, Trash2, Plus,
-  Eye as EyeIcon, MapPin, Receipt, Target
+  Eye as EyeIcon, MapPin, Receipt, Target, Trophy
 } from 'lucide-react';
-
-async function sendEventRegistrationEmail(email, name, eventDetails, qrToken) {
-  const response = await fetch('/api/confirmation', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, name, eventDetails, qrToken }),
-  });
-  if (!response.ok) {
-    const result = await response.json().catch(() => ({}));
-    throw new Error(result.error || 'No se pudo enviar el correo de confirmación');
-  }
-}
 
 function EventoDetalleContent() {
   const { id } = useParams();
@@ -61,6 +51,9 @@ function EventoDetalleContent() {
   
   const [isRegistered, setIsRegistered] = useState(false);
   const [qrToken, setQrToken] = useState(null);
+  // Mesa y equipo de MI inscripción (los devuelve check-register): se enseñan
+  // en el ticket para que la persona sepa a dónde ir al llegar.
+  const [miInscripcion, setMiInscripcion] = useState({ mesa: null, nombre_equipo: null });
   // Imagen del QR (data URL) generada por nuestro propio backend.
   const [qrImage, setQrImage] = useState(null);
   const [registrationCheckLoading, setRegistrationCheckLoading] = useState(true);
@@ -115,9 +108,7 @@ function EventoDetalleContent() {
   // mostraba "Inscribir Equipo" sin ninguna vía de inscripción individual, y un
   // evento sin concurso llevaba a un modal cuyo envío siempre fallaba con
   // "Configuración de concurso no encontrada".
-  const esRegistroPorEquipos = Boolean(
-    evento?.permite_equipos && evento?.id_concurso && evento?.modalidad === 'equipos'
-  );
+  const esRegistroPorEquipos = esPorEquipos(evento);
 
   // Rango de integrantes real del concurso, en un solo sitio. Antes había tres
   // valores por defecto distintos (1, 2 y 5) repartidos por el archivo, así que
@@ -245,6 +236,7 @@ function EventoDetalleContent() {
         if (data.registered && data.qrToken) {
             setQrToken(data.qrToken);
         }
+        setMiInscripcion({ mesa: data.mesa ?? null, nombre_equipo: data.nombre_equipo ?? null });
       }
     } catch (err) {
       setIsRegistered(false);
@@ -412,16 +404,21 @@ function EventoDetalleContent() {
       setShowTallaModal(false);
       setShowRetoModal(false);
 
-      // Enviar correo (no bloquea la UI; si falla, avisa al usuario)
-      if (!isCancellation) {
-         sendEventRegistrationEmail(
-            isAuthenticated ? user.correo_electronico : (payload.guestData?.correo_electronico || payload.integrantes?.[0]?.email),
-            isAuthenticated ? user.nombre_completo : (payload.guestData?.nombre_completo || payload.integrantes?.[0]?.nombre),
-            result.event || evento,
-            result.qrToken
-         ).catch(() => {
+      // Enviar correo (no bloquea la UI; si falla, avisa al usuario). En un
+      // equipo el servidor manda el ticket a cada integrante y asesor.
+      if (!isCancellation && result.qrToken) {
+         enviarCorreoConfirmacion(result.qrToken)
+           .then(({ enviados, destinatarios }) => {
+             if (type === 'register_team' && destinatarios > 1) {
+               toast.info(`Ticket enviado a ${enviados} de ${destinatarios} personas del equipo.`, { theme: 'dark' });
+             }
+           })
+           .catch(() => {
             toast.warning('Tu inscripción se realizó, pero no pudimos enviarte el correo de confirmación.', { theme: 'dark' });
          });
+      }
+      if (type === 'register_team') {
+        setMiInscripcion({ mesa: null, nombre_equipo: payload.equipo?.nombre ?? null });
       }
 
     } catch (error) {
@@ -622,10 +619,14 @@ function EventoDetalleContent() {
   // `isPastEvent` entra en la condición: hasta ahora sólo servía para pintar el
   // badge "Finalizado" y el botón seguía activo, así que se podía uno inscribir
   // a un evento terminado y recibir por correo el QR de acceso.
+  // Aforo en la unidad del evento: equipos en concursos por equipos, personas
+  // en el resto (src/lib/aforo.js).
+  const ocupacion = ocupacionDeEvento(evento);
+  const unidadAforoTexto = UNIDAD_AFORO[ocupacion.unidad];
   const canParticipate =
     !evento.isPastEvent
     && !evento.registroCerrado
-    && (evento.cupos === null || evento.cupos_disponibles > 0)
+    && !ocupacion.lleno
     // Los cupos por desafío son un tope independiente del aforo: si no queda
     // plaza en ninguno, no hay dónde inscribirse.
     && !retosLlenos;
@@ -909,33 +910,30 @@ function EventoDetalleContent() {
                        ("147/150 disponibles" = barra llena de verde), que
                        comunicaba justo lo contrario. */}
                    <div className="mb-6 pb-6 border-b border-line">
-                       {evento.cupos === null ? (
+                       {ocupacion.cupos === null ? (
                            <div className="flex justify-between items-center">
                                <span className="text-muted font-medium">Aforo</span>
-                               <span className="font-bold text-fg">Ilimitado</span>
+                               <span className="font-bold text-fg">
+                                   {esRegistroPorEquipos ? 'Equipos ilimitados' : 'Ilimitado'}
+                               </span>
                            </div>
                        ) : (() => {
-                           const cupos = Number(evento.cupos);
-                           const ocupados = Math.min(
-                             cupos,
-                             Number(evento.lugares_ocupados ?? Math.max(0, cupos - (evento.cupos_disponibles ?? 0))),
-                           );
-                           const libres = Math.max(0, cupos - ocupados);
-                           const pct = Math.max(0, Math.min(100, (ocupados / cupos) * 100));
+                           const { cupos, libres, porcentaje: pct } = ocupacion;
+                           const ocupados = Math.min(cupos, ocupacion.ocupados);
                            const colorBarra = libres === 0 ? 'bg-danger' : pct >= 80 ? 'bg-warning' : 'bg-brand';
                            return (
                                <>
                                    <div className="flex justify-between items-baseline mb-2">
                                        <span className="text-muted font-medium">Aforo</span>
                                        <span className="text-sm text-muted">
-                                           <span className="text-xl font-bold text-fg">{ocupados}</span> de {cupos} inscritos
+                                           <span className="text-xl font-bold text-fg">{ocupados}</span> de {cupos} {unidadAforoTexto.inscritos}
                                        </span>
                                    </div>
                                    <div className="w-full bg-surface-2 h-2 rounded-full overflow-hidden">
                                        <div className={`${colorBarra} h-full transition-all`} style={{ width: `${pct}%` }} />
                                    </div>
                                    <p className={`mt-2 text-xs ${libres === 0 ? 'text-danger' : libres <= cupos * 0.2 ? 'text-warning' : 'text-faint'}`}>
-                                       {libres === 0 ? 'No quedan lugares' : `Quedan ${libres} lugares`}
+                                       {textoRestantes(libres, ocupacion.unidad)}
                                    </p>
                                </>
                            );
@@ -970,7 +968,7 @@ function EventoDetalleContent() {
                               : retosLlenos
                                 ? 'Desafíos llenos'
                               : !canParticipate
-                                ? 'Cupos Agotados'
+                                ? (esRegistroPorEquipos ? 'Sin cupo para más equipos' : 'Cupos Agotados')
                                 : esRegistroPorEquipos
                                   ? 'Inscribir Equipo'
                                   : 'Inscribirme Ahora'}
@@ -979,6 +977,17 @@ function EventoDetalleContent() {
                     {isRegistered && (
                         <Button onClick={abrirTicket} variant="secondary" className="w-full py-3 flex items-center justify-center">
                             <QrCode className="mr-2" size={18}/> Ver Ticket de Acceso
+                        </Button>
+                    )}
+
+                    {/* Resultados publicados por administración (migración 015). */}
+                    {evento.resultados_publicados && (
+                        <Button
+                            onClick={() => router.push(`/eventos/${evento.id_evento}/ganadores`)}
+                            variant="secondary"
+                            className="mt-3 w-full py-3 flex items-center justify-center"
+                        >
+                            <Trophy className="mr-2 text-warning" size={18}/> Ver ganadores
                         </Button>
                     )}
 
@@ -1161,9 +1170,19 @@ function EventoDetalleContent() {
                   <Loader className="animate-spin text-black" size={32} />
                 )}
               </div>
+              {miInscripcion.nombre_equipo && (
+                <p className="mt-3 text-center text-sm font-semibold text-black">Equipo: {miInscripcion.nombre_equipo}</p>
+              )}
+              {miInscripcion.mesa && (
+                <p className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-black px-3 py-1 text-sm font-bold text-white">
+                  <MapPin size={14} aria-hidden="true" /> {miInscripcion.mesa}
+                </p>
+              )}
               <p className="text-black text-sm mt-4 text-center">
                 {qrImageSrc
-                  ? 'Presenta este código al ingresar al evento.'
+                  ? (miInscripcion.nombre_equipo
+                      ? 'Es el ticket de todo el equipo: preséntenlo al ingresar y el staff registrará a cada integrante.'
+                      : 'Presenta este código al ingresar al evento.')
                   : 'Generando tu código de acceso…'}
               </p>
           </div>

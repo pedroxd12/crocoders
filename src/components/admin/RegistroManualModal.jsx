@@ -22,6 +22,7 @@ import {
 import { rangoEquipos } from '@/components/eventos/EventoBadges';
 import { TALLAS_PLAYERA } from '@/lib/registro-campos';
 import { fetcher } from '@/lib/fetcher';
+import { esPorEquipos } from '@/lib/aforo';
 
 /**
  * Registro manual de asistentes desde el panel admin.
@@ -47,9 +48,8 @@ const ASESOR_VACIO = { nombre: '', email: '', telefono: '', talla_playera: '' };
 const MAX_RESULTADOS = 50;
 
 export default function RegistroManualModal({ isOpen, onClose, evento, eventoId, asistentes = [], onRegistered }) {
-  // Mismas TRES condiciones que `esRegistroPorEquipos` en el detalle público
-  // (src/app/eventos/[id]/page.jsx); si cambian en un lado, cambiar el otro.
-  const esEquipos = Boolean(evento?.permite_equipos && evento?.id_concurso && evento?.modalidad === 'equipos');
+  // Las mismas tres condiciones que el detalle público (src/lib/aforo.js).
+  const esEquipos = esPorEquipos(evento);
   const solicitarTalla = Boolean(evento?.solicitar_talla);
   const minEq = Math.max(1, Number(evento?.min_integrantes_equipo) || 1);
   const maxEq = Number(evento?.max_integrantes_equipo) || null;
@@ -620,7 +620,10 @@ export default function RegistroManualModal({ isOpen, onClose, evento, eventoId,
               onChange={(e) => setForzar(e.target.checked)}
               className="mt-0.5 h-3.5 w-3.5 accent-brand"
             />
-            <span>Registrar aunque no queden cupos (el aforo del evento se ampliará para reflejarlo).</span>
+            <span>
+              Registrar aunque no quede cupo{esEquipos ? ' para más equipos' : ''} (el aforo del evento se ampliará para reflejarlo;
+              si lo definen los desafíos, quedará como sobrecupo).
+            </span>
           </label>
         )}
       </form>

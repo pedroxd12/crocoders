@@ -57,7 +57,21 @@ export function useMarcasInscripcion({ parchear }) {
     }
   }, [enviar, pagoAConfirmar, parchear]);
 
-  return { toggleAsistencia, pagoAConfirmar, setPagoAConfirmar, confirmarPago, guardando };
+  // Mesa o lugar (migración 015): texto corto, null para quitarla.
+  const guardarMesa = useCallback(
+    async (fila, mesa) => {
+      try {
+        const data = await enviar(fila.id_inscripcion, 'set_mesa', mesa);
+        parchear(fila.id_inscripcion, { mesa: data.mesa ?? null });
+        toast.success(data.mesa ? `Mesa asignada: ${data.mesa}` : 'Mesa retirada');
+      } catch (error) {
+        toast.error(error.message);
+      }
+    },
+    [enviar, parchear],
+  );
+
+  return { toggleAsistencia, pagoAConfirmar, setPagoAConfirmar, confirmarPago, guardando, guardarMesa };
 }
 
 /**

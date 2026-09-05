@@ -9,12 +9,22 @@
 --   db/migrations/003_evidencia_programa.sql
 --   db/migrations/004_hash_codigo_verificacion.sql
 --   db/migrations/005_puntajes_sync_avatar.sql
---   db/migrations/006_limpieza_esquema_muerto.sql
 --   db/migrations/007_talla_edad_nivel_estudios.sql
 --   db/migrations/008_asesores_concurso.sql
 --   db/migrations/009_checkin_playera.sql
 --   db/migrations/010_checkin_programas.sql
 --   db/migrations/011_talla_asesor.sql
+--   db/migrations/012_numero_control_invitado.sql
+--   db/migrations/013_comprobante_pago.sql
+--   db/migrations/014_retos_evento.sql
+--   db/migrations/015_aforo_equipos_ganadores_mesas_documentos.sql
+--
+-- La 006 (limpieza de esquema muerto) sigue PENDIENTE: este dump todavía trae
+-- `actividad_plataforma_semanal`, `v_actividad_semanal_actual`,
+-- `cuenta_plataforma.problemas_resueltos_semana` y las columnas de registro
+-- tardío de `concurso`. El encabezado anterior la daba por aplicada; no lo
+-- está (verificado contra la base el 2026-09-02). Dump regenerado el
+-- 2026-09-02 tras aplicar la 015.
 --
 -- Ver db/migrations/README.md para el estado de cada migración (aplicada o
 -- pendiente).
@@ -30,7 +40,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict nVZuqatNOXDG5yzhHH0JAbB2xsDT1IGBckw1qYoSJvZrLXpXaSHanVZv0hp0Ywl
+\restrict Cw5iEjYzkJmhNRYf9ank7xriUGh9bKdmtfGmbIWALdIIvtrAgHT0RYNRQONTarC
 
 -- Dumped from database version 17.11 (Debian 17.11-1.pgdg13+2)
 -- Dumped by pg_dump version 17.6
@@ -589,6 +599,57 @@ ALTER SEQUENCE public.catalogo_tipo_evento_id_tipo_evento_seq OWNED BY public.ca
 
 
 --
+-- Name: comprobante_pago; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.comprobante_pago (
+    id_comprobante integer NOT NULL,
+    id_inscripcion integer NOT NULL,
+    imagen_url character varying(500) NOT NULL,
+    imagen_key character varying(255) NOT NULL,
+    nombre_archivo character varying(255),
+    referencia character varying(120),
+    monto_declarado numeric(10,2),
+    estado character varying(20) DEFAULT 'pendiente'::character varying NOT NULL,
+    motivo_rechazo text,
+    subido_en timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    revisado_por integer,
+    revisado_en timestamp without time zone,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT comprobante_pago_estado_check CHECK (((estado)::text = ANY ((ARRAY['pendiente'::character varying, 'aprobado'::character varying, 'rechazado'::character varying])::text[]))),
+    CONSTRAINT comprobante_pago_monto_check CHECK (((monto_declarado IS NULL) OR (monto_declarado >= (0)::numeric)))
+);
+
+
+--
+-- Name: TABLE comprobante_pago; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.comprobante_pago IS 'Imagen del pago que sube quien se inscribe a un evento con costo; la valida el staff o un administrador.';
+
+
+--
+-- Name: comprobante_pago_id_comprobante_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.comprobante_pago_id_comprobante_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: comprobante_pago_id_comprobante_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.comprobante_pago_id_comprobante_seq OWNED BY public.comprobante_pago.id_comprobante;
+
+
+--
 -- Name: concurso; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -799,6 +860,10 @@ CREATE TABLE public.evento (
     fecha_limite_registro timestamp without time zone,
     listable boolean DEFAULT true NOT NULL,
     solicitar_talla boolean DEFAULT false NOT NULL,
+    instrucciones_pago text,
+    slug character varying(60),
+    asignar_mesas boolean DEFAULT false NOT NULL,
+    resultados_publicados boolean DEFAULT false NOT NULL,
     CONSTRAINT costo_requerido CHECK ((((tiene_costo = false) AND (costo = (0)::numeric)) OR ((tiene_costo = true) AND (costo > (0)::numeric)))),
     CONSTRAINT evento_costo_check CHECK ((costo >= (0)::numeric)),
     CONSTRAINT evento_cupos_check CHECK ((cupos > 0)),
@@ -806,6 +871,20 @@ CREATE TABLE public.evento (
     CONSTRAINT fecha_valida CHECK ((fecha_fin >= fecha_inicio)),
     CONSTRAINT hora_valida CHECK (((fecha_fin > fecha_inicio) OR ((fecha_fin = fecha_inicio) AND (hora_fin > hora_inicio))))
 );
+
+
+--
+-- Name: COLUMN evento.cupos; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.evento.cupos IS 'Aforo del evento. UNIDAD según modalidad: en concursos por equipos cuenta EQUIPOS (una inscripción = un equipo); en el resto cuenta PERSONAS. Si todos los desafíos activos tienen cupo, se deriva de su suma (src/lib/eventos-cupos.js). NULL = ilimitado.';
+
+
+--
+-- Name: COLUMN evento.cupos_disponibles; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.evento.cupos_disponibles IS 'Caché derivada de las inscripciones vivas (recalcularCupos). Misma unidad que cupos. No sumar ni restar a mano.';
 
 
 --
@@ -820,6 +899,34 @@ COMMENT ON COLUMN public.evento.fecha_limite_registro IS 'Fecha y hora límite p
 --
 
 COMMENT ON COLUMN public.evento.solicitar_talla IS 'Si es true, el formulario público de inscripción pide talla de playera (miembros, invitados y cada integrante de equipo).';
+
+
+--
+-- Name: COLUMN evento.instrucciones_pago; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.evento.instrucciones_pago IS 'Texto libre con los datos de pago (cuenta, referencia, dónde pagar en persona). Se muestra al inscribirse en eventos con tiene_costo.';
+
+
+--
+-- Name: COLUMN evento.slug; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.evento.slug IS 'Identificador estable para páginas propias del evento (p. ej. "hackaitlac", que alimenta /hackaitlac con sus retos). NULL en los eventos normales.';
+
+
+--
+-- Name: COLUMN evento.asignar_mesas; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.evento.asignar_mesas IS 'true = el evento reparte mesas/lugares: el panel muestra la columna y permite asignarlas.';
+
+
+--
+-- Name: COLUMN evento.resultados_publicados; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.evento.resultados_publicados IS 'true = los ganadores del evento se muestran en la web pública (/eventos/[id]/ganadores).';
 
 
 --
@@ -938,6 +1045,52 @@ ALTER SEQUENCE public.evidencia_id_evidencia_seq OWNED BY public.evidencia.id_ev
 
 
 --
+-- Name: ganador_evento; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ganador_evento (
+    id_ganador integer NOT NULL,
+    id_evento integer NOT NULL,
+    id_reto integer,
+    id_inscripcion integer NOT NULL,
+    posicion integer NOT NULL,
+    titulo character varying(120),
+    premio character varying(200),
+    notas text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT ganador_evento_posicion_check CHECK ((posicion > 0))
+);
+
+
+--
+-- Name: TABLE ganador_evento; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.ganador_evento IS 'Ganadores de un evento: por desafío (id_reto) o clasificación general (id_reto NULL). Apunta a la inscripción premiada (equipo o persona).';
+
+
+--
+-- Name: ganador_evento_id_ganador_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.ganador_evento_id_ganador_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: ganador_evento_id_ganador_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.ganador_evento_id_ganador_seq OWNED BY public.ganador_evento.id_ganador;
+
+
+--
 -- Name: inscripcion_evento; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -957,6 +1110,8 @@ CREATE TABLE public.inscripcion_evento (
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     playera_entregada boolean DEFAULT false NOT NULL,
     hora_entrega_playera timestamp without time zone,
+    id_reto integer,
+    mesa character varying(40),
     CONSTRAINT inscripcion_evento_estado_check CHECK (((estado)::text = ANY (ARRAY[('pendiente'::character varying)::text, ('confirmada'::character varying)::text, ('cancelada'::character varying)::text, ('en_espera'::character varying)::text]))),
     CONSTRAINT un_tipo_inscrito CHECK ((((((id_miembro IS NOT NULL))::integer + ((id_invitado IS NOT NULL))::integer) + ((id_equipo IS NOT NULL))::integer) = 1))
 );
@@ -981,6 +1136,20 @@ COMMENT ON COLUMN public.inscripcion_evento.requiere_pago IS 'Se determina autom
 --
 
 COMMENT ON COLUMN public.inscripcion_evento.playera_entregada IS 'Sólo para inscripciones de miembro/invitado; en equipos la entrega se lleva por integrante/asesor.';
+
+
+--
+-- Name: COLUMN inscripcion_evento.id_reto; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inscripcion_evento.id_reto IS 'Reto elegido por esta inscripción. NULL en eventos sin retos (o en inscripciones anteriores a que el evento tuviera).';
+
+
+--
+-- Name: COLUMN inscripcion_evento.mesa; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inscripcion_evento.mesa IS 'Mesa o lugar asignado a la inscripción (a todo el equipo en concursos por equipos). Texto libre corto.';
 
 
 --
@@ -1023,6 +1192,7 @@ CREATE TABLE public.inscripcion_programa (
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     playera_entregada boolean DEFAULT false NOT NULL,
     hora_entrega_playera timestamp without time zone,
+    mesa character varying(40),
     CONSTRAINT un_tipo_inscrito_programa CHECK (((((id_miembro IS NOT NULL))::integer + ((id_invitado IS NOT NULL))::integer) = 1))
 );
 
@@ -1039,6 +1209,13 @@ COMMENT ON TABLE public.inscripcion_programa IS 'Inscripciones a programas compl
 --
 
 COMMENT ON COLUMN public.inscripcion_programa.playera_entregada IS 'Entrega única por participante en todo el programa; se marca desde el escáner QR de una sesión.';
+
+
+--
+-- Name: COLUMN inscripcion_programa.mesa; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.inscripcion_programa.mesa IS 'Mesa o lugar asignado al participante durante todo el programa.';
 
 
 --
@@ -1117,11 +1294,19 @@ CREATE TABLE public.invitado (
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     edad integer,
     talla_playera character varying(5),
+    numero_control character varying(20),
     CONSTRAINT invitado_edad_check CHECK (((edad IS NULL) OR ((edad >= 5) AND (edad <= 120)))),
     CONSTRAINT invitado_nivel_estudios_check CHECK (((nivel_estudios IS NULL) OR ((nivel_estudios)::text = ANY (ARRAY['secundaria'::text, 'preparatoria'::text, 'universidad'::text, 'maestria'::text, 'otro'::text])))),
     CONSTRAINT invitado_semestre_check CHECK (((semestre >= 1) AND (semestre <= 14))),
     CONSTRAINT invitado_talla_playera_check CHECK (((talla_playera IS NULL) OR ((talla_playera)::text = ANY ((ARRAY['XS'::character varying, 'S'::character varying, 'M'::character varying, 'L'::character varying, 'XL'::character varying, 'XXL'::character varying, 'XXXL'::character varying])::text[]))))
 );
+
+
+--
+-- Name: COLUMN invitado.numero_control; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.invitado.numero_control IS 'Número de control institucional; se captura sólo cuando la persona es del Instituto Tecnológico de Lázaro Cárdenas.';
 
 
 --
@@ -1407,6 +1592,55 @@ ALTER SEQUENCE public.password_reset_token_id_token_seq OWNED BY public.password
 
 
 --
+-- Name: plantilla_documento; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.plantilla_documento (
+    id_plantilla integer NOT NULL,
+    id_evento integer,
+    id_programa integer,
+    tipo character varying(20) NOT NULL,
+    nombre character varying(120) NOT NULL,
+    pdf_url character varying(500) NOT NULL,
+    pdf_key character varying(255) NOT NULL,
+    pagina integer DEFAULT 1 NOT NULL,
+    campos jsonb DEFAULT '[]'::jsonb NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT plantilla_documento_pagina_check CHECK ((pagina >= 1)),
+    CONSTRAINT plantilla_documento_target_xor CHECK (((((id_evento IS NOT NULL))::integer + ((id_programa IS NOT NULL))::integer) = 1)),
+    CONSTRAINT plantilla_documento_tipo_check CHECK (((tipo)::text = ANY ((ARRAY['certificado'::character varying, 'gafete'::character varying, 'reconocimiento'::character varying])::text[])))
+);
+
+
+--
+-- Name: TABLE plantilla_documento; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.plantilla_documento IS 'Plantilla PDF de certificado/gafete/reconocimiento de un evento o programa, con la posición de cada dato. Los documentos se generan bajo demanda (src/lib/documentos-pdf.js).';
+
+
+--
+-- Name: plantilla_documento_id_plantilla_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.plantilla_documento_id_plantilla_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: plantilla_documento_id_plantilla_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.plantilla_documento_id_plantilla_seq OWNED BY public.plantilla_documento.id_plantilla;
+
+
+--
 -- Name: programa_recurrente; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1428,7 +1662,8 @@ CREATE TABLE public.programa_recurrente (
     dias_semana integer[],
     hora_inicio time without time zone,
     hora_fin time without time zone,
-    solicitar_talla boolean DEFAULT false NOT NULL
+    solicitar_talla boolean DEFAULT false NOT NULL,
+    asignar_mesas boolean DEFAULT false NOT NULL
 );
 
 
@@ -1458,6 +1693,13 @@ COMMENT ON COLUMN public.programa_recurrente.porcentaje_asistencia_minimo IS 'Po
 --
 
 COMMENT ON COLUMN public.programa_recurrente.solicitar_talla IS 'Si es true, el formulario público de inscripción pide talla de playera.';
+
+
+--
+-- Name: COLUMN programa_recurrente.asignar_mesas; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.programa_recurrente.asignar_mesas IS 'true = el programa reparte mesas/lugares a sus participantes.';
 
 
 --
@@ -1513,6 +1755,70 @@ CREATE SEQUENCE public.resultado_equipo_concurso_id_resultado_seq
 --
 
 ALTER SEQUENCE public.resultado_equipo_concurso_id_resultado_seq OWNED BY public.resultado_equipo_concurso.id_resultado;
+
+
+--
+-- Name: reto_evento; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.reto_evento (
+    id_reto integer NOT NULL,
+    id_evento integer NOT NULL,
+    slug character varying(80) NOT NULL,
+    titulo character varying(160) NOT NULL,
+    lede character varying(300),
+    resumen character varying(600),
+    descripcion text,
+    entregable text,
+    patrocinador character varying(160),
+    premio character varying(120),
+    tags text[] DEFAULT '{}'::text[] NOT NULL,
+    criterios text[] DEFAULT '{}'::text[] NOT NULL,
+    cupo_equipos integer,
+    imagen_url character varying(500),
+    imagen_key character varying(255),
+    tono smallint DEFAULT 1 NOT NULL,
+    orden integer DEFAULT 0 NOT NULL,
+    activo boolean DEFAULT true NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT reto_evento_cupo_check CHECK (((cupo_equipos IS NULL) OR (cupo_equipos > 0))),
+    CONSTRAINT reto_evento_tono_check CHECK (((tono >= 1) AND (tono <= 5)))
+);
+
+
+--
+-- Name: TABLE reto_evento; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.reto_evento IS 'Desafíos de un evento (hackatones y similares). Cada inscripción puede elegir uno y cada reto admite un número limitado de equipos.';
+
+
+--
+-- Name: COLUMN reto_evento.cupo_equipos; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.reto_evento.cupo_equipos IS 'Tope de INSCRIPCIONES en este reto (un equipo = 1, una persona = 1). Unidad distinta de evento.cupos, que se mide en personas. NULL = sin tope.';
+
+
+--
+-- Name: reto_evento_id_reto_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.reto_evento_id_reto_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: reto_evento_id_reto_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.reto_evento_id_reto_seq OWNED BY public.reto_evento.id_reto;
 
 
 --
@@ -1763,6 +2069,13 @@ ALTER TABLE ONLY public.catalogo_tipo_evento ALTER COLUMN id_tipo_evento SET DEF
 
 
 --
+-- Name: comprobante_pago id_comprobante; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comprobante_pago ALTER COLUMN id_comprobante SET DEFAULT nextval('public.comprobante_pago_id_comprobante_seq'::regclass);
+
+
+--
 -- Name: concurso id_concurso; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -1802,6 +2115,13 @@ ALTER TABLE ONLY public.evento_imagenes ALTER COLUMN id_imagen SET DEFAULT nextv
 --
 
 ALTER TABLE ONLY public.evidencia ALTER COLUMN id_evidencia SET DEFAULT nextval('public.evidencia_id_evidencia_seq'::regclass);
+
+
+--
+-- Name: ganador_evento id_ganador; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ganador_evento ALTER COLUMN id_ganador SET DEFAULT nextval('public.ganador_evento_id_ganador_seq'::regclass);
 
 
 --
@@ -1868,6 +2188,13 @@ ALTER TABLE ONLY public.password_reset_token ALTER COLUMN id_token SET DEFAULT n
 
 
 --
+-- Name: plantilla_documento id_plantilla; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.plantilla_documento ALTER COLUMN id_plantilla SET DEFAULT nextval('public.plantilla_documento_id_plantilla_seq'::regclass);
+
+
+--
 -- Name: programa_recurrente id_programa; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -1879,6 +2206,13 @@ ALTER TABLE ONLY public.programa_recurrente ALTER COLUMN id_programa SET DEFAULT
 --
 
 ALTER TABLE ONLY public.resultado_equipo_concurso ALTER COLUMN id_resultado SET DEFAULT nextval('public.resultado_equipo_concurso_id_resultado_seq'::regclass);
+
+
+--
+-- Name: reto_evento id_reto; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reto_evento ALTER COLUMN id_reto SET DEFAULT nextval('public.reto_evento_id_reto_seq'::regclass);
 
 
 --
@@ -2024,6 +2358,22 @@ ALTER TABLE ONLY public.catalogo_tipo_evento
 
 
 --
+-- Name: comprobante_pago comprobante_pago_id_inscripcion_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comprobante_pago
+    ADD CONSTRAINT comprobante_pago_id_inscripcion_key UNIQUE (id_inscripcion);
+
+
+--
+-- Name: comprobante_pago comprobante_pago_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comprobante_pago
+    ADD CONSTRAINT comprobante_pago_pkey PRIMARY KEY (id_comprobante);
+
+
+--
 -- Name: concurso concurso_id_evento_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2101,6 +2451,30 @@ ALTER TABLE ONLY public.evento
 
 ALTER TABLE ONLY public.evidencia
     ADD CONSTRAINT evidencia_pkey PRIMARY KEY (id_evidencia);
+
+
+--
+-- Name: ganador_evento ganador_evento_inscripcion_unica; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ganador_evento
+    ADD CONSTRAINT ganador_evento_inscripcion_unica UNIQUE NULLS NOT DISTINCT (id_evento, id_reto, id_inscripcion);
+
+
+--
+-- Name: ganador_evento ganador_evento_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ganador_evento
+    ADD CONSTRAINT ganador_evento_pkey PRIMARY KEY (id_ganador);
+
+
+--
+-- Name: ganador_evento ganador_evento_posicion_unica; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ganador_evento
+    ADD CONSTRAINT ganador_evento_posicion_unica UNIQUE NULLS NOT DISTINCT (id_evento, id_reto, posicion);
 
 
 --
@@ -2264,6 +2638,14 @@ ALTER TABLE ONLY public.password_reset_token
 
 
 --
+-- Name: plantilla_documento plantilla_documento_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.plantilla_documento
+    ADD CONSTRAINT plantilla_documento_pkey PRIMARY KEY (id_plantilla);
+
+
+--
 -- Name: programa_recurrente programa_recurrente_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2285,6 +2667,22 @@ ALTER TABLE ONLY public.resultado_equipo_concurso
 
 ALTER TABLE ONLY public.resultado_equipo_concurso
     ADD CONSTRAINT resultado_equipo_concurso_pkey PRIMARY KEY (id_resultado);
+
+
+--
+-- Name: reto_evento reto_evento_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reto_evento
+    ADD CONSTRAINT reto_evento_pkey PRIMARY KEY (id_reto);
+
+
+--
+-- Name: reto_evento reto_evento_slug_unico; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reto_evento
+    ADD CONSTRAINT reto_evento_slug_unico UNIQUE (id_evento, slug);
 
 
 --
@@ -2368,6 +2766,13 @@ CREATE INDEX idx_asistencia_invitado_invitado ON public.asistencia_invitado USIN
 --
 
 CREATE INDEX idx_asistencia_miembro_miembro ON public.asistencia_miembro USING btree (id_miembro);
+
+
+--
+-- Name: idx_comprobante_pago_estado; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_comprobante_pago_estado ON public.comprobante_pago USING btree (estado);
 
 
 --
@@ -2455,6 +2860,13 @@ CREATE INDEX idx_evento_imagenes_evento ON public.evento_imagenes USING btree (i
 
 
 --
+-- Name: idx_evento_slug; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_evento_slug ON public.evento USING btree (slug) WHERE ((slug IS NOT NULL) AND (deleted_at IS NULL));
+
+
+--
 -- Name: idx_evento_tipo; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2487,6 +2899,13 @@ CREATE INDEX idx_evidencia_programa ON public.evidencia USING btree (id_programa
 --
 
 CREATE INDEX idx_evidencia_publica ON public.evidencia USING btree (publica) WHERE (publica = true);
+
+
+--
+-- Name: idx_ganador_evento_evento; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ganador_evento_evento ON public.ganador_evento USING btree (id_evento, id_reto, posicion);
 
 
 --
@@ -2543,6 +2962,13 @@ CREATE INDEX idx_inscripcion_programa_miembro ON public.inscripcion_programa USI
 --
 
 CREATE INDEX idx_inscripcion_programa_programa ON public.inscripcion_programa USING btree (id_programa);
+
+
+--
+-- Name: idx_inscripcion_reto; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_inscripcion_reto ON public.inscripcion_evento USING btree (id_reto);
 
 
 --
@@ -2641,6 +3067,27 @@ CREATE INDEX idx_pago_mp_payment ON public.pago USING btree (mp_payment_id) WHER
 --
 
 CREATE INDEX idx_password_reset_token ON public.password_reset_token USING btree (token) WHERE (usado = false);
+
+
+--
+-- Name: idx_plantilla_documento_evento; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_plantilla_documento_evento ON public.plantilla_documento USING btree (id_evento);
+
+
+--
+-- Name: idx_plantilla_documento_programa; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_plantilla_documento_programa ON public.plantilla_documento USING btree (id_programa);
+
+
+--
+-- Name: idx_reto_evento_evento; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_reto_evento_evento ON public.reto_evento USING btree (id_evento, orden);
 
 
 --
@@ -2795,6 +3242,13 @@ CREATE TRIGGER trigger_actualizar_pago_inscripcion AFTER UPDATE ON public.pago F
 
 
 --
+-- Name: comprobante_pago trigger_comprobante_pago_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_comprobante_pago_updated_at BEFORE UPDATE ON public.comprobante_pago FOR EACH ROW EXECUTE FUNCTION public.actualizar_updated_at();
+
+
+--
 -- Name: equipo_concurso trigger_equipo_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -2830,6 +3284,13 @@ CREATE TRIGGER trigger_evidencia_updated_at BEFORE UPDATE ON public.evidencia FO
 
 
 --
+-- Name: ganador_evento trigger_ganador_evento_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_ganador_evento_updated_at BEFORE UPDATE ON public.ganador_evento FOR EACH ROW EXECUTE FUNCTION public.actualizar_updated_at();
+
+
+--
 -- Name: evento trigger_inicializar_cupos; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -2862,6 +3323,20 @@ CREATE TRIGGER trigger_miembro_updated_at BEFORE UPDATE ON public.miembro FOR EA
 --
 
 CREATE TRIGGER trigger_pago_updated_at BEFORE UPDATE ON public.pago FOR EACH ROW EXECUTE FUNCTION public.actualizar_updated_at();
+
+
+--
+-- Name: plantilla_documento trigger_plantilla_documento_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_plantilla_documento_updated_at BEFORE UPDATE ON public.plantilla_documento FOR EACH ROW EXECUTE FUNCTION public.actualizar_updated_at();
+
+
+--
+-- Name: reto_evento trigger_reto_evento_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_reto_evento_updated_at BEFORE UPDATE ON public.reto_evento FOR EACH ROW EXECUTE FUNCTION public.actualizar_updated_at();
 
 
 --
@@ -2910,6 +3385,22 @@ ALTER TABLE ONLY public.asistencia_miembro
 
 ALTER TABLE ONLY public.asistencia_miembro
     ADD CONSTRAINT asistencia_miembro_id_sesion_fkey FOREIGN KEY (id_sesion) REFERENCES public.sesion_programa(id_sesion) ON DELETE CASCADE;
+
+
+--
+-- Name: comprobante_pago comprobante_pago_id_inscripcion_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comprobante_pago
+    ADD CONSTRAINT comprobante_pago_id_inscripcion_fkey FOREIGN KEY (id_inscripcion) REFERENCES public.inscripcion_evento(id_inscripcion) ON DELETE CASCADE;
+
+
+--
+-- Name: comprobante_pago comprobante_pago_revisado_por_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comprobante_pago
+    ADD CONSTRAINT comprobante_pago_revisado_por_fkey FOREIGN KEY (revisado_por) REFERENCES public.miembro(id_miembro) ON DELETE SET NULL;
 
 
 --
@@ -3001,6 +3492,30 @@ ALTER TABLE ONLY public.evidencia
 
 
 --
+-- Name: ganador_evento ganador_evento_id_evento_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ganador_evento
+    ADD CONSTRAINT ganador_evento_id_evento_fkey FOREIGN KEY (id_evento) REFERENCES public.evento(id_evento) ON DELETE CASCADE;
+
+
+--
+-- Name: ganador_evento ganador_evento_id_inscripcion_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ganador_evento
+    ADD CONSTRAINT ganador_evento_id_inscripcion_fkey FOREIGN KEY (id_inscripcion) REFERENCES public.inscripcion_evento(id_inscripcion) ON DELETE CASCADE;
+
+
+--
+-- Name: ganador_evento ganador_evento_id_reto_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ganador_evento
+    ADD CONSTRAINT ganador_evento_id_reto_fkey FOREIGN KEY (id_reto) REFERENCES public.reto_evento(id_reto) ON DELETE CASCADE;
+
+
+--
 -- Name: inscripcion_evento inscripcion_evento_id_equipo_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3030,6 +3545,14 @@ ALTER TABLE ONLY public.inscripcion_evento
 
 ALTER TABLE ONLY public.inscripcion_evento
     ADD CONSTRAINT inscripcion_evento_id_miembro_fkey FOREIGN KEY (id_miembro) REFERENCES public.miembro(id_miembro) ON DELETE CASCADE;
+
+
+--
+-- Name: inscripcion_evento inscripcion_evento_id_reto_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inscripcion_evento
+    ADD CONSTRAINT inscripcion_evento_id_reto_fkey FOREIGN KEY (id_reto) REFERENCES public.reto_evento(id_reto) ON DELETE SET NULL;
 
 
 --
@@ -3145,6 +3668,22 @@ ALTER TABLE ONLY public.password_reset_token
 
 
 --
+-- Name: plantilla_documento plantilla_documento_id_evento_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.plantilla_documento
+    ADD CONSTRAINT plantilla_documento_id_evento_fkey FOREIGN KEY (id_evento) REFERENCES public.evento(id_evento) ON DELETE CASCADE;
+
+
+--
+-- Name: plantilla_documento plantilla_documento_id_programa_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.plantilla_documento
+    ADD CONSTRAINT plantilla_documento_id_programa_fkey FOREIGN KEY (id_programa) REFERENCES public.programa_recurrente(id_programa) ON DELETE CASCADE;
+
+
+--
 -- Name: programa_recurrente programa_recurrente_id_alcance_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3166,6 +3705,14 @@ ALTER TABLE ONLY public.programa_recurrente
 
 ALTER TABLE ONLY public.resultado_equipo_concurso
     ADD CONSTRAINT resultado_equipo_concurso_id_equipo_fkey FOREIGN KEY (id_equipo) REFERENCES public.equipo_concurso(id_equipo) ON DELETE CASCADE;
+
+
+--
+-- Name: reto_evento reto_evento_id_evento_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reto_evento
+    ADD CONSTRAINT reto_evento_id_evento_fkey FOREIGN KEY (id_evento) REFERENCES public.evento(id_evento) ON DELETE CASCADE;
 
 
 --
@@ -3212,5 +3759,5 @@ ALTER TABLE ONLY public.staff_evento
 -- PostgreSQL database dump complete
 --
 
-\unrestrict nVZuqatNOXDG5yzhHH0JAbB2xsDT1IGBckw1qYoSJvZrLXpXaSHanVZv0hp0Ywl
+\unrestrict Cw5iEjYzkJmhNRYf9ank7xriUGh9bKdmtfGmbIWALdIIvtrAgHT0RYNRQONTarC
 

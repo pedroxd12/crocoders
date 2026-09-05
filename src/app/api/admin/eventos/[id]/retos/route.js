@@ -3,10 +3,16 @@ import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 import { retoCreateSchema, parseOrError } from '@/lib/validation';
 import { listarRetos, slugDisponible } from '@/lib/retos';
+import { recalcularCupos } from '@/lib/eventos-cupos';
 
 // Retos (desafíos) de un evento. Es el CRUD que sustituye a tener los desafíos
 // escritos a mano dentro de un componente de React: crear uno aquí lo publica
 // en la landing del evento y lo pone a elegir en el formulario de inscripción.
+//
+// AFORO: cuando todos los desafíos activos tienen cupo, el aforo del evento es
+// la suma de esos cupos (src/lib/eventos-cupos.js). Por eso cada alta, edición
+// o baja de un desafío termina con `recalcularCupos` bajo el bloqueo del
+// evento: así `evento.cupos` nunca se queda desfasado de sus desafíos.
 
 // Texto vacío del formulario -> NULL en la base (y no ''), para que la UI
 // pueda distinguir "sin dato" de "cadena vacía" con un simple COALESCE.
@@ -65,11 +71,16 @@ export async function POST(request, context) {
 
   const client = await connectWithRetry();
   try {
+    await client.query('BEGIN');
+
+    // Bloqueo del evento: el recálculo del aforo del final es atómico frente a
+    // registros simultáneos.
     const eventoRes = await client.query(
-      'SELECT 1 FROM evento WHERE id_evento = $1 AND deleted_at IS NULL',
+      'SELECT id_evento FROM evento WHERE id_evento = $1 AND deleted_at IS NULL FOR UPDATE',
       [idEvento],
     );
     if (eventoRes.rows.length === 0) {
+      await client.query('ROLLBACK');
       return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
     }
 
@@ -118,11 +129,15 @@ export async function POST(request, context) {
       ],
     );
 
+    const cupos = await recalcularCupos(client, idEvento);
+    await client.query('COMMIT');
+
     return NextResponse.json(
-      { message: 'Reto creado', id_reto: res.rows[0].id_reto, slug },
+      { message: 'Reto creado', id_reto: res.rows[0].id_reto, slug, cupo_por_retos: cupos.cupo_por_retos },
       { status: 201 },
     );
   } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
     console.error('Error en POST /api/admin/eventos/[id]/retos:', error);
     if (error.code === '23505') {
       return NextResponse.json({ error: 'Ya existe un reto con ese título en el evento.' }, { status: 409 });

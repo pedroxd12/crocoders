@@ -13,6 +13,7 @@
 
 import { query } from '@/lib/db-server';
 import { ZONA_EVENTOS, sqlRegistroCerrado, sqlEventoTerminado } from '@/lib/eventos-fechas';
+import { sqlLugaresOcupados } from '@/lib/eventos-cupos';
 
 // Se usa `query()` en vez del template `sql` porque las expresiones de zona
 // horaria son SQL, no parámetros.
@@ -57,15 +58,11 @@ const SQL_EVENTOS_PUBLICOS = `
       SELECT COUNT(*)::int FROM reto_evento r
        WHERE r.id_evento = e.id_evento AND r.activo = TRUE
     ) as total_retos,
-    (
-      SELECT COALESCE(SUM(
-               CASE WHEN ie.id_equipo IS NOT NULL
-                    THEN (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = ie.id_equipo)
-                    ELSE 1 END
-             ), 0)::int
-      FROM inscripcion_evento ie
-      WHERE ie.id_evento = e.id_evento AND ie.estado <> 'cancelada'
-    ) as lugares_ocupados
+    -- Inscripciones vivas: equipos en concursos por equipos, personas en el
+    -- resto (la misma unidad que e.cupos, ver src/lib/aforo.js).
+    ${sqlLugaresOcupados('e')} as lugares_ocupados,
+    e.resultados_publicados,
+    e.asignar_mesas
   FROM evento e
   JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
   JOIN catalogo_alcance_evento a ON e.id_alcance = a.id_alcance
@@ -122,7 +119,7 @@ export async function listarEventosPublicos() {
       costo: evento.costo !== null ? Number(evento.costo) : null,
       cupos: evento.cupos !== null ? Number(evento.cupos) : null,
       cupos_disponibles: evento.cupos_disponibles !== null ? Number(evento.cupos_disponibles) : null,
-      // Lugares realmente ocupados (los equipos cuentan por integrante).
+      // Inscripciones vivas, en la unidad del aforo (equipos o personas).
       lugares_ocupados: Number(evento.lugares_ocupados) || 0,
       total_retos: Number(evento.total_retos) || 0,
     };

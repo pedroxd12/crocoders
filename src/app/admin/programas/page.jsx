@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { toast } from 'react-toastify';
 import Image from 'next/image';
-import { Plus, Pencil, Trash2, Calendar, Users, X } from 'lucide-react';
+import { Plus, Pencil, Trash2, Calendar, Users, X, FileBadge } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import IconButton from '@/components/ui/IconButton';
 import Table from '@/components/ui/Table';
@@ -43,6 +43,7 @@ const FORM_VACIO = {
   hora_fin: '',
   activo: true,
   solicitar_talla: false,
+  asignar_mesas: false,
 };
 
 /**
@@ -107,6 +108,7 @@ export default function ProgramasRecurrentes() {
         hora_fin: aHoraCorta(programa.hora_fin),
         activo: programa.activo !== false,
         solicitar_talla: Boolean(programa.solicitar_talla),
+        asignar_mesas: Boolean(programa.asignar_mesas),
       });
     } else {
       setEditingPrograma(null);
@@ -249,6 +251,12 @@ export default function ProgramasRecurrentes() {
             label="Reporte de asistencia"
             tone="brand"
             onClick={() => router.push(`/admin/programas/${row.id_programa}/asistencia`)}
+          />
+          <IconButton
+            icon={FileBadge}
+            label="Certificados y gafetes"
+            tone="accent"
+            onClick={() => router.push(`/admin/programas/${row.id_programa}/documentos`)}
           />
           <IconButton icon={Pencil} label="Editar programa" onClick={() => handleOpenModal(row)} />
           <IconButton
@@ -500,6 +508,13 @@ export default function ProgramasRecurrentes() {
             help="Actívalo si el programa entrega playera o kit. El formulario público pedirá la talla a miembros e invitados."
             checked={formData.solicitar_talla}
             onChange={(e) => setFormData({ ...formData, solicitar_talla: e.target.checked })}
+          />
+
+          <Checkbox
+            label="Asignar mesas o lugares"
+            help="Actívalo si cada participante tendrá una mesa o lugar fijo. Se asignan desde el reporte de asistencia y se imprimen en gafetes y certificados."
+            checked={formData.asignar_mesas}
+            onChange={(e) => setFormData({ ...formData, asignar_mesas: e.target.checked })}
           />
         </form>
       </Modal>

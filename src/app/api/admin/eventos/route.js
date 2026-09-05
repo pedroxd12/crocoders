@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 import { sanitizeHtml } from '@/lib/sanitize';
-import { slugificar } from '@/lib/retos';
+import { sqlLugaresOcupados, sqlCupoPorRetos } from '@/lib/eventos-cupos';
+import { normalizarEvento, EventoInvalido, mensajeErrorEvento } from '@/lib/eventos-validacion';
 
 export async function GET(request) {
   const guard = await requireAdmin(request);
@@ -10,7 +11,7 @@ export async function GET(request) {
   const client = await connectWithRetry();
   try {
     const query = `
-      SELECT 
+      SELECT
         e.id_evento,
         e.nombre,
         e.descripcion_html,
@@ -28,32 +29,24 @@ export async function GET(request) {
         e.imagen_flyer_url,
         e.estado,
         e.solicitar_talla,
+        e.asignar_mesas,
+        e.resultados_publicados,
         e.slug,
         -- Retos del evento: el panel necesita saber si tiene y cuántos para
         -- llevar al gestor de desafíos sin abrir la pantalla en vacío.
         (SELECT COUNT(*)::int FROM reto_evento r WHERE r.id_evento = e.id_evento) as total_retos,
+        (SELECT COUNT(*)::int FROM ganador_evento g WHERE g.id_evento = e.id_evento) as total_ganadores,
         t.id_tipo_evento,
         t.nombre as tipo_nombre,
+        t.permite_equipos,
         a.id_alcance,
         a.nombre as alcance_nombre,
-        -- OJO: son dos unidades distintas y no deben compararse entre sí.
-        -- total_inscritos cuenta FILAS de inscripción; lugares_ocupados
-        -- cuenta LUGARES de aforo (un equipo es 1 inscripción y N lugares).
-        -- Mezclarlas es lo que hacía que el panel mostrara "147/150" junto a
-        -- "Inscritos: 1" para un equipo de tres.
-        (
-          SELECT COUNT(*) FROM inscripcion_evento
-          WHERE id_evento = e.id_evento AND estado <> 'cancelada'
-        ) as total_inscritos,
-        (
-          SELECT COALESCE(SUM(
-                   CASE WHEN ie.id_equipo IS NOT NULL
-                        THEN (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = ie.id_equipo)
-                        ELSE 1 END
-                 ), 0)::int
-          FROM inscripcion_evento ie
-          WHERE ie.id_evento = e.id_evento AND ie.estado <> 'cancelada'
-        ) as lugares_ocupados,
+        -- Inscripciones vivas en la UNIDAD del aforo: equipos en concursos por
+        -- equipos, personas en el resto (src/lib/aforo.js). Es la misma cifra
+        -- que compara el registro contra e.cupos.
+        ${sqlLugaresOcupados('e')} as lugares_ocupados,
+        -- Aforo dictado por los desafíos (NULL si no aplica).
+        ${sqlCupoPorRetos('e')} as cupo_por_retos,
         -- Datos de concurso si aplica
         c.id_concurso,
         c.modalidad,
@@ -89,184 +82,116 @@ export async function GET(request) {
 export async function POST(request) {
   const guard = await requireAdmin(request);
   if (!guard.ok) return guard.response;
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Cuerpo de la petición no es JSON válido' }, { status: 400 });
+  }
+
   const client = await connectWithRetry();
   try {
-    const body = await request.json();
-    const {
-      nombre,
-      descripcion_html,
-      id_tipo_evento,
-      id_alcance,
-      fecha_inicio,
-      fecha_fin,
-      fecha_limite_registro,
-      hora_inicio,
-      hora_fin,
-      ubicacion,
-      cupos,
-      tiene_costo,
-      costo,
-      instrucciones_pago,
-      imagen_flyer_url,
-      imagen_flyer_key,
-      solicitar_talla,
-      // Identificador para la landing propia del evento (p. ej. 'hackaitlac').
-      slug,
-      // Datos de concurso
-      es_concurso,
-      modalidad, // 'individual' | 'equipos'
-      max_integrantes_equipo,
-      min_integrantes_equipo,
-      id_plataforma,
-      requiere_asesor,
-      asesor_participa,
-      max_asesores,
-      url_concurso
-    } = body;
+    // El tipo decide si la modalidad por equipos es válida: se lee del
+    // catálogo ANTES de validar (un Taller no puede inscribirse por equipos).
+    const idTipo = parseInt(body?.id_tipo_evento, 10);
+    const tipoRes = Number.isInteger(idTipo)
+      ? await client.query('SELECT nombre, permite_equipos FROM catalogo_tipo_evento WHERE id_tipo_evento = $1', [idTipo])
+      : { rows: [] };
+    if (tipoRes.rows.length === 0) {
+      return NextResponse.json({ error: 'Elige un tipo de evento válido.' }, { status: 400 });
+    }
 
-    // Validaciones básicas. La DB exige fecha_fin/hora_fin NOT NULL y cupos > 0.
-    if (!nombre || !id_tipo_evento || !id_alcance || !fecha_inicio || !hora_inicio || !hora_fin) {
-      return NextResponse.json(
-        { error: 'Faltan campos obligatorios' },
-        { status: 400 }
-      );
-    }
-    if (es_concurso && modalidad && !['individual', 'equipos'].includes(modalidad)) {
-      return NextResponse.json(
-        { error: "modalidad debe ser 'individual' o 'equipos'" },
-        { status: 400 }
-      );
-    }
-    if (!Number.isInteger(parseInt(cupos)) || parseInt(cupos) <= 0) {
-      return NextResponse.json({ error: 'Los cupos deben ser mayores a 0' }, { status: 400 });
-    }
-    // Coherencia de integrantes en concursos por equipos: min >= 2 y min <= max.
-    if (es_concurso && modalidad === 'equipos') {
-      const minInt = parseInt(min_integrantes_equipo) || 2;
-      const maxInt = parseInt(max_integrantes_equipo) || 3;
-      if (minInt < 2) {
-        return NextResponse.json({ error: 'El mínimo de integrantes por equipo debe ser al menos 2.' }, { status: 400 });
-      }
-      if (minInt > maxInt) {
-        return NextResponse.json({ error: 'El mínimo de integrantes no puede ser mayor que el máximo.' }, { status: 400 });
-      }
-    }
+    const { evento, concurso } = normalizarEvento(body, { tipo: tipoRes.rows[0], esEdicion: false });
 
     await client.query('BEGIN');
 
-    // 1. Insertar Evento
-    const insertEventoQuery = `
-      INSERT INTO evento (
-        nombre, descripcion_html, id_tipo_evento, id_alcance,
-        fecha_inicio, fecha_fin, fecha_limite_registro, hora_inicio, hora_fin,
-        ubicacion, cupos, cupos_disponibles,
-        tiene_costo, costo,
-        imagen_flyer_url, imagen_flyer_key,
-        solicitar_talla,
-        instrucciones_pago,
-        slug,
-        estado
-      ) VALUES (
-        $1, $2, $3, $4,
-        $5, $6, $7, $8, $9,
-        $10, $11, $11, -- cupos_disponibles inicial = cupos
-        $12, $13,
-        $14, $15,
-        $16, $17, $18,
-        'publicado'
-      )
-      RETURNING id_evento;
-    `;
-
-    const fechaFinValue = fecha_fin || fecha_inicio;
-    const costoValue = parseFloat(costo) || 0;
-    const tieneCostoValue = tiene_costo || (costoValue > 0);
-
-    const eventoRes = await client.query(insertEventoQuery, [
-      nombre,
-      sanitizeHtml(descripcion_html || ''),
-      id_tipo_evento,
-      id_alcance,
-      fecha_inicio,
-      fechaFinValue,
-      fecha_limite_registro || null,
-      hora_inicio,
-      hora_fin,
-      ubicacion ?? null,
-      parseInt(cupos),
-      tieneCostoValue,
-      costoValue,
-      imagen_flyer_url,
-      imagen_flyer_key,
-      Boolean(solicitar_talla),
-      // Sin costo no hay nada que pagar: guardar instrucciones ahí sólo
-      // serviría para que reaparecieran si algún día se marca el cobro.
-      tieneCostoValue ? (instrucciones_pago?.trim() || null) : null,
-      // El slug se normaliza aquí (no en el navegador) para que sea siempre el
-      // mismo texto que buscan las landings.
-      // varchar(60) en `evento.slug`: el recorte lo hace el helper.
-      slugificar(slug, 60) || null
-    ]);
+    // 1. Insertar Evento. `cupos_disponibles` arranca igual que `cupos` (el
+    //    trigger de la base lo haría con NULL, pero así queda explícito).
+    const eventoRes = await client.query(
+      `INSERT INTO evento (
+         nombre, descripcion_html, id_tipo_evento, id_alcance,
+         fecha_inicio, fecha_fin, fecha_limite_registro, hora_inicio, hora_fin,
+         ubicacion, cupos, cupos_disponibles,
+         tiene_costo, costo,
+         imagen_flyer_url, imagen_flyer_key,
+         solicitar_talla, asignar_mesas,
+         instrucciones_pago,
+         slug,
+         estado
+       ) VALUES (
+         $1, $2, $3, $4,
+         $5, $6, $7, $8, $9,
+         $10, $11, $11,
+         $12, $13,
+         $14, $15,
+         $16, $17, $18, $19, $20
+       )
+       RETURNING id_evento`,
+      [
+        evento.nombre,
+        sanitizeHtml(evento.descripcion_html || ''),
+        evento.id_tipo_evento,
+        evento.id_alcance,
+        evento.fecha_inicio,
+        evento.fecha_fin,
+        evento.fecha_limite_registro,
+        evento.hora_inicio,
+        evento.hora_fin,
+        evento.ubicacion,
+        evento.cupos,
+        evento.tiene_costo,
+        evento.costo,
+        body.imagen_flyer_url || null,
+        body.imagen_flyer_key || null,
+        evento.solicitar_talla,
+        evento.asignar_mesas,
+        evento.instrucciones_pago,
+        evento.slug ?? null,
+        evento.estado,
+      ],
+    );
 
     const idEvento = eventoRes.rows[0].id_evento;
 
     // 2. Insertar Concurso si aplica
-    if (es_concurso) {
-      // Valor por defecto para equipos: mínimo 2 personas, o lo que venga del front
-      const minIntegrantes = modalidad === 'equipos' ? (parseInt(min_integrantes_equipo) || 2) : 1; 
-      
-      const insertConcursoQuery = `
-        INSERT INTO concurso (
-          id_evento, id_plataforma, modalidad,
-          max_integrantes_equipo, min_integrantes_equipo, requiere_asesor,
-          asesor_participa, max_asesores, url_concurso
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9
-        )
-      `;
-
-      await client.query(insertConcursoQuery, [
-        idEvento,
-        id_plataforma || null,
-        modalidad || 'individual',
-        modalidad === 'equipos' ? (parseInt(max_integrantes_equipo) || 3) : null,
-        minIntegrantes,
-        requiere_asesor || false,
-        Boolean(asesor_participa),
-        Math.min(5, Math.max(1, parseInt(max_asesores) || 1)),
-        url_concurso
-      ]);
+    if (concurso) {
+      await client.query(
+        `INSERT INTO concurso (
+           id_evento, id_plataforma, modalidad,
+           max_integrantes_equipo, min_integrantes_equipo, requiere_asesor,
+           asesor_participa, max_asesores, url_concurso
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          idEvento,
+          concurso.id_plataforma,
+          concurso.modalidad,
+          concurso.max_integrantes_equipo,
+          concurso.min_integrantes_equipo,
+          concurso.requiere_asesor,
+          concurso.asesor_participa,
+          concurso.max_asesores,
+          concurso.url_concurso,
+        ],
+      );
     }
 
     await client.query('COMMIT');
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       message: 'Evento creado exitosamente',
-      id_evento: idEvento 
+      id_evento: idEvento
     }, { status: 201 });
 
   } catch (error) {
-    await client.query('ROLLBACK');
+    try { await client.query('ROLLBACK'); } catch {}
+    if (error instanceof EventoInvalido) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error('Error en POST /api/admin/eventos:', error);
-    // Mapear violaciones de CHECK/FK a 400 con mensaje claro.
-    if (error.code === '23514') {
-      const c = error.constraint || '';
-      let msg = 'Datos del evento inválidos.';
-      if (c.includes('costo')) msg = 'Si el evento tiene costo, el costo debe ser mayor a 0 (y 0 si no tiene costo).';
-      else if (c.includes('cupos')) msg = 'Los cupos deben ser mayores a 0.';
-      else if (c.includes('fecha')) msg = 'La fecha de fin debe ser igual o posterior a la de inicio.';
-      else if (c.includes('hora')) msg = 'En eventos de un mismo día, la hora de fin debe ser posterior a la de inicio.';
-      else if (c.includes('modalidad') || c.includes('integrantes')) msg = 'Configuración de concurso inválida: en modalidad por equipos el máximo de integrantes debe ser ≥ 2.';
-      return NextResponse.json({ error: msg }, { status: 400 });
-    }
-    if (error.code === '23503') {
-      return NextResponse.json({ error: 'Tipo de evento, alcance o plataforma inválidos.' }, { status: 400 });
-    }
-    if (error.code === '23505' && String(error.constraint || '').includes('slug')) {
-      return NextResponse.json(
-        { error: 'Ya hay otro evento usando ese identificador de página. Elige uno distinto.' },
-        { status: 409 },
-      );
+    const mensaje = mensajeErrorEvento(error);
+    if (mensaje) {
+      return NextResponse.json({ error: mensaje }, { status: error.code === '23505' ? 409 : 400 });
     }
     return NextResponse.json(
       { error: 'Error al crear evento' },

@@ -28,7 +28,7 @@ import ResumenRetos from '@/components/asistentes/ResumenRetos';
 import EquipoModal from '@/components/asistentes/EquipoModal';
 import { useMarcasInscripcion, ModalConfirmarPago } from '@/components/asistentes/MarcasInscripcion';
 import {
-  colNombre, colCorreo, colTipo, colDesafio, colPerfil, colTalla, colPlayera,
+  colNombre, colCorreo, colTipo, colDesafio, colPerfil, colTalla, colPlayera, colMesa,
   colAsistencia, colPago, colComprobante,
 } from '@/components/asistentes/columnas';
 import {
@@ -109,6 +109,7 @@ export default function StaffEventoDetalle() {
       conTalla: Boolean(evento?.solicitar_talla),
       conCosto: Boolean(evento?.tiene_costo),
       conRetos: hayRetos,
+      conMesas: Boolean(evento?.asignar_mesas),
     });
     descargarCsv(nombreArchivoCsv(evento?.nombre), cabeceras, filas);
   };
@@ -135,6 +136,8 @@ export default function StaffEventoDetalle() {
     colCorreo,
     colTipo,
     ...(hayRetos ? [colDesafio] : []),
+    // Mesa: la ve todo el staff; la edita quien tiene rol de gestión.
+    ...(evento?.asignar_mesas ? [colMesa({ puedeEditar: permisos.gestionar, onGuardar: marcas.guardarMesa })] : []),
     colPerfil,
     ...(evento?.solicitar_talla ? [colTalla, colPlayera] : []),
     ...(evento?.tiene_costo
@@ -271,7 +274,7 @@ export default function StaffEventoDetalle() {
           <Input
             label="Buscar inscrito"
             wrapperClassName="flex-1"
-            placeholder={porEquipos ? 'Equipo, integrante, correo o desafío' : 'Nombre, correo o número IEEE'}
+            placeholder={porEquipos ? 'Equipo, integrante, correo, mesa o desafío' : 'Nombre, correo, mesa o número IEEE'}
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
             icon={<Search size={15} aria-hidden="true" />}

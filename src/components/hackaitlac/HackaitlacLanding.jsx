@@ -10,14 +10,36 @@ import ChallengeStack from './ChallengeStack';
 import ScheduleSection from './ScheduleSection';
 import ClosingSection from './ClosingSection';
 import { acquireScroll, releaseScroll, refreshScroll } from './scroll-engine';
+import { rangoEquipos } from '@/components/eventos/EventoBadges';
 
 /* ── Bases de participación ─────────────────────────────────────────────── */
-const rules = [
-  {
+// La base 01 (tamaño del equipo) se redacta a partir del concurso configurado
+// en el panel (mínimo, máximo y asesor): antes decía "Equipos de 5" a mano y
+// la ficha del evento "de 3", según lo que tuviera la base en cada momento.
+function baseTamanoEquipo(evento) {
+  const min = Number(evento?.min_integrantes_equipo) || null;
+  const max = Number(evento?.max_integrantes_equipo) || null;
+  const conAsesor = Boolean(evento?.requiere_asesor) && !evento?.asesor_participa;
+  if (!min && !max) {
+    return {
+      num: '01',
+      title: 'Equipos de 5 + asesor',
+      text: 'Cinco integrantes sin contar al asesor, que acompaña al equipo pero no participa en la presentación: esa la hacen estrictamente los estudiantes.',
+    };
+  }
+  const rango = rangoEquipos(min, max); // "Equipos de 3 a 5 integrantes"
+  const cuantos = !max ? `${min} o más integrantes` : min === max ? `${max} integrantes` : `entre ${min} y ${max} integrantes`;
+  return {
     num: '01',
-    title: 'Equipos de 5 + asesor',
-    text: 'Cinco integrantes sin contar al asesor, que acompaña al equipo pero no participa en la presentación: esa la hacen estrictamente los estudiantes.',
-  },
+    title: conAsesor ? `${rango} + asesor` : rango,
+    text: conAsesor
+      ? `${cuantos.charAt(0).toUpperCase()}${cuantos.slice(1)} sin contar al asesor, que acompaña al equipo pero no participa en la presentación: esa la hacen estrictamente los estudiantes.`
+      : `${cuantos.charAt(0).toUpperCase()}${cuantos.slice(1)} por equipo.`,
+  };
+}
+
+const rules = [
+  null, // la 01 se calcula con el evento (baseTamanoEquipo)
   {
     num: '02',
     title: 'Estudiantes inscritos',
@@ -118,13 +140,17 @@ const NUMERALES = ['Cero', 'Un', 'Dos', 'Tres', 'Cuatro', 'Cinco', 'Seis', 'Siet
 export default function HackaitlacLanding({ challenges = [], evento = null }) {
   const totalDesafios = challenges.length;
 
-  // Personas por equipo que se anuncian: integrantes del concurso más el asesor
-  // cuando no compite. Sin evento configurado se mantiene la cifra de la
-  // convocatoria impresa.
+  // Integrantes por equipo que se anuncian ("3–5"), tal como los configuró el
+  // panel. Sin evento configurado se mantiene la cifra de la convocatoria
+  // impresa. El asesor va aparte: lo explica la base 01.
+  const minIntegrantes = Number(evento?.min_integrantes_equipo) || null;
   const maxIntegrantes = Number(evento?.max_integrantes_equipo) || null;
-  const personasPorEquipo = maxIntegrantes
-    ? maxIntegrantes + (evento?.requiere_asesor && !evento?.asesor_participa ? 1 : 0)
-    : 6;
+  const integrantesPorEquipo = !maxIntegrantes
+    ? (minIntegrantes ? `${minIntegrantes}+` : '5')
+    : minIntegrantes && minIntegrantes !== maxIntegrantes
+      ? `${minIntegrantes}–${maxIntegrantes}`
+      : String(maxIntegrantes);
+  const bases = [baseTamanoEquipo(evento), ...rules.filter(Boolean)];
 
   // El premio lo escribe el administrador en cada desafío; se muestra el del
   // primero que lo tenga (en la práctica es el mismo para todos).
@@ -208,8 +234,8 @@ export default function HackaitlacLanding({ challenges = [], evento = null }) {
             <span className={styles.figureLabel}>De desarrollo</span>
           </div>
           <div className={styles.figure}>
-            <span className={styles.figureValue}>{personasPorEquipo}</span>
-            <span className={styles.figureLabel}>Personas por equipo</span>
+            <span className={styles.figureValue}>{integrantesPorEquipo}</span>
+            <span className={styles.figureLabel}>Integrantes por equipo</span>
           </div>
         </div>
       </ScrollSection>
@@ -263,7 +289,7 @@ export default function HackaitlacLanding({ challenges = [], evento = null }) {
         heading="Lo que necesitas saber antes de registrar a tu equipo."
       >
         <div className={styles.rules}>
-          {rules.map((rule) => (
+          {bases.map((rule) => (
             <article className={styles.rule} key={rule.num}>
               <span className={styles.ruleNum}>{rule.num}</span>
               <h3 className={styles.ruleTitle}>{rule.title}</h3>

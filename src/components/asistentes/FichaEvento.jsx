@@ -3,6 +3,7 @@
 import Card from '@/components/ui/Card';
 import { rangoEquipos } from '@/components/eventos/EventoBadges';
 import { formatearFechaHora, formatearFechaLarga, formatearFechaMedia, formatearHora } from '@/lib/fechas';
+import { esPorEquipos as esPorEquiposLib, unidadAforo, UNIDAD_AFORO } from '@/lib/aforo';
 
 /**
  * Datos generales del evento tal como los necesita quien lo opera: qué tipo
@@ -14,9 +15,8 @@ import { formatearFechaHora, formatearFechaLarga, formatearFechaMedia, formatear
  * (`tipo_nombre`/`tipo_evento`, `alcance_nombre`/`alcance`). Deliberadamente
  * sobria: etiqueta + valor, sin iconos ni chips de color.
  */
-export function esPorEquipos(evento) {
-  return Boolean(evento?.permite_equipos && evento?.id_concurso && evento?.modalidad === 'equipos');
-}
+// Re-export por compatibilidad: la regla vive en src/lib/aforo.js.
+export const esPorEquipos = esPorEquiposLib;
 
 function textoModalidad(evento) {
   if (!evento?.id_concurso) return 'Individual';
@@ -34,12 +34,17 @@ function textoFechas(evento) {
 }
 
 function Aforo({ evento, resumen }) {
-  const ocupados = Number(evento.lugares_ocupados ?? resumen?.personas ?? 0);
+  // Unidad del aforo: equipos en concursos por equipos, personas en el resto
+  // (src/lib/aforo.js). El respaldo por `resumen` cuenta filas de inscripción,
+  // que es exactamente esa unidad.
+  const unidad = unidadAforo(evento);
+  const u = UNIDAD_AFORO[unidad];
+  const ocupados = Number(evento.lugares_ocupados ?? resumen?.inscripciones ?? 0);
   const cupos = evento.cupos != null ? Number(evento.cupos) : null;
   if (!cupos) {
     return (
       <span className="tabular-nums">
-        {ocupados} {ocupados === 1 ? 'lugar ocupado' : 'lugares ocupados'} · sin límite
+        {ocupados} {ocupados === 1 ? `${u.singular} ocupado` : `${u.plural} ocupados`} · sin límite
       </span>
     );
   }
@@ -47,8 +52,11 @@ function Aforo({ evento, resumen }) {
   return (
     <div>
       <span className="tabular-nums">
-        {ocupados} de {cupos} lugares
+        {ocupados} de {cupos} {u.plural}
       </span>
+      {evento.cupo_por_retos != null && (
+        <span className="ml-1.5 text-xs text-faint">(según los desafíos)</span>
+      )}
       <span className="ml-1.5 text-xs text-faint tabular-nums">({pct}%)</span>
       <div
         className="mt-1.5 h-1.5 w-full max-w-[180px] overflow-hidden rounded-full bg-surface-2"
@@ -94,6 +102,9 @@ export default function FichaEvento({ evento, resumen, className = '' }) {
       etiqueta: 'Playera',
       valor: evento.solicitar_talla ? 'Se pide talla al inscribirse' : 'No se pide talla',
     },
+    ...(evento.asignar_mesas
+      ? [{ etiqueta: 'Mesas', valor: 'Se asignan mesas o lugares' }]
+      : []),
     ...(totalRetos > 0
       ? [{ etiqueta: 'Desafíos', valor: `${totalRetos} ${totalRetos === 1 ? 'desafío' : 'desafíos'}` }]
       : []),

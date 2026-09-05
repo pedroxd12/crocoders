@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
+import { PROCEDENCIAS_JUEZ_VALUES } from '@/lib/registro-campos';
 
-const PROCEDENCIAS = new Set([
-  'club_programacion', 'computer_society', 'itlac',
-  'universitario', 'preparatoria', 'otro',
-]);
+const PROCEDENCIAS = new Set(PROCEDENCIAS_JUEZ_VALUES);
 
 // GET - Lista de jueces del evento.
 export async function GET(request, { params }) {

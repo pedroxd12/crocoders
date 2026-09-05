@@ -1,23 +1,10 @@
 import { NextResponse } from 'next/server';
 import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
-import { UTApi } from "uploadthing/server";
 import { sanitizeHtml } from '@/lib/sanitize';
-import { recalcularCupos } from '@/lib/eventos-cupos';
-import { slugificar } from '@/lib/retos';
-
-const utapi = new UTApi();
-
-// Helper function to delete from UploadThing
-async function deleteFromUploadThing(fileKey) {
-  if (!fileKey) return;
-  try {
-    await utapi.deleteFiles(fileKey);
-    console.log(`Successfully deleted ${fileKey} from UploadThing`);
-  } catch (e) {
-    console.error(`Error deleting ${fileKey} from UploadThing:`, e);
-  }
-}
+import { recalcularCupos, sqlLugaresOcupados, sqlCupoPorRetos } from '@/lib/eventos-cupos';
+import { normalizarEvento, EventoInvalido, mensajeErrorEvento } from '@/lib/eventos-validacion';
+import { deleteFromUploadThing } from '@/lib/uploadthing-server';
 
 export async function GET(request, context) {
   const guard = await requireAdmin(request);
@@ -52,6 +39,9 @@ export async function GET(request, context) {
         a.nombre as alcance_nombre,
         -- Desafíos del evento (migración 014): la ficha del panel los muestra.
         (SELECT COUNT(*)::int FROM reto_evento r WHERE r.id_evento = e.id_evento) as total_retos,
+        (SELECT COUNT(*)::int FROM reto_evento r WHERE r.id_evento = e.id_evento AND r.activo) as total_retos_activos,
+        (SELECT COUNT(*)::int FROM ganador_evento g WHERE g.id_evento = e.id_evento) as total_ganadores,
+        (SELECT COUNT(*)::int FROM plantilla_documento p WHERE p.id_evento = e.id_evento) as total_plantillas,
         -- Concurso info
         c.id_concurso,
         c.modalidad,
@@ -62,25 +52,19 @@ export async function GET(request, context) {
         c.asesor_participa,
         c.max_asesores,
         c.url_concurso,
-        -- Dos cifras distintas y a propósito: filas de inscripción vs. lugares
-        -- ocupados (un equipo es 1 inscripción y N lugares).
-        (SELECT COUNT(*) FROM inscripcion_evento WHERE id_evento = e.id_evento AND estado <> 'cancelada') as total_inscritos,
-        (
-          SELECT COALESCE(SUM(
-                   CASE WHEN ie.id_equipo IS NOT NULL
-                        THEN (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = ie.id_equipo)
-                        ELSE 1 END
-                 ), 0)::int
-          FROM inscripcion_evento ie
-          WHERE ie.id_evento = e.id_evento AND ie.estado <> 'cancelada'
-        ) as lugares_ocupados
+        -- Inscripciones vivas en la UNIDAD del aforo (equipos o personas).
+        ${sqlLugaresOcupados('e')} as total_inscritos,
+        ${sqlLugaresOcupados('e')} as lugares_ocupados,
+        -- Aforo dictado por los desafíos: si no es NULL, el formulario muestra
+        -- el campo de cupos como derivado (src/lib/eventos-cupos.js).
+        ${sqlCupoPorRetos('e')} as cupo_por_retos
       FROM evento e
       LEFT JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
       LEFT JOIN catalogo_alcance_evento a ON e.id_alcance = a.id_alcance
       LEFT JOIN concurso c ON e.id_evento = c.id_evento
       WHERE e.id_evento = $1 AND e.deleted_at IS NULL
     `;
-    
+
     const result = await client.query(query, [id]);
 
     if (result.rows.length === 0) {
@@ -103,53 +87,45 @@ export async function PUT(request, context) {
   if (!guard.ok) return guard.response;
   const { id } = await context.params;
 
-  if (!id) {
-    return NextResponse.json({ error: 'ID de evento es requerido' }, { status: 400 });
+  if (!id || isNaN(Number(id))) {
+    return NextResponse.json({ error: 'ID de evento inválido' }, { status: 400 });
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Cuerpo de la petición no es JSON válido' }, { status: 400 });
   }
 
   let client;
   try {
     client = await connectWithRetry();
-    const body = await request.json();
-    const {
-        nombre, descripcion_html, id_tipo_evento, id_alcance,
-        fecha_inicio, fecha_fin, fecha_limite_registro, hora_inicio, hora_fin,
-        ubicacion, cupos, tiene_costo, costo, instrucciones_pago,
-        imagen_flyer_url, imagen_flyer_key, solicitar_talla, slug,
-        // Concurso
-        es_concurso, modalidad, max_integrantes_equipo, min_integrantes_equipo, id_plataforma,
-        requiere_asesor, asesor_participa, max_asesores, url_concurso
-    } = body;
 
-    // Validación de campos obligatorios (la DB exige fecha_fin/hora_fin NOT NULL).
-    if (!nombre || !id_tipo_evento || !id_alcance || !fecha_inicio || !hora_inicio || !hora_fin) {
-        return NextResponse.json({ error: 'Faltan campos obligatorios' }, { status: 400 });
+    const idTipo = parseInt(body?.id_tipo_evento, 10);
+    const tipoRes = Number.isInteger(idTipo)
+      ? await client.query('SELECT nombre, permite_equipos FROM catalogo_tipo_evento WHERE id_tipo_evento = $1', [idTipo])
+      : { rows: [] };
+    if (tipoRes.rows.length === 0) {
+      return NextResponse.json({ error: 'Elige un tipo de evento válido.' }, { status: 400 });
     }
-    // Coherencia de integrantes en concursos por equipos: min >= 2 y min <= max.
-    if (es_concurso && modalidad === 'equipos') {
-      const minInt = parseInt(min_integrantes_equipo) || 2;
-      const maxInt = parseInt(max_integrantes_equipo) || 3;
-      if (minInt < 2) {
-        return NextResponse.json({ error: 'El mínimo de integrantes por equipo debe ser al menos 2.' }, { status: 400 });
-      }
-      if (minInt > maxInt) {
-        return NextResponse.json({ error: 'El mínimo de integrantes no puede ser mayor que el máximo.' }, { status: 400 });
-      }
-    }
+
+    const { evento, concurso } = normalizarEvento(body, { tipo: tipoRes.rows[0], esEdicion: true });
 
     await client.query('BEGIN');
 
-    // 1. Bloquear el evento y leer estado actual (imagen + cupos).
+    // 1. Bloquear el evento y leer estado actual (imagen, cupos, slug, estado).
     const currentRes = await client.query(
-      'SELECT imagen_flyer_url, imagen_flyer_key, cupos AS cupos_actual, cupos_disponibles, slug AS slug_actual FROM evento WHERE id_evento = $1 FOR UPDATE',
+      `SELECT imagen_flyer_url, imagen_flyer_key, cupos AS cupos_actual, cupos_disponibles,
+              slug AS slug_actual, estado AS estado_actual
+         FROM evento WHERE id_evento = $1 AND deleted_at IS NULL FOR UPDATE`,
       [id],
     );
     if (currentRes.rows.length === 0) {
         await client.query('ROLLBACK');
         return NextResponse.json({ error: 'Evento no encontrado' }, { status: 404 });
     }
-    const oldUrl = currentRes.rows[0].imagen_flyer_url;
-    const oldKey = currentRes.rows[0].imagen_flyer_key;
+    const actual = currentRes.rows[0];
 
     // Si la propiedad no viene en el body, conservar el valor actual. Solo se
     // toca cuando el cliente envía explícitamente la propiedad (incluso como null
@@ -157,138 +133,125 @@ export async function PUT(request, context) {
     const hasKeyField = Object.prototype.hasOwnProperty.call(body, 'imagen_flyer_key');
     const hasUrlField = Object.prototype.hasOwnProperty.call(body, 'imagen_flyer_url');
 
-    let finalKey = oldKey;
-    let finalUrl = oldUrl;
+    let finalKey = actual.imagen_flyer_key;
+    let finalUrl = actual.imagen_flyer_url;
     // El borrado en el CDN se difiere a DESPUÉS del COMMIT: si la transacción
     // hiciera ROLLBACK, no queremos haber borrado un archivo aún referenciado.
     let keyToDeleteAfterCommit = null;
 
     if (hasKeyField) {
-      finalKey = imagen_flyer_key ?? null;
-      if (oldKey && oldKey !== finalKey) {
-        keyToDeleteAfterCommit = oldKey;
+      finalKey = body.imagen_flyer_key ?? null;
+      if (actual.imagen_flyer_key && actual.imagen_flyer_key !== finalKey) {
+        keyToDeleteAfterCommit = actual.imagen_flyer_key;
       }
     }
     if (hasUrlField) {
-      finalUrl = imagen_flyer_url ?? null;
+      finalUrl = body.imagen_flyer_url ?? null;
     }
 
-    const nuevoCupos = parseInt(cupos);
+    // 2. Cambio de modalidad con inscripciones dentro. Pasar de equipos a
+    //    individual dejaría equipos inscritos en un evento que ya no los admite
+    //    (y al revés). Se rechaza con un mensaje claro en vez de dejar datos
+    //    incoherentes.
+    const inscRes = await client.query(
+      `SELECT COUNT(*) FILTER (WHERE id_equipo IS NOT NULL)::int AS equipos,
+              COUNT(*) FILTER (WHERE id_equipo IS NULL)::int AS individuales
+         FROM inscripcion_evento WHERE id_evento = $1 AND estado <> 'cancelada'`,
+      [id],
+    );
+    const { equipos: equiposVivos, individuales: individualesVivos } = inscRes.rows[0];
+    if (concurso?.modalidad === 'equipos' && individualesVivos > 0) {
+      await client.query('ROLLBACK');
+      return NextResponse.json(
+        { error: `No se puede cambiar a modalidad por equipos: el evento ya tiene ${individualesVivos} inscripción(es) individual(es).` },
+        { status: 409 },
+      );
+    }
+    if (concurso?.modalidad !== 'equipos' && equiposVivos > 0) {
+      await client.query('ROLLBACK');
+      return NextResponse.json(
+        { error: `No se puede quitar la modalidad por equipos: el evento ya tiene ${equiposVivos} equipo(s) inscrito(s). Cancela primero sus inscripciones.` },
+        { status: 409 },
+      );
+    }
 
-    // 2. Update Evento
+    // 3. Update Evento.
     // `cupos_disponibles` NO se calcula aquí: se escribe un valor provisional
     // (el que había) y al final de la transacción `recalcularCupos` lo deriva de
-    // las inscripciones reales. Antes este PUT usaba una regla propia
-    // (estado <> 'cancelada', equipos por integrante) distinta de la del trigger
-    // de la base (sólo 'confirmada', siempre ±1), así que cada edición del aforo
-    // dejaba el contador con un criterio y el trigger seguía moviéndolo con otro.
-    // Además sólo recalculaba si cambiaban los cupos, de modo que un contador ya
-    // desincronizado no había forma de repararlo desde el panel.
-    const updateQuery = `
-        UPDATE evento SET
-            nombre = $1,
-            descripcion_html = $2,
-            id_tipo_evento = $3,
-            id_alcance = $4,
-            fecha_inicio = $5,
-            fecha_fin = $6,
-            fecha_limite_registro = $7,
-            hora_inicio = $8,
-            hora_fin = $9,
-            ubicacion = $10,
-            cupos = $11,
-            cupos_disponibles = $12,
-            tiene_costo = $13,
-            costo = $14,
-            imagen_flyer_url = $15,
-            imagen_flyer_key = $16,
-            solicitar_talla = $17,
-            instrucciones_pago = $18,
-            -- Igual que la imagen: sólo se toca si el cliente manda la clave.
-            -- Así un PUT de un formulario que no conoce el campo no borra el
-            -- identificador de la landing.
-            slug = $19,
-            updated_at = NOW()
-        WHERE id_evento = $20
-        RETURNING *
-    `;
+    // las inscripciones reales (y, si los desafíos dictan el aforo, también
+    // reescribe `cupos`). Ver src/lib/eventos-cupos.js.
+    const cuposValue = evento.cupos === undefined ? actual.cupos_actual : evento.cupos;
+    const slugValue = evento.slug === undefined ? actual.slug_actual : evento.slug;
+    const estadoValue = evento.estado === undefined ? actual.estado_actual : evento.estado;
 
-    const fechaFinValue = fecha_fin || fecha_inicio;
-    const costoValue = parseFloat(costo) || 0;
-    const tieneCostoValue = Boolean(tiene_costo) || costoValue > 0;
-    const cuposValue = Number.isInteger(nuevoCupos) ? nuevoCupos : currentRes.rows[0].cupos_actual;
-    const slugValue = Object.prototype.hasOwnProperty.call(body, 'slug')
-      ? (slugificar(slug, 60) || null)
-      : currentRes.rows[0].slug_actual;
-
-    await client.query(updateQuery, [
-        nombre, sanitizeHtml(descripcion_html || ''), id_tipo_evento, id_alcance,
-        fecha_inicio, fechaFinValue, fecha_limite_registro || null, hora_inicio, hora_fin,
-        ubicacion ?? null, cuposValue, currentRes.rows[0].cupos_disponibles, tieneCostoValue, costoValue,
-        finalUrl, finalKey, Boolean(solicitar_talla),
-        // Igual que en el alta: las instrucciones sólo viven mientras el
-        // evento cobre. Al desmarcar el costo se limpian.
-        tieneCostoValue ? (instrucciones_pago?.trim() || null) : null,
+    await client.query(
+      `UPDATE evento SET
+          nombre = $1,
+          descripcion_html = $2,
+          id_tipo_evento = $3,
+          id_alcance = $4,
+          fecha_inicio = $5,
+          fecha_fin = $6,
+          fecha_limite_registro = $7,
+          hora_inicio = $8,
+          hora_fin = $9,
+          ubicacion = $10,
+          cupos = $11,
+          cupos_disponibles = $12,
+          tiene_costo = $13,
+          costo = $14,
+          imagen_flyer_url = $15,
+          imagen_flyer_key = $16,
+          solicitar_talla = $17,
+          asignar_mesas = $18,
+          instrucciones_pago = $19,
+          slug = $20,
+          estado = $21,
+          updated_at = NOW()
+        WHERE id_evento = $22`,
+      [
+        evento.nombre, sanitizeHtml(evento.descripcion_html || ''), evento.id_tipo_evento, evento.id_alcance,
+        evento.fecha_inicio, evento.fecha_fin, evento.fecha_limite_registro, evento.hora_inicio, evento.hora_fin,
+        evento.ubicacion, cuposValue, actual.cupos_disponibles, evento.tiene_costo, evento.costo,
+        finalUrl, finalKey, evento.solicitar_talla, evento.asignar_mesas,
+        evento.instrucciones_pago,
         slugValue,
-        id
-    ]);
+        estadoValue,
+        id,
+      ],
+    );
 
-    // Reconciliación del aforo: fuente de verdad = las inscripciones reales.
-    // Se ejecuta SIEMPRE (cambien o no los cupos), así que guardar el evento
-    // sin tocar nada ya repara un contador desincronizado.
-    // Ver src/lib/eventos-cupos.js.
-    await recalcularCupos(client, id);
-
-    // 3. Handle Concurso (Insert, Update, or Delete)
-    if (es_concurso) {
+    // 4. Handle Concurso (Insert, Update, or Delete)
+    if (concurso) {
         const checkConcurso = await client.query('SELECT id_concurso FROM concurso WHERE id_evento = $1', [id]);
-        
-        const asesorParticipaValue = Boolean(asesor_participa);
-        const maxAsesoresValue = Math.min(5, Math.max(1, parseInt(max_asesores) || 1));
-
+        const valores = [
+          concurso.id_plataforma,
+          concurso.modalidad,
+          concurso.max_integrantes_equipo,
+          concurso.min_integrantes_equipo,
+          concurso.requiere_asesor,
+          concurso.asesor_participa,
+          concurso.max_asesores,
+          concurso.url_concurso,
+          id,
+        ];
         if (checkConcurso.rows.length > 0) {
-            // Update existing
-            await client.query(`
-                UPDATE concurso SET
-                    id_plataforma = $1,
-                    modalidad = $2,
-                    max_integrantes_equipo = $3,
-                    min_integrantes_equipo = $4,
-                    requiere_asesor = $5,
-                    asesor_participa = $6,
-                    max_asesores = $7,
-                    url_concurso = $8
-                WHERE id_evento = $9
-            `, [
-                id_plataforma || null,
-                modalidad || 'individual',
-                modalidad === 'equipos' ? (parseInt(max_integrantes_equipo) || 3) : null,
-                modalidad === 'equipos' ? (parseInt(min_integrantes_equipo) || 2) : 1,
-                requiere_asesor,
-                asesorParticipaValue,
-                maxAsesoresValue,
-                url_concurso,
-                id
-            ]);
+            await client.query(
+              `UPDATE concurso SET
+                  id_plataforma = $1, modalidad = $2, max_integrantes_equipo = $3,
+                  min_integrantes_equipo = $4, requiere_asesor = $5, asesor_participa = $6,
+                  max_asesores = $7, url_concurso = $8
+                WHERE id_evento = $9`,
+              valores,
+            );
         } else {
-            // Create new
-            await client.query(`
-                INSERT INTO concurso (
-                    id_evento, id_plataforma, modalidad,
-                    max_integrantes_equipo, min_integrantes_equipo, requiere_asesor,
-                    asesor_participa, max_asesores, url_concurso
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            `, [
-                id,
-                id_plataforma || null,
-                modalidad || 'individual',
-                modalidad === 'equipos' ? (parseInt(max_integrantes_equipo) || 3) : null,
-                modalidad === 'equipos' ? (parseInt(min_integrantes_equipo) || 2) : 1,
-                requiere_asesor,
-                asesorParticipaValue,
-                maxAsesoresValue,
-                url_concurso
-            ]);
+            await client.query(
+              `INSERT INTO concurso (
+                  id_plataforma, modalidad, max_integrantes_equipo, min_integrantes_equipo,
+                  requiere_asesor, asesor_participa, max_asesores, url_concurso, id_evento
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+              valores,
+            );
         }
     } else {
         // Si dejó de ser concurso, NO borrar a ciegas: hay equipos/inscripciones
@@ -312,6 +275,11 @@ export async function PUT(request, context) {
         await client.query('DELETE FROM concurso WHERE id_evento = $1', [id]);
     }
 
+    // 5. Reconciliación del aforo: fuente de verdad = las inscripciones reales
+    //    (y los desafíos, si dictan el aforo). Se ejecuta SIEMPRE, así que
+    //    guardar el evento sin tocar nada ya repara un contador desincronizado.
+    const cupos = await recalcularCupos(client, id);
+
     await client.query('COMMIT');
 
     // Borrado diferido del archivo viejo en el CDN (ya commiteado).
@@ -319,31 +287,25 @@ export async function PUT(request, context) {
       await deleteFromUploadThing(keyToDeleteAfterCommit);
     }
 
-    return NextResponse.json({ success: true, message: 'Evento actualizado correctamente' });
+    return NextResponse.json({
+      success: true,
+      message: 'Evento actualizado correctamente',
+      cupos: cupos.cupos,
+      cupo_por_retos: cupos.cupo_por_retos,
+      lugares_ocupados: cupos.lugares_ocupados,
+    });
 
   } catch (error) {
     if (client) {
       try { await client.query('ROLLBACK'); } catch {}
     }
+    if (error instanceof EventoInvalido) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     console.error('Error en PUT /api/admin/eventos/[id]:', error);
-    if (error.code === '23514') {
-      const c = error.constraint || '';
-      let msg = 'Datos del evento inválidos.';
-      if (c.includes('costo')) msg = 'Si el evento tiene costo, el costo debe ser mayor a 0 (y 0 si no tiene costo).';
-      else if (c.includes('cupos')) msg = 'Los cupos deben ser mayores a 0.';
-      else if (c.includes('fecha')) msg = 'La fecha de fin debe ser igual o posterior a la de inicio.';
-      else if (c.includes('hora')) msg = 'En eventos de un mismo día, la hora de fin debe ser posterior a la de inicio.';
-      else if (c.includes('modalidad') || c.includes('integrantes')) msg = 'Configuración de concurso inválida: en modalidad por equipos el máximo de integrantes debe ser ≥ 2.';
-      return NextResponse.json({ error: msg }, { status: 400 });
-    }
-    if (error.code === '23503') {
-      return NextResponse.json({ error: 'Tipo de evento, alcance o plataforma inválidos.' }, { status: 400 });
-    }
-    if (error.code === '23505' && String(error.constraint || '').includes('slug')) {
-      return NextResponse.json(
-        { error: 'Ya hay otro evento usando ese identificador de página. Elige uno distinto.' },
-        { status: 409 },
-      );
+    const mensaje = mensajeErrorEvento(error);
+    if (mensaje) {
+      return NextResponse.json({ error: mensaje }, { status: error.code === '23505' ? 409 : 400 });
     }
     return NextResponse.json({ error: 'Error al actualizar evento' }, { status: 500 });
   } finally {

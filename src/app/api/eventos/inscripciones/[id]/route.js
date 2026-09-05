@@ -29,18 +29,27 @@ export async function PATCH(request, { params }) {
   }
   const { action, value } = body;
 
-  // action: 'toggle_asistencia' | 'toggle_pago'; value debe ser booleano.
-  if (typeof value !== 'boolean') {
-    return NextResponse.json({ error: 'El campo "value" debe ser booleano' }, { status: 400 });
-  }
-  if (action !== 'toggle_asistencia' && action !== 'toggle_pago') {
+  // action: 'toggle_asistencia' | 'toggle_pago' (value booleano) |
+  //         'set_mesa' (value: texto corto o null para quitarla).
+  const ACCIONES = ['toggle_asistencia', 'toggle_pago', 'set_mesa'];
+  if (!ACCIONES.includes(action)) {
     return NextResponse.json({ error: 'Acción no válida' }, { status: 400 });
   }
+  if (action !== 'set_mesa' && typeof value !== 'boolean') {
+    return NextResponse.json({ error: 'El campo "value" debe ser booleano' }, { status: 400 });
+  }
+  if (action === 'set_mesa' && value !== null && typeof value !== 'string') {
+    return NextResponse.json({ error: 'La mesa debe ser un texto (o null para quitarla)' }, { status: 400 });
+  }
+  const mesa = action === 'set_mesa' ? (String(value ?? '').trim().slice(0, 40) || null) : null;
 
   const client = await connectWithRetry();
   try {
     const { rows: filas } = await client.query(
-      'SELECT id_evento, id_equipo FROM inscripcion_evento WHERE id_inscripcion = $1',
+      `SELECT ie.id_evento, ie.id_equipo, e.asignar_mesas
+         FROM inscripcion_evento ie
+         JOIN evento e ON e.id_evento = ie.id_evento
+        WHERE ie.id_inscripcion = $1`,
       [idNum],
     );
     const inscripcion = filas[0];
@@ -62,6 +71,20 @@ export async function PATCH(request, { params }) {
         { error: 'La asistencia de un equipo se marca por integrante desde el escáner QR.' },
         { status: 400 },
       );
+    }
+
+    if (action === 'set_mesa') {
+      if (!inscripcion.asignar_mesas) {
+        return NextResponse.json(
+          { error: 'Este evento no reparte mesas. Actívalo en la configuración del evento.' },
+          { status: 400 },
+        );
+      }
+      const res = await client.query(
+        'UPDATE inscripcion_evento SET mesa = $1, updated_at = NOW() WHERE id_inscripcion = $2 RETURNING id_inscripcion, mesa',
+        [mesa, idNum],
+      );
+      return NextResponse.json(res.rows[0]);
     }
 
     const query =

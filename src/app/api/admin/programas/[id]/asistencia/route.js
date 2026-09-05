@@ -53,6 +53,7 @@ export async function GET(request, { params }) {
         ip.id_miembro,
         ip.id_invitado,
         ip.fecha_inscripcion,
+        ip.mesa,
         COALESCE(
           TRIM(m.nombre || ' ' || m.apellido_paterno || ' ' || COALESCE(m.apellido_materno, '')),
           i.nombre_completo

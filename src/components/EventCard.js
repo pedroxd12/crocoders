@@ -7,6 +7,7 @@ import { motion } from 'framer-motion';
 import { formatearFechaMedia } from '@/lib/fechas';
 import { EstadoBadge, CategoriaTag, estadoDeEvento, rangoEquipos } from '@/components/eventos/EventoBadges';
 import Button from '@/components/ui/Button';
+import { esPorEquipos, ocupacionDeEvento, UNIDAD_AFORO } from '@/lib/aforo';
 
 /**
  * Fila de dato del evento. Un solo tratamiento de iconografía (cajita con
@@ -36,15 +37,14 @@ function EventCard({ evento, isRegistered, onParticipate, onViewDetails, index }
   const [imageError, setImageError] = useState(false);
 
   const isEventFinished = evento.isPastEvent;
-  const sinCupos = evento.cupos !== null && evento.cupos_disponibles <= 0;
+  const ocupacion = ocupacionDeEvento(evento);
+  const sinCupos = ocupacion.lleno;
   const estado = estadoDeEvento(evento, isRegistered);
 
   // ¿Concurso por equipos? Entonces la inscripción NO es el flujo individual
   // genérico: el botón lo dice y el clic lleva al detalle, donde vive el
-  // formulario de equipo. Mismas tres condiciones que usa el detalle.
-  const esConcursoEquipos = Boolean(
-    evento.permite_equipos && evento.id_concurso && evento.modalidad === 'equipos',
-  );
+  // formulario de equipo (src/lib/aforo.js).
+  const esConcursoEquipos = esPorEquipos(evento);
 
   // El formateo vive en un helper compartido porque la fecha llega como DATE de
   // Postgres serializado a UTC y, formateada sin más, se imprime el día anterior.
@@ -70,19 +70,18 @@ function EventCard({ evento, isRegistered, onParticipate, onViewDetails, index }
   // "147/150 disponibles" con barra llena comunicaba justo lo contrario.
   // `lugares_ocupados` cuenta personas (un equipo = N lugares).
   const getCuposDisplay = () => {
-    if (evento.cupos === null) return <span>Cupos ilimitados</span>;
+    const u = UNIDAD_AFORO[ocupacion.unidad];
+    if (ocupacion.cupos === null) {
+      return <span>{esConcursoEquipos ? 'Equipos ilimitados' : 'Cupos ilimitados'}</span>;
+    }
 
-    const cupos = Number(evento.cupos);
-    const ocupados = evento.lugares_ocupados != null
-      ? Number(evento.lugares_ocupados)
-      : Math.max(0, cupos - Number(evento.cupos_disponibles ?? cupos));
-    const libres = Math.max(0, cupos - ocupados);
+    const { cupos, ocupados, libres } = ocupacion;
     const pocosDisponibles = libres > 0 && libres <= cupos * 0.2;
 
     return (
       <span className="flex flex-wrap items-center gap-x-1.5">
         <span className="text-fg font-medium">{ocupados}</span>
-        <span>de {cupos} inscritos</span>
+        <span>de {cupos} {u.inscritos}</span>
         {pocosDisponibles && (
           <span className="font-medium text-warning">· ¡Quedan {libres}!</span>
         )}

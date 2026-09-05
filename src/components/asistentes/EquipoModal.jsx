@@ -100,6 +100,7 @@ export default function EquipoModal({ fila, conTalla = false, onClose }) {
             {integrantes} {integrantes === 1 ? 'integrante' : 'integrantes'}
             {asesores > 0 && ` · ${asesores} ${asesores === 1 ? 'asesor' : 'asesores'}`}
             {fila.reto_titulo && ` · Desafío: ${fila.reto_titulo}`}
+            {fila.mesa && ` · ${fila.mesa}`}
             {fila.correo && ` · Contacto: ${fila.correo}`}
           </p>
           <Table

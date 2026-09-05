@@ -17,6 +17,7 @@
 import { query } from '@/lib/db-server';
 import { ZONA_EVENTOS, sqlRegistroCerrado, sqlEventoTerminado } from '@/lib/eventos-fechas';
 import { listarRetos } from '@/lib/retos';
+import { sqlLugaresOcupados } from '@/lib/eventos-cupos';
 
 const SQL_EVENTO_POR_SLUG = `
   SELECT
@@ -39,15 +40,10 @@ const SQL_EVENTO_POR_SLUG = `
     c.max_integrantes_equipo,
     c.requiere_asesor,
     c.asesor_participa,
-    (
-      SELECT COALESCE(SUM(
-               CASE WHEN ie.id_equipo IS NOT NULL
-                    THEN (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = ie.id_equipo)
-                    ELSE 1 END
-             ), 0)::int
-      FROM inscripcion_evento ie
-      WHERE ie.id_evento = e.id_evento AND ie.estado <> 'cancelada'
-    ) AS lugares_ocupados
+    e.resultados_publicados,
+    -- Equipos inscritos (el aforo de un concurso por equipos se cuenta en
+    -- equipos, src/lib/aforo.js).
+    ${sqlLugaresOcupados('e')} AS lugares_ocupados
   FROM evento e
   LEFT JOIN concurso c ON e.id_evento = c.id_evento
   WHERE e.slug = $1
@@ -131,6 +127,9 @@ export async function obtenerLandingEvento(slug = 'hackaitlac') {
       cupos,
       lugares_ocupados: ocupados,
       lugares_libres: cupos === null ? null : Math.max(0, cupos - ocupados),
+      // Unidad del aforo: en el HackaItlac son equipos.
+      unidad_aforo: fila.modalidad === 'equipos' ? 'equipos' : 'personas',
+      resultados_publicados: Boolean(fila.resultados_publicados),
       tiene_costo: Boolean(fila.tiene_costo),
       costo: fila.costo === null ? null : Number(fila.costo),
       fecha_limite_registro:

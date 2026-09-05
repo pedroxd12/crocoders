@@ -58,3 +58,15 @@ export const SEMESTRES = Array.from({ length: 14 }, (_, i) => ({
   value: String(i + 1),
   label: `${i + 1}° Semestre`,
 }));
+
+// Procedencia de un juez (`juez_evento.procedencia`, CHECK de la migración
+// 001). La lista vivía duplicada en el panel de staff y en su API.
+export const PROCEDENCIAS_JUEZ = [
+  { value: 'club_programacion', label: 'Miembro del Club de Programación' },
+  { value: 'computer_society', label: 'Asociación (IEEE / Computer Society)' },
+  { value: 'itlac', label: 'Universidad (ITLAC)' },
+  { value: 'universitario', label: 'Universitario externo' },
+  { value: 'preparatoria', label: 'Estudiante de preparatoria' },
+  { value: 'otro', label: 'Otro' },
+];
+export const PROCEDENCIAS_JUEZ_VALUES = PROCEDENCIAS_JUEZ.map((p) => p.value);

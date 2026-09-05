@@ -19,6 +19,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import EmptyState from '@/components/ui/EmptyState';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { fetcher } from '@/lib/fetcher';
+import { MesaEditable } from '@/components/asistentes/columnas';
 
 export default function ProgramaAsistencia() {
   const { id } = useParams();
@@ -138,7 +139,7 @@ export default function ProgramaAsistencia() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Error al acreditar');
-      toast.success('Participante marcado como acreditado (la entrega del certificado es manual)');
+      toast.success('Participante acreditado. Genera su certificado desde «Certificados y gafetes».');
       mutate();
     } catch (error) {
       toast.error(error.message);
@@ -153,12 +154,14 @@ export default function ProgramaAsistencia() {
       const s = v === null || v === undefined ? '' : String(v);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const headers = ['Nombre', 'Email', 'Teléfono', 'Tipo', 'Sesiones asistidas', '% Asistencia', 'Elegible', 'Acreditado'];
+    const conMesas = Boolean(programa?.asignar_mesas);
+    const headers = ['Nombre', 'Email', 'Teléfono', 'Tipo', ...(conMesas ? ['Mesa'] : []), 'Sesiones asistidas', '% Asistencia', 'Elegible', 'Acreditado'];
     const rows = asistencia.map((a) => [
       a.nombre_completo,
       a.email,
       a.telefono || '',
       a.tipo,
+      ...(conMesas ? [a.mesa || ''] : []),
       a.sesiones_asistidas,
       `${a.porcentaje_asistencia}%`,
       a.elegible_certificado ? 'Sí' : 'No',
@@ -174,6 +177,32 @@ export default function ProgramaAsistencia() {
     link.click();
   };
 
+  // Mesa o lugar del participante (migración 015): edición en línea contra
+  // PATCH /api/admin/programas/[id]/mesa. Se parchea la fila local sin
+  // volver a pedir el reporte entero.
+  const guardarMesa = async (row, mesa) => {
+    try {
+      const res = await fetch(`/api/admin/programas/${id}/mesa`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id_miembro: row.tipo === 'miembro' ? row.id_miembro : null,
+          id_invitado: row.tipo === 'invitado' ? row.id_invitado : null,
+          mesa,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'No se pudo asignar la mesa');
+      mutate(
+        (actual = []) => actual.map((a) => (a.id_inscripcion_programa === row.id_inscripcion_programa ? { ...a, mesa: data.mesa ?? null } : a)),
+        { revalidate: false },
+      );
+      toast.success(data.mesa ? `Mesa asignada: ${data.mesa}` : 'Mesa retirada');
+    } catch (error) {
+      toast.error(error.message);
+    }
+  };
+
   const elegibles = asistencia.filter((a) => a.elegible_certificado && !a.certificado_emitido);
   const acreditados = asistencia.filter((a) => a.certificado_emitido);
 
@@ -185,6 +214,20 @@ export default function ProgramaAsistencia() {
       label: 'Tipo',
       render: (row) => <Badge tone={row.tipo === 'miembro' ? 'info' : 'neutral'}>{row.tipo}</Badge>,
     },
+    ...(programa?.asignar_mesas
+      ? [{
+          key: 'mesa',
+          label: 'Mesa',
+          align: 'center',
+          render: (row) => (
+            <MesaEditable
+              key={`${row.id_inscripcion_programa}-${row.mesa ?? ''}`}
+              valor={row.mesa}
+              onGuardar={(mesa) => guardarMesa(row, mesa)}
+            />
+          ),
+        }]
+      : []),
     { key: 'sesiones_asistidas', label: 'Sesiones', align: 'center', cellClassName: 'tabular-nums' },
     {
       key: 'porcentaje_asistencia',
@@ -260,6 +303,9 @@ export default function ProgramaAsistencia() {
             </Button>
             <Button onClick={exportarCSV} variant="secondary" disabled={asistencia.length === 0}>
               <Download size={16} /> Exportar CSV
+            </Button>
+            <Button onClick={() => router.push(`/admin/programas/${id}/documentos`)} variant="secondary">
+              <Award size={16} /> Certificados y gafetes
             </Button>
           </>
         }

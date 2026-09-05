@@ -145,6 +145,8 @@ export async function POST(request) {
       evento: inscripcion.nombre_evento,
       fecha_evento: inscripcion.fecha_inicio,
       solicitar_talla: Boolean(inscripcion.solicitar_talla),
+      // Mesa asignada (migración 015): el staff la dice al recibir a la persona.
+      mesa: inscripcion.mesa ?? null,
     };
 
     // Equipo: el escaneo no escribe nada; devuelve el roster para que el staff

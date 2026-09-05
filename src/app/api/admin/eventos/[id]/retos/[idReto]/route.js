@@ -1,22 +1,10 @@
 import { NextResponse } from 'next/server';
-import { UTApi } from 'uploadthing/server';
 import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 import { retoUpdateSchema, parseOrError } from '@/lib/validation';
 import { slugDisponible } from '@/lib/retos';
-
-const utapi = new UTApi();
-
-// Mismo criterio que el flyer del evento: al reemplazar o quitar la imagen se
-// borra el archivo del CDN, que si no queda pagando cuota para siempre.
-async function borrarDelCdn(fileKey) {
-  if (!fileKey) return;
-  try {
-    await utapi.deleteFiles(fileKey);
-  } catch (e) {
-    console.error(`No se pudo borrar ${fileKey} de UploadThing:`, e);
-  }
-}
+import { recalcularCupos } from '@/lib/eventos-cupos';
+import { deleteFromUploadThing } from '@/lib/uploadthing-server';
 
 const vacioANull = (v) => {
   if (v === undefined || v === null) return null;
@@ -59,6 +47,10 @@ export async function PUT(request, context) {
   try {
     await client.query('BEGIN');
 
+    // Bloqueo del evento: el cupo del reto puede cambiar el aforo del evento y
+    // ese recálculo tiene que ser atómico frente a registros simultáneos.
+    await client.query('SELECT 1 FROM evento WHERE id_evento = $1 FOR UPDATE', [idEvento]);
+
     const actual = await cargarReto(client, idEvento, retoId);
     if (!actual) {
       await client.query('ROLLBACK');
@@ -82,6 +74,23 @@ export async function PUT(request, context) {
     const keyAntigua = tocaImagen && actual.imagen_key && actual.imagen_key !== nuevaKey
       ? actual.imagen_key
       : null;
+
+    // Reducir el cupo por debajo de lo ya inscrito dejaría equipos "de más":
+    // se rechaza con la cifra real.
+    if (datos.cupo_equipos !== undefined && datos.cupo_equipos !== null) {
+      const ocupadosRes = await client.query(
+        `SELECT COUNT(*)::int AS ocupados FROM inscripcion_evento
+          WHERE id_reto = $1 AND estado <> 'cancelada'`,
+        [retoId],
+      );
+      if (ocupadosRes.rows[0].ocupados > datos.cupo_equipos) {
+        await client.query('ROLLBACK');
+        return NextResponse.json(
+          { error: `El desafío ya tiene ${ocupadosRes.rows[0].ocupados} inscripción(es): el cupo no puede ser menor.` },
+          { status: 409 },
+        );
+      }
+    }
 
     const res = await client.query(
       `UPDATE reto_evento SET
@@ -123,12 +132,13 @@ export async function PUT(request, context) {
       ],
     );
 
+    const cupos = await recalcularCupos(client, idEvento);
     await client.query('COMMIT');
 
     // Fuera de la transacción: si el CDN falla no debe deshacer el guardado.
-    await borrarDelCdn(keyAntigua);
+    await deleteFromUploadThing(keyAntigua);
 
-    return NextResponse.json({ message: 'Reto actualizado', ...res.rows[0] });
+    return NextResponse.json({ message: 'Reto actualizado', ...res.rows[0], cupo_por_retos: cupos.cupo_por_retos });
   } catch (error) {
     try {
       await client.query('ROLLBACK');
@@ -158,8 +168,12 @@ export async function DELETE(request, context) {
 
   const client = await connectWithRetry();
   try {
+    await client.query('BEGIN');
+    await client.query('SELECT 1 FROM evento WHERE id_evento = $1 FOR UPDATE', [idEvento]);
+
     const actual = await cargarReto(client, idEvento, retoId);
     if (!actual) {
+      await client.query('ROLLBACK');
       return NextResponse.json({ error: 'Reto no encontrado' }, { status: 404 });
     }
 
@@ -172,6 +186,7 @@ export async function DELETE(request, context) {
       [retoId],
     );
     if (enUso.rows[0].total > 0) {
+      await client.query('ROLLBACK');
       return NextResponse.json(
         {
           error: `“${actual.titulo}” tiene ${enUso.rows[0].total} inscripción(es): no se puede borrar. Desactívalo para que deje de admitir registros sin perder los que ya tiene.`,
@@ -182,10 +197,14 @@ export async function DELETE(request, context) {
     }
 
     await client.query('DELETE FROM reto_evento WHERE id_reto = $1', [retoId]);
-    await borrarDelCdn(actual.imagen_key);
+    const cupos = await recalcularCupos(client, idEvento);
+    await client.query('COMMIT');
 
-    return NextResponse.json({ message: 'Reto eliminado' });
+    await deleteFromUploadThing(actual.imagen_key);
+
+    return NextResponse.json({ message: 'Reto eliminado', cupo_por_retos: cupos.cupo_por_retos });
   } catch (error) {
+    try { await client.query('ROLLBACK'); } catch {}
     console.error('Error en DELETE /api/admin/eventos/[id]/retos/[idReto]:', error);
     return NextResponse.json({ error: 'Error al eliminar el reto' }, { status: 500 });
   } finally {

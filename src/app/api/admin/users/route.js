@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import pool, { connectWithRetry } from '@/lib/db-server';
+import { connectWithRetry } from '@/lib/db-server';
 import { requireAdmin } from '@/lib/auth';
 
 export async function GET(request) {

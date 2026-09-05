@@ -138,6 +138,22 @@ export const ourFileRouter = {
       return { fileUrl: file.ufsUrl, fileName: file.name, fileKey: file.key };
     }),
 
+  // Plantilla PDF de certificados, gafetes y reconocimientos (migración 015).
+  // Sólo administración; la fila la escribe POST /api/admin/plantillas con la
+  // clave que se devuelve aquí (mismo patrón que las evidencias).
+  plantillaPdfUploader: f({ pdf: { maxFileSize: "8MB", maxFileCount: 1 } })
+    .middleware(async ({ req }) => {
+      return await requireAdminUpload(req, 'plantillaPdfUploader');
+    })
+    .onUploadComplete(async ({ metadata, file }) => {
+      if (!metadata || !file || !file.ufsUrl || !file.key || !file.name) {
+        console.error("[plantillaPdfUploader] onUploadComplete: datos incompletos.");
+        throw new Error("Server-side processing error after upload completion (missing data).");
+      }
+      console.log(`[plantillaPdfUploader] Subida OK (usuario ${metadata.userId}, clave ${file.key})`);
+      return { uploadedBy: metadata.userId, fileUrl: file.ufsUrl, fileName: file.name, fileKey: file.key };
+    }),
+
   evidenciaUploader: f({ image: { maxFileSize: "8MB", maxFileCount: 1 } })
     .middleware(async ({ req }) => {
       return await requireAdminUpload(req, 'evidenciaUploader');

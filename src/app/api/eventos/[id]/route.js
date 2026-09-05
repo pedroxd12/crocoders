@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db-server';
 import { ZONA_EVENTOS, sqlLimiteRegistro, sqlRegistroCerrado, sqlEventoTerminado } from '@/lib/eventos-fechas';
+import { sqlLugaresOcupados } from '@/lib/eventos-cupos';
+import { unidadAforo } from '@/lib/aforo';
 
 export async function GET(request, context) {
   try {
@@ -25,10 +27,8 @@ export async function GET(request, context) {
     // sin la conversión, el cliente lo leía como UTC y anunciaba el cierre seis
     // horas antes del real. Ver src/lib/eventos-fechas.js.
     //
-    // `lugares_ocupados` cuenta LUGARES (un equipo ocupa uno por integrante);
-    // `asistentes_count` cuenta FILAS de inscripción. Son unidades distintas y
-    // por eso se exponen por separado: mezclarlas es lo que producía cosas como
-    // "147/150 disponibles" con un solo inscrito.
+    // `lugares_ocupados` cuenta inscripciones vivas en la UNIDAD del aforo
+    // (equipos en concursos por equipos, personas en el resto; src/lib/aforo.js).
     const sqlTexto = `
       SELECT
         e.id_evento,
@@ -70,15 +70,10 @@ export async function GET(request, context) {
           FROM inscripcion_evento
           WHERE id_evento = e.id_evento AND estado <> 'cancelada'
         ) as asistentes_count,
-        (
-          SELECT COALESCE(SUM(
-                   CASE WHEN ie.id_equipo IS NOT NULL
-                        THEN (SELECT COUNT(*) FROM integrante_equipo WHERE id_equipo = ie.id_equipo)
-                        ELSE 1 END
-                 ), 0)::int
-          FROM inscripcion_evento ie
-          WHERE ie.id_evento = e.id_evento AND ie.estado <> 'cancelada'
-        ) as lugares_ocupados
+        -- Inscripciones vivas en la unidad del aforo (equipos o personas).
+        ${sqlLugaresOcupados('e')} as lugares_ocupados,
+        e.resultados_publicados,
+        e.asignar_mesas
       FROM evento e
       LEFT JOIN catalogo_tipo_evento t ON e.id_tipo_evento = t.id_tipo_evento
       LEFT JOIN catalogo_alcance_evento a ON e.id_alcance = a.id_alcance
@@ -135,6 +130,8 @@ export async function GET(request, context) {
       // Usar columna directa de cupos_disponibles
       cupos_disponibles: evento.cupos_disponibles !== null ? Number(evento.cupos_disponibles) : null,
       lugares_ocupados: Number(evento.lugares_ocupados) || 0,
+      unidad_aforo: unidadAforo(evento),
+      resultados_publicados: Boolean(evento.resultados_publicados),
       asistentes_count: Number(evento.asistentes_count) || 0,
       total_inscritos: Number(evento.asistentes_count) || 0,
       imagen_url: evento.imagen_flyer_url, // Alias si el front usa imagen_url

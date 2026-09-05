@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { PLATAFORMAS, limpiarUsuario } from './plataformas';
 import { TALLAS_PLAYERA, NIVELES_ESTUDIO_VALUES } from './registro-campos';
+import { MAX_INTEGRANTES_EQUIPO, MAX_ASESORES_EQUIPO } from './concurso-reglas';
 
 // Talla de playera: los valores válidos viven en registro-campos.js y coinciden
 // con los CHECK de la base (invitado/miembro.talla_playera).
@@ -85,11 +86,11 @@ export const eventoRegisterSchema = z.discriminatedUnion('tipo', [
     eventoId: z.coerce.number().int().positive(),
     id_reto: idRetoSchema,
     equipo: equipoSchema,
-    integrantes: z.array(integranteSchema).min(1).max(10),
+    integrantes: z.array(integranteSchema).min(1).max(MAX_INTEGRANTES_EQUIPO),
     // `asesores` es la forma actual (hasta concurso.max_asesores); `asesor`
     // se acepta por compatibilidad con clientes viejos (equivale a [asesor]).
     asesor: asesorSchema.optional().nullable(),
-    asesores: z.array(asesorSchema).max(5).optional(),
+    asesores: z.array(asesorSchema).max(MAX_ASESORES_EQUIPO).optional(),
   }),
 ]);
 

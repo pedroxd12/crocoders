@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { connectWithRetry } from '@/lib/db-server';
 import { requireAuth } from '@/lib/auth';
-import { sqlLugaresOcupados } from '@/lib/eventos-cupos';
+import { sqlLugaresOcupados, sqlCupoPorRetos } from '@/lib/eventos-cupos';
 
 // GET - Detalle de un evento para el panel de staff.
 // Gate: autenticado; abajo se exige pertenencia a staff_evento de ESTE evento (403).
@@ -59,6 +59,8 @@ export async function GET(request, { params }) {
         e.tiene_costo,
         e.costo,
         e.solicitar_talla,
+        e.asignar_mesas,
+        e.resultados_publicados,
         TO_CHAR(e.fecha_limite_registro, 'YYYY-MM-DD"T"HH24:MI') AS fecha_limite_registro,
         e.imagen_flyer_url AS imagen_url,
         te.nombre AS tipo_evento,
@@ -80,7 +82,8 @@ export async function GET(request, { params }) {
           WHERE ie.id_evento = e.id_evento AND ie.estado <> 'cancelada' AND ie.asistio) AS total_asistieron,
         (SELECT COUNT(*)::int FROM inscripcion_evento ie
           WHERE ie.id_evento = e.id_evento AND ie.estado <> 'cancelada' AND ie.pago_completado) AS pagos_completados,
-        ${sqlLugaresOcupados('e')} AS lugares_ocupados
+        ${sqlLugaresOcupados('e')} AS lugares_ocupados,
+        ${sqlCupoPorRetos('e')} AS cupo_por_retos
       FROM evento e
       LEFT JOIN catalogo_tipo_evento te ON e.id_tipo_evento = te.id_tipo_evento
       LEFT JOIN catalogo_alcance_evento ae ON e.id_alcance = ae.id_alcance

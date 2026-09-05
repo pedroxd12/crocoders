@@ -144,11 +144,23 @@ function Generico() {
   );
 }
 
+/**
+ * Ilustración por identificador de desafío.
+ *
+ * Hay dos juegos de claves para los mismos cinco dibujos: las cortas son las
+ * del contenido de respaldo (`desafios-fallback.js`) y las largas, las que
+ * genera el slug a partir del título cuando el desafío se crea desde el panel.
+ * Sin las segundas, los desafíos de la convocatoria 2026 cargados en la base
+ * caían todos en la ilustración genérica.
+ */
 const ART = {
   arancelaria: Arancelaria,
+  'clasificacion-arancelaria': Arancelaria,
   'alerta-ciudadana': Alerta,
   'resguardo-industrial': Resguardo,
+  'resguardo-equipo-industrial': Resguardo,
   'despacho-agua': Agua,
+  'despacho-automatico-de-agua': Agua,
   'imagen-urbana': Urbana,
 };
 

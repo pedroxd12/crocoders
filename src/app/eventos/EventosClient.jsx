@@ -20,6 +20,8 @@ import {
   limpiarInvitadoPayload,
 } from '@/components/eventos/RegistroInvitado';
 import ComprobantePagoModal from '@/components/eventos/ComprobantePago';
+import { enviarCorreoConfirmacion } from '@/lib/confirmacion-cliente';
+import { esPorEquipos, ocupacionDeEvento } from '@/lib/aforo';
 
 import { UserPlus, LogIn } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -35,17 +37,6 @@ const normalizar = (s) =>
     .replace(/\p{Diacritic}/gu, '')
     .trim();
 
-async function sendEventRegistrationEmail(email, name, eventDetails, qrToken) {
-  const response = await fetch('/api/confirmation', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, name, eventDetails, qrToken }),
-  });
-  if (!response.ok) {
-    const result = await response.json().catch(() => ({}));
-    throw new Error(result.error || 'No se pudo enviar el correo de confirmación');
-  }
-}
 
 // `eventosIniciales` son los eventos que el Server Component de page.jsx ya
 // consultó y mandó dentro del HTML. Se le entregan a SWR como `fallbackData`,
@@ -234,7 +225,7 @@ function EventosContent({ eventosIniciales }) {
       toast.info('El periodo de inscripción para este evento ha finalizado.', { theme: 'dark' });
       return;
     }
-    if (evento.cupos !== null && evento.cupos_disponibles <= 0) {
+    if (ocupacionDeEvento(evento).lleno) {
       toast.info('No hay cupos disponibles.', { theme: 'dark' });
       return;
     }
@@ -248,7 +239,7 @@ function EventosContent({ eventosIniciales }) {
     // Concurso por equipos: el formulario de equipo vive en el detalle. Antes
     // la tarjeta abría el flujo individual genérico y el evento "de concurso"
     // se inscribía como si fuera una conferencia.
-    if (evento.permite_equipos && evento.id_concurso && evento.modalidad === 'equipos') {
+    if (esPorEquipos(evento)) {
       router.push(`/eventos/${evento.id_evento}`);
       return;
     }
@@ -291,7 +282,7 @@ function EventosContent({ eventosIniciales }) {
       } else {
         toast.success('¡Registro exitoso!', { theme: "dark" });
       }
-      sendEventRegistrationEmail(user.correo_electronico, user.nombre_completo, result.event, result.qrToken)
+      enviarCorreoConfirmacion(result.qrToken)
         .catch(() => toast.warning('Te inscribiste, pero no pudimos enviar el correo de confirmación.', { theme: 'dark' }));
       setShowRegistrationTypeModal(false);
       setShowTallaModal(false);
@@ -342,7 +333,7 @@ function EventosContent({ eventosIniciales }) {
       } else {
         toast.success('¡Registro como invitado exitoso!', { theme: "dark" });
       }
-      sendEventRegistrationEmail(guestData.correo_electronico, guestData.nombre_completo, attendanceResult.event, attendanceResult.qrToken)
+      enviarCorreoConfirmacion(attendanceResult.qrToken)
         .catch(() => toast.warning('Te inscribiste, pero no pudimos enviar el correo de confirmación.', { theme: 'dark' }));
       
       setShowGuestFormModal(false);

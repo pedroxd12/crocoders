@@ -6,7 +6,7 @@ import useSWR from 'swr';
 import Image from 'next/image';
 import { toast } from 'react-toastify';
 import {
-  Plus, Pencil, Trash2, Users, Search, ShieldUser, CalendarX2, ImageOff, Target,
+  Plus, Pencil, Trash2, Users, Search, ShieldUser, CalendarX2, ImageOff, Target, Trophy, FileBadge,
 } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import Button from '@/components/ui/Button';
@@ -22,13 +22,18 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import FlyerUploader from '@/components/FlyerUploader';
 import { fetcher } from '@/lib/fetcher';
 import { formatearFechaDia, formatearHora } from '@/lib/fechas';
+import { ocupacionDeEvento, UNIDAD_AFORO } from '@/lib/aforo';
+import {
+  MIN_INTEGRANTES_EQUIPO,
+  MAX_INTEGRANTES_EQUIPO,
+  MAX_INTEGRANTES_POR_DEFECTO,
+  MIN_ASESORES_EQUIPO,
+  MAX_ASESORES_EQUIPO,
+  ESTADOS_EVENTO_EDITABLES,
+  ETIQUETA_ESTADO_EVENTO,
+} from '@/lib/concurso-reglas';
 
 const FORM_ID = 'formulario-evento';
-
-// El servidor exige equipos de 2 o más (api/admin/eventos: "El mínimo de
-// integrantes por equipo debe ser al menos 2"), así que el formulario arranca
-// en 2. Antes proponía 1 y guardar con los valores por defecto siempre fallaba.
-const MIN_INTEGRANTES = 2;
 
 const ESTADO_TONO = {
   planificacion: 'neutral',
@@ -38,41 +43,41 @@ const ESTADO_TONO = {
   cancelado: 'danger',
 };
 
-const ESTADO_ETIQUETA = {
-  planificacion: 'Planificación',
-  publicado: 'Publicado',
-  en_curso: 'En curso',
-  finalizado: 'Finalizado',
-  cancelado: 'Cancelado',
-};
+const OPCIONES_ESTADO = ESTADOS_EVENTO_EDITABLES.map((value) => ({
+  value,
+  label: ETIQUETA_ESTADO_EVENTO[value],
+}));
 
 const FORM_VACIO = {
   nombre: '',
   descripcion_html: '',
   id_tipo_evento: '',
   id_alcance: '',
+  estado: 'publicado',
   fecha_inicio: '',
   fecha_fin: '',
   fecha_limite_registro: '',
   hora_inicio: '',
   hora_fin: '',
   ubicacion: '',
-  cupos: 50,
-  costo: 0,
+  // '' = sin límite de aforo (NULL en la base).
+  cupos: '',
+  costo: '',
   tiene_costo: false,
   instrucciones_pago: '',
   imagen_flyer_url: null,
   imagen_flyer_key: undefined,
   solicitar_talla: false,
+  asignar_mesas: false,
   slug: '',
   es_concurso: false,
   modalidad: 'individual',
-  max_integrantes_equipo: 3,
-  min_integrantes_equipo: MIN_INTEGRANTES,
+  max_integrantes_equipo: MAX_INTEGRANTES_POR_DEFECTO,
+  min_integrantes_equipo: MIN_INTEGRANTES_EQUIPO,
   id_plataforma: '',
   requiere_asesor: false,
   asesor_participa: false,
-  max_asesores: 1,
+  max_asesores: MIN_ASESORES_EQUIPO,
   url_concurso: '',
 };
 
@@ -89,7 +94,7 @@ function Seccion({ title, description, children }) {
 }
 
 /** Casilla con etiqueta y explicación de lo que activa. */
-function Casilla({ id, name, checked, onChange, label, help }) {
+function Casilla({ id, name, checked, onChange, label, help, disabled = false }) {
   return (
     <div>
       <div className="flex items-center gap-2">
@@ -99,7 +104,8 @@ function Casilla({ id, name, checked, onChange, label, help }) {
           type="checkbox"
           checked={checked}
           onChange={onChange}
-          className="h-4 w-4 accent-brand"
+          disabled={disabled}
+          className="h-4 w-4 accent-brand disabled:opacity-50"
         />
         <label htmlFor={id} className="cursor-pointer select-none text-sm font-medium text-fg">
           {label}
@@ -107,6 +113,23 @@ function Casilla({ id, name, checked, onChange, label, help }) {
       </div>
       {help && <p className="ml-6 mt-1 text-xs text-faint">{help}</p>}
     </div>
+  );
+}
+
+/** Ocupación del evento en su unidad: "3 / 10 equipos", "12 / ∞ lugares". */
+function Aforo({ evento }) {
+  const { cupos, ocupados, lleno, unidad } = ocupacionDeEvento(evento);
+  const u = UNIDAD_AFORO[unidad];
+  return (
+    <span className="tabular-nums">
+      <span className={`font-medium ${lleno ? 'text-danger' : 'text-fg'}`}>{ocupados}</span>
+      <span className="text-muted"> / {cupos ?? '∞'} {u.plural}</span>
+      {evento.cupo_por_retos != null && (
+        <span className="ml-1 text-[10px] uppercase tracking-wide text-faint" title="El aforo lo definen los cupos de los desafíos">
+          por desafíos
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -152,6 +175,20 @@ export default function EventosAdmin() {
     );
   }, [eventos, searchTerm]);
 
+  // Tipo elegido y lo que permite. La modalidad por equipos sólo tiene sentido
+  // en tipos del catálogo con `permite_equipos` (Concurso, Hackathon): antes el
+  // formulario dejaba marcarla en un Taller y la inscripción rechazaba luego a
+  // todos los equipos con "Este evento no permite registro por equipos".
+  const tipoSeleccionado = catalogs.tipos.find(
+    (t) => String(t.id_tipo_evento) === String(formData.id_tipo_evento),
+  ) || null;
+  const tipoPermiteEquipos = Boolean(tipoSeleccionado?.permite_equipos);
+  const esEquipos = formData.es_concurso && formData.modalidad === 'equipos' && tipoPermiteEquipos;
+  const unidad = esEquipos ? UNIDAD_AFORO.equipos : UNIDAD_AFORO.personas;
+  // Aforo dictado por los desafíos (sólo al editar; los desafíos se crean
+  // después del evento).
+  const cupoDerivado = currentEvento?.cupo_por_retos != null ? Number(currentEvento.cupo_por_retos) : null;
+
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
     const val = type === 'checkbox' ? checked : value;
@@ -161,14 +198,27 @@ export default function EventosAdmin() {
     setFormData((prev) => {
       const newData = { ...prev, [name]: val };
 
-      // Sugerencia (no imposición): sólo al CREAR y mientras el admin no haya
-      // tocado la casilla. Antes esto se ejecutaba siempre, así que cambiar el
-      // tipo de un evento ya guardado desmarcaba la casilla sola y al guardar
-      // se borraba la fila de `concurso` con toda su configuración.
-      if (name === 'id_tipo_evento' && !currentEvento && !esConcursoTocado) {
-        const tipo = catalogs.tipos.find((t) => t.id_tipo_evento === parseInt(val, 10));
-        const nombreTipo = tipo?.nombre?.toLowerCase() ?? '';
-        newData.es_concurso = nombreTipo.includes('concurso') || nombreTipo.includes('hackathon');
+      if (name === 'id_tipo_evento') {
+        const tipo = catalogs.tipos.find((t) => String(t.id_tipo_evento) === String(val));
+        // Sugerencia (no imposición): sólo al CREAR y mientras el admin no haya
+        // tocado la casilla. Antes esto se ejecutaba siempre, así que cambiar el
+        // tipo de un evento ya guardado desmarcaba la casilla sola y al guardar
+        // se borraba la fila de `concurso` con toda su configuración.
+        if (!currentEvento && !esConcursoTocado) {
+          newData.es_concurso = Boolean(tipo?.permite_equipos);
+          if (tipo?.permite_equipos) newData.modalidad = 'equipos';
+        }
+        // Un tipo sin equipos no puede quedarse con modalidad por equipos.
+        if (tipo && !tipo.permite_equipos && newData.modalidad === 'equipos') {
+          newData.modalidad = 'individual';
+        }
+      }
+
+      // Sin costo, el importe vuelve a cero: antes un costo olvidado con la
+      // casilla desmarcada reactivaba el cobro en el servidor.
+      if (name === 'tiene_costo' && !checked) {
+        newData.costo = '';
+        newData.instrucciones_pago = '';
       }
 
       return newData;
@@ -176,10 +226,9 @@ export default function EventosAdmin() {
   };
 
   /**
-   * Validación cruzada en el cliente. Antes no existía ninguna: las
-   * incoherencias de fecha/hora sólo las detectaba un CHECK de la base de datos
-   * tras el viaje de ida y vuelta, y con un toast que no señalaba el campo. La
-   * fecha límite posterior al evento no la detectaba nadie.
+   * Validación cruzada en el cliente (espejo de src/lib/eventos-validacion.js
+   * en el servidor): señala el campo en vez de un toast genérico tras el
+   * viaje de ida y vuelta.
    */
   const validarFormulario = () => {
     const errores = {};
@@ -194,31 +243,38 @@ export default function EventosAdmin() {
       errores.hora_fin = 'En un evento de un solo día, la hora de fin debe ser posterior a la de inicio.';
     }
 
-    if (fecha_limite_registro && fecha_inicio) {
-      const limite = new Date(fecha_limite_registro);
-      const inicio = new Date(`${fecha_inicio}T${hora_inicio || '00:00'}`);
-      if (limite > inicio) {
-        errores.fecha_limite_registro =
-          'El registro debe cerrar antes de que empiece el evento.';
+    if (fecha_limite_registro && fecha_inicio && hora_inicio) {
+      if (fecha_limite_registro.slice(0, 16) > `${fecha_inicio}T${hora_inicio}`) {
+        errores.fecha_limite_registro = 'El registro debe cerrar antes de que empiece el evento.';
       }
     }
 
-    if (Number(formData.cupos) < 1) {
-      errores.cupos = 'Debe haber al menos 1 cupo.';
+    if (formData.cupos !== '' && cupoDerivado == null) {
+      const n = Number(formData.cupos);
+      if (!Number.isInteger(n) || n < 1) errores.cupos = 'Indica un número entero mayor que 0, o déjalo vacío para no poner límite.';
     }
 
-    if (formData.tiene_costo && Number(formData.costo) <= 0) {
+    if (formData.tiene_costo && !(Number(formData.costo) > 0)) {
       errores.costo = 'Indica un costo mayor que cero o desmarca "Tiene costo".';
     }
 
     if (formData.es_concurso && formData.modalidad === 'equipos') {
+      if (!tipoPermiteEquipos) {
+        errores.modalidad = `El tipo «${tipoSeleccionado?.nombre ?? 'elegido'}» no admite equipos.`;
+      }
       const min = Number(formData.min_integrantes_equipo);
       const max = Number(formData.max_integrantes_equipo);
-      if (!Number.isFinite(min) || min < MIN_INTEGRANTES) {
-        errores.min_integrantes_equipo = `Un equipo necesita al menos ${MIN_INTEGRANTES} integrantes.`;
-      } else if (max < min) {
+      if (!Number.isFinite(min) || min < MIN_INTEGRANTES_EQUIPO) {
+        errores.min_integrantes_equipo = `Un equipo necesita al menos ${MIN_INTEGRANTES_EQUIPO} integrantes.`;
+      } else if (!Number.isFinite(max) || max < min) {
         errores.max_integrantes_equipo = 'El máximo no puede ser menor que el mínimo.';
+      } else if (max > MAX_INTEGRANTES_EQUIPO) {
+        errores.max_integrantes_equipo = `El máximo no puede superar ${MAX_INTEGRANTES_EQUIPO}.`;
       }
+    }
+
+    if (formData.url_concurso && formData.es_concurso && !/^https?:\/\/\S+$/i.test(formData.url_concurso.trim())) {
+      errores.url_concurso = 'Debe empezar por http:// o https://';
     }
 
     setFormErrors(errores);
@@ -229,11 +285,14 @@ export default function EventosAdmin() {
     setIsSubmitting(true);
     try {
       const payload = { ...formData };
-      payload.cupos = Number(payload.cupos) || 0;
-      payload.costo = Number(payload.costo) || 0;
+      payload.cupos = payload.cupos === '' ? null : Number(payload.cupos);
+      payload.costo = payload.tiene_costo ? Number(payload.costo) || 0 : 0;
       payload.id_tipo_evento = parseInt(payload.id_tipo_evento, 10);
       payload.id_alcance = parseInt(payload.id_alcance, 10);
-      if (payload.id_plataforma) payload.id_plataforma = parseInt(payload.id_plataforma, 10);
+      payload.id_plataforma = payload.id_plataforma ? parseInt(payload.id_plataforma, 10) : null;
+      // Si los desafíos dictan el aforo, el número que se mande da igual: el
+      // servidor lo vuelve a derivar. Se manda el derivado para no confundir.
+      if (cupoDerivado != null) payload.cupos = cupoDerivado;
 
       const method = currentEvento ? 'PUT' : 'POST';
       const url = currentEvento
@@ -311,6 +370,7 @@ export default function EventosAdmin() {
       descripcion_html: evento.descripcion_html || '',
       id_tipo_evento: evento.id_tipo_evento ?? '',
       id_alcance: evento.id_alcance ?? '',
+      estado: ESTADOS_EVENTO_EDITABLES.includes(evento.estado) ? evento.estado : 'publicado',
       fecha_inicio: evento.fecha_inicio ? String(evento.fecha_inicio).slice(0, 10) : '',
       fecha_fin: evento.fecha_fin ? String(evento.fecha_fin).slice(0, 10) : '',
       fecha_limite_registro: evento.fecha_limite_registro || '',
@@ -319,8 +379,8 @@ export default function EventosAdmin() {
       hora_inicio: evento.hora_inicio ? String(evento.hora_inicio).slice(0, 5) : '',
       hora_fin: evento.hora_fin ? String(evento.hora_fin).slice(0, 5) : '',
       ubicacion: evento.ubicacion || '',
-      cupos: evento.cupos ?? 0,
-      costo: evento.costo ?? 0,
+      cupos: evento.cupos == null ? '' : String(evento.cupos),
+      costo: evento.tiene_costo ? String(evento.costo ?? '') : '',
       tiene_costo: Boolean(evento.tiene_costo),
       instrucciones_pago: evento.instrucciones_pago || '',
       imagen_flyer_url: evento.imagen_flyer_url ?? null,
@@ -331,15 +391,16 @@ export default function EventosAdmin() {
       // admin sube otro flyer o lo quita.
       imagen_flyer_key: evento.imagen_flyer_key ?? undefined,
       solicitar_talla: Boolean(evento.solicitar_talla),
+      asignar_mesas: Boolean(evento.asignar_mesas),
       slug: evento.slug || '',
       es_concurso: evento.id_concurso != null,
       modalidad: evento.modalidad || 'individual',
-      max_integrantes_equipo: evento.max_integrantes_equipo || 3,
-      min_integrantes_equipo: evento.min_integrantes_equipo || MIN_INTEGRANTES,
+      max_integrantes_equipo: evento.max_integrantes_equipo || MAX_INTEGRANTES_POR_DEFECTO,
+      min_integrantes_equipo: evento.min_integrantes_equipo || MIN_INTEGRANTES_EQUIPO,
       id_plataforma: evento.id_plataforma || '',
-      requiere_asesor: evento.requiere_asesor || false,
+      requiere_asesor: Boolean(evento.requiere_asesor),
       asesor_participa: Boolean(evento.asesor_participa),
-      max_asesores: evento.max_asesores || 1,
+      max_asesores: evento.max_asesores || MIN_ASESORES_EQUIPO,
       url_concurso: evento.url_concurso || '',
     });
     setIsModalOpen(true);
@@ -351,7 +412,7 @@ export default function EventosAdmin() {
     setEsConcursoTocado(false);
     setFormData({
       ...FORM_VACIO,
-      id_tipo_evento: catalogs.tipos[0]?.id_tipo_evento || '',
+      id_tipo_evento: '',
       id_alcance: catalogs.alcances[0]?.id_alcance || '',
     });
     setIsModalOpen(true);
@@ -379,7 +440,9 @@ export default function EventosAdmin() {
             <div className="truncate font-medium text-fg">{evento.nombre}</div>
             <div className="text-xs text-muted">
               {evento.tipo_nombre}
+              {evento.id_concurso && evento.modalidad === 'equipos' && ' · por equipos'}
               {evento.total_retos > 0 && ` · ${evento.total_retos} desafío${evento.total_retos === 1 ? '' : 's'}`}
+              {evento.total_ganadores > 0 && ` · ${evento.resultados_publicados ? 'ganadores publicados' : 'ganadores sin publicar'}`}
             </div>
           </div>
         </div>
@@ -400,24 +463,15 @@ export default function EventosAdmin() {
       header: 'Estado',
       render: (evento) => (
         <Badge tone={ESTADO_TONO[evento.estado] || 'neutral'}>
-          {ESTADO_ETIQUETA[evento.estado] || evento.estado || '—'}
+          {ETIQUETA_ESTADO_EVENTO[evento.estado] || evento.estado || '—'}
         </Badge>
       ),
     },
     { header: 'Alcance', accessor: 'alcance_nombre' },
     {
-      header: 'Cupos',
+      header: 'Aforo',
       align: 'center',
-      render: (evento) => (
-        <span className="tabular-nums">
-          {evento.cupos_disponibles ?? '∞'} / {evento.cupos ?? '∞'}
-        </span>
-      ),
-    },
-    {
-      header: 'Inscritos',
-      align: 'center',
-      render: (evento) => <span className="tabular-nums font-medium">{evento.total_inscritos}</span>,
+      render: (evento) => <Aforo evento={evento} />,
     },
     {
       header: 'Acciones',
@@ -431,6 +485,18 @@ export default function EventosAdmin() {
             onClick={() => router.push(`/admin/eventos/${evento.id_evento}/retos`)}
           />
           <IconButton
+            icon={Trophy}
+            label="Ganadores"
+            tone="accent"
+            onClick={() => router.push(`/admin/eventos/${evento.id_evento}/ganadores`)}
+          />
+          <IconButton
+            icon={FileBadge}
+            label="Certificados, gafetes y reconocimientos"
+            tone="neutral"
+            onClick={() => router.push(`/admin/eventos/${evento.id_evento}/documentos`)}
+          />
+          <IconButton
             icon={ShieldUser}
             label="Gestionar staff"
             tone="accent"
@@ -438,7 +504,7 @@ export default function EventosAdmin() {
           />
           <IconButton
             icon={Users}
-            label="Ver asistentes"
+            label="Ver inscritos"
             tone="info"
             onClick={() => router.push(`/admin/eventos/${evento.id_evento}/asistentes`)}
           />
@@ -558,7 +624,7 @@ export default function EventosAdmin() {
               required
               placeholder="Ej. Maratón de Programación 2026"
             />
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               <Select
                 label="Tipo de evento"
                 name="id_tipo_evento"
@@ -566,7 +632,10 @@ export default function EventosAdmin() {
                 onChange={handleInputChange}
                 required
                 placeholder="Seleccionar tipo"
-                options={catalogs.tipos.map((t) => ({ value: t.id_tipo_evento, label: t.nombre }))}
+                options={catalogs.tipos.map((t) => ({
+                  value: t.id_tipo_evento,
+                  label: t.permite_equipos ? `${t.nombre} (admite equipos)` : t.nombre,
+                }))}
               />
               <Select
                 label="Alcance"
@@ -575,8 +644,17 @@ export default function EventosAdmin() {
                 onChange={handleInputChange}
                 required
                 placeholder="Seleccionar alcance"
-                help="Determina a qué comunidad se anuncia."
+                help="A qué comunidad se anuncia."
                 options={catalogs.alcances.map((a) => ({ value: a.id_alcance, label: a.nombre }))}
+              />
+              <Select
+                label="Estado"
+                name="estado"
+                value={formData.estado}
+                onChange={handleInputChange}
+                required
+                options={OPCIONES_ESTADO}
+                help="Sólo «Publicado» y «En curso» aparecen en la web y admiten inscripciones."
               />
             </div>
             <Input
@@ -636,17 +714,147 @@ export default function EventosAdmin() {
             </div>
           </Seccion>
 
-          <Seccion title="Aforo y acceso" description="Cuánta gente cabe, hasta cuándo se acepta y a qué precio.">
+          <Seccion
+            title="Concurso"
+            description="Sólo para competencias: equipos, plataforma u online judge y asesores."
+          >
+            <Casilla
+              id="es_concurso"
+              name="es_concurso"
+              checked={formData.es_concurso}
+              onChange={handleInputChange}
+              label="Habilitar funciones de concurso"
+              help="Activa la modalidad (individual o por equipos), la plataforma u online judge y, en equipos, los asesores."
+            />
+
+            {formData.es_concurso && (
+              <div className="space-y-4 rounded-lg border border-line bg-surface p-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <Select
+                    label="Modalidad de participación"
+                    name="modalidad"
+                    value={formData.modalidad}
+                    onChange={handleInputChange}
+                    required
+                    placeholder="Seleccionar modalidad"
+                    error={formErrors.modalidad}
+                    options={[
+                      { value: 'individual', label: 'Individual' },
+                      ...(tipoPermiteEquipos ? [{ value: 'equipos', label: 'Por equipos' }] : []),
+                    ]}
+                    help={
+                      tipoPermiteEquipos
+                        ? 'Por equipos: cada inscripción es un equipo y el aforo se cuenta en equipos.'
+                        : tipoSeleccionado
+                          ? `El tipo «${tipoSeleccionado.nombre}» no admite equipos; elige Concurso o Hackathon para inscribir equipos.`
+                          : 'Elige primero el tipo de evento.'
+                    }
+                  />
+                  <Select
+                    label="Plataforma / online judge"
+                    name="id_plataforma"
+                    value={formData.id_plataforma}
+                    onChange={handleInputChange}
+                    placeholder="Ninguna u otra"
+                    options={catalogs.plataformas.map((p) => ({
+                      value: p.id_plataforma,
+                      label: p.nombre,
+                    }))}
+                  />
+                </div>
+
+                {esEquipos && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <Input
+                        label="Mín. integrantes"
+                        type="number"
+                        name="min_integrantes_equipo"
+                        min={MIN_INTEGRANTES_EQUIPO}
+                        max={MAX_INTEGRANTES_EQUIPO}
+                        value={formData.min_integrantes_equipo}
+                        onChange={handleInputChange}
+                        error={formErrors.min_integrantes_equipo}
+                      />
+                      <Input
+                        label="Máx. integrantes"
+                        type="number"
+                        name="max_integrantes_equipo"
+                        min={Math.max(MIN_INTEGRANTES_EQUIPO, Number(formData.min_integrantes_equipo) || MIN_INTEGRANTES_EQUIPO)}
+                        max={MAX_INTEGRANTES_EQUIPO}
+                        value={formData.max_integrantes_equipo}
+                        onChange={handleInputChange}
+                        error={formErrors.max_integrantes_equipo}
+                      />
+                    </div>
+
+                    <div className="space-y-3 rounded-lg border border-line bg-surface-2 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted">Asesores</p>
+                      <Casilla
+                        id="requiere_asesor"
+                        name="requiere_asesor"
+                        checked={formData.requiere_asesor}
+                        onChange={handleInputChange}
+                        label="Requerir asesor"
+                        help="El formulario de inscripción pedirá los datos del asesor como obligatorios."
+                      />
+                      <Casilla
+                        id="asesor_participa"
+                        name="asesor_participa"
+                        checked={formData.asesor_participa}
+                        onChange={handleInputChange}
+                        label="El asesor participa como integrante"
+                        help="Si NO participa, el evento se anuncia como «equipos de N integrantes + asesor» y el asesor no cuenta como integrante."
+                      />
+                      <Input
+                        label="Máx. asesores por equipo"
+                        type="number"
+                        name="max_asesores"
+                        min={MIN_ASESORES_EQUIPO}
+                        max={MAX_ASESORES_EQUIPO}
+                        value={formData.max_asesores}
+                        onChange={handleInputChange}
+                        help="El formulario de equipo permitirá «Agregar asesor» hasta este tope."
+                        wrapperClassName="max-w-xs"
+                      />
+                    </div>
+                  </>
+                )}
+
+                <Input
+                  label="URL del concurso (externo)"
+                  name="url_concurso"
+                  value={formData.url_concurso}
+                  onChange={handleInputChange}
+                  placeholder="https://…"
+                  error={formErrors.url_concurso}
+                />
+              </div>
+            )}
+          </Seccion>
+
+          <Seccion
+            title="Aforo y acceso"
+            description={`Cuántos ${unidad.plural} caben, hasta cuándo se acepta y a qué precio.`}
+          >
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Input
-                label="Cupos"
+                label={esEquipos ? 'Aforo (equipos)' : 'Aforo (personas)'}
                 type="number"
                 name="cupos"
                 min="1"
-                value={formData.cupos}
+                value={cupoDerivado != null ? String(cupoDerivado) : formData.cupos}
                 onChange={handleInputChange}
-                required
+                disabled={cupoDerivado != null}
+                placeholder="Sin límite"
                 error={formErrors.cupos}
+                help={
+                  cupoDerivado != null
+                    ? `Lo definen los desafíos: ${cupoDerivado} ${unidad.plural} en total (suma de los cupos de cada desafío). Cámbialo desde «Desafíos del evento».`
+                    : esEquipos
+                      ? 'Se cuenta en EQUIPOS: cada equipo inscrito ocupa un lugar, sin importar cuántos integrantes tenga. Vacío = sin límite.'
+                      : 'Se cuenta en PERSONAS: cada inscripción ocupa un lugar. Vacío = sin límite.'
+                }
               />
               <Input
                 label="Fecha límite de registro"
@@ -674,6 +882,15 @@ export default function EventosAdmin() {
             />
 
             <Casilla
+              id="asignar_mesas"
+              name="asignar_mesas"
+              checked={formData.asignar_mesas}
+              onChange={handleInputChange}
+              label="Asignar mesas o lugares"
+              help={`Actívalo si ${esEquipos ? 'cada equipo' : 'cada persona'} tendrá una mesa o lugar fijo. Se asignan desde la lista de inscritos, aparecen en el escáner QR, en el ticket y en los gafetes.`}
+            />
+
+            <Casilla
               id="tiene_costo"
               name="tiene_costo"
               checked={formData.tiene_costo}
@@ -684,7 +901,7 @@ export default function EventosAdmin() {
             {formData.tiene_costo && (
               <>
                 <Input
-                  label="Costo (MXN)"
+                  label={esEquipos ? 'Costo por equipo (MXN)' : 'Costo (MXN)'}
                   type="number"
                   name="costo"
                   min="0"
@@ -692,6 +909,7 @@ export default function EventosAdmin() {
                   value={formData.costo}
                   onChange={handleInputChange}
                   error={formErrors.costo}
+                  required
                   wrapperClassName="max-w-xs"
                 />
                 <Textarea
@@ -704,108 +922,6 @@ export default function EventosAdmin() {
                   help="Se muestran en la ficha del evento y en el paso donde se pide el comprobante. Al inscribirse, la persona sube una imagen del pago y el staff la valida."
                 />
               </>
-            )}
-          </Seccion>
-
-          <Seccion title="Concurso" description="Sólo para competencias con equipos, plataforma o asesor.">
-            <Casilla
-              id="es_concurso"
-              name="es_concurso"
-              checked={formData.es_concurso}
-              onChange={handleInputChange}
-              label="Habilitar funciones de concurso"
-              help="Activa el registro por equipos, la plataforma u online judge y el asesor obligatorio."
-            />
-
-            {formData.es_concurso && (
-              <div className="space-y-4 rounded-lg border border-line bg-surface p-4">
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <Select
-                    label="Modalidad de participación"
-                    name="modalidad"
-                    value={formData.modalidad}
-                    onChange={handleInputChange}
-                    required
-                    placeholder="Seleccionar modalidad"
-                    options={[
-                      { value: 'individual', label: 'Individual' },
-                      { value: 'equipos', label: 'Por equipos' },
-                    ]}
-                  />
-                  <Select
-                    label="Plataforma / online judge"
-                    name="id_plataforma"
-                    value={formData.id_plataforma}
-                    onChange={handleInputChange}
-                    placeholder="Ninguna u otra"
-                    options={catalogs.plataformas.map((p) => ({
-                      value: p.id_plataforma,
-                      label: p.nombre,
-                    }))}
-                  />
-                </div>
-
-                {formData.modalidad === 'equipos' && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <Input
-                      label="Mín. integrantes"
-                      type="number"
-                      name="min_integrantes_equipo"
-                      min={MIN_INTEGRANTES}
-                      value={formData.min_integrantes_equipo}
-                      onChange={handleInputChange}
-                      error={formErrors.min_integrantes_equipo}
-                    />
-                    <Input
-                      label="Máx. integrantes"
-                      type="number"
-                      name="max_integrantes_equipo"
-                      min={Math.max(MIN_INTEGRANTES, Number(formData.min_integrantes_equipo) || MIN_INTEGRANTES)}
-                      value={formData.max_integrantes_equipo}
-                      onChange={handleInputChange}
-                      error={formErrors.max_integrantes_equipo}
-                    />
-                  </div>
-                )}
-
-                <Casilla
-                  id="requiere_asesor"
-                  name="requiere_asesor"
-                  checked={formData.requiere_asesor}
-                  onChange={handleInputChange}
-                  label="Requerir asesor"
-                  help="El formulario de inscripción pedirá los datos del asesor como obligatorios."
-                />
-
-                <Casilla
-                  id="asesor_participa"
-                  name="asesor_participa"
-                  checked={formData.asesor_participa}
-                  onChange={handleInputChange}
-                  label="El asesor participa como integrante"
-                  help="Si NO participa, el evento se anuncia como «equipos de N integrantes + asesor» y el asesor no ocupa lugar del equipo."
-                />
-
-                <Input
-                  label="Máx. asesores por equipo"
-                  type="number"
-                  name="max_asesores"
-                  min="1"
-                  max="5"
-                  value={formData.max_asesores}
-                  onChange={handleInputChange}
-                  help="El formulario de equipo permitirá «Agregar asesor» hasta este tope."
-                  wrapperClassName="max-w-xs"
-                />
-
-                <Input
-                  label="URL del concurso (externo)"
-                  name="url_concurso"
-                  value={formData.url_concurso}
-                  onChange={handleInputChange}
-                  placeholder="https://…"
-                />
-              </div>
             )}
           </Seccion>
 
@@ -844,7 +960,7 @@ export default function EventosAdmin() {
         // historial se conserva, lo que se pierde es el acceso desde el panel.
         message="Se da de baja el evento: se marca como cancelado y desaparece de la web y del panel. No hay forma de recuperarlo desde aquí."
         consequences={[
-          `Se cierran las inscripciones; las ${eventoAEliminar?.total_inscritos ?? 0} personas inscritas dejan de ver el evento y su ticket`,
+          `Se cierran las inscripciones; las ${eventoAEliminar?.lugares_ocupados ?? 0} inscripciones vivas dejan de ver el evento y su ticket`,
           'Desaparece del listado público y del panel de staff',
           'El historial de asistencia, los pagos y las evidencias se conservan en la base de datos, pero ya no serán consultables desde el panel',
         ]}

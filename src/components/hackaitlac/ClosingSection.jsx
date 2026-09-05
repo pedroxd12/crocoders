@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import styles from './hackaitlac.module.css';
 import { formatearFechaHora } from '@/lib/fechas';
+import { textoRestantes } from '@/lib/aforo';
 import { acquireScroll, releaseScroll, revealLines } from './scroll-engine';
 
 const CONTACTO = 'hackaitlac@lcardenas.tecnm.mx';
@@ -81,7 +82,7 @@ export default function ClosingSection({ zIndex = 7, evento = null, premio = nul
                     ? `El registro cierra el ${formatearFechaHora(evento.fecha_limite_registro)}, o antes si se agotan los espacios.`
                     : 'El registro está abierto hasta agotar los espacios disponibles.'}
                 {typeof lugaresLibres === 'number' && !registroCerrado
-                  ? ` Quedan ${lugaresLibres} lugares.`
+                  ? ` ${textoRestantes(lugaresLibres, evento.unidad_aforo || 'equipos')}.`
                   : ''}{' '}
                 Un solo desafío por equipo.
               </>

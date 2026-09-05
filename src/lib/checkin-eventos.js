@@ -79,6 +79,7 @@ export async function cargarInscripcionCheckin(client, inscripcionId, eventoId) 
         ie.pago_completado,
         ie.playera_entregada,
         ie.hora_entrega_playera,
+        ie.mesa,
         e.tiene_costo,
         e.solicitar_talla,
         e.nombre AS nombre_evento,

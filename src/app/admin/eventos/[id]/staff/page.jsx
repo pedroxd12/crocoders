@@ -17,15 +17,8 @@ import EmptyState from '@/components/ui/EmptyState';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { fetcher } from '@/lib/fetcher';
 import { nivelDeRol, ETIQUETA_NIVEL, TONO_NIVEL, DESCRIPCION_NIVEL, NIVEL_STAFF } from '@/lib/roles-staff';
+import { PROCEDENCIAS_JUEZ as PROCEDENCIAS } from '@/lib/registro-campos';
 
-const PROCEDENCIAS = [
-  { value: 'club_programacion', label: 'Miembro del Club de Programación' },
-  { value: 'computer_society', label: 'Asociación (IEEE / Computer Society)' },
-  { value: 'itlac', label: 'Universidad (ITLAC)' },
-  { value: 'universitario', label: 'Universitario externo' },
-  { value: 'preparatoria', label: 'Estudiante de preparatoria' },
-  { value: 'otro', label: 'Otro' },
-];
 const procedenciaLabel = (v) => PROCEDENCIAS.find((p) => p.value === v)?.label || v;
 
 const JUEZ_VACIO = {

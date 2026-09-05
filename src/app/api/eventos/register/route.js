@@ -9,6 +9,8 @@ import { recalcularCupos, verificarDisponibilidad } from '@/lib/eventos-cupos';
 // inscribirse (ver src/lib/retos.js).
 import { resolverRetoDeInscripcion } from '@/lib/retos';
 import { sqlRegistroCerrado, sqlEventoTerminado } from '@/lib/eventos-fechas';
+import { firmarQrToken } from '@/lib/qr-token';
+import { esPorEquipos, unidadAforo, textoRestantes } from '@/lib/aforo';
 // Errores de reglas de negocio (no fallos del servidor). Antes todas estas
 // validaciones eran `throw new Error(...)` y acababan en el catch genérico, así
 // que el usuario leía "Error: Error al registrarse" en vez del motivo real.
@@ -130,7 +132,9 @@ export async function POST(request) {
     // del club (ver src/lib/eventos-fechas.js). Comparar en JS convertía los
     // timestamps naive a UTC y cerraba el registro 6 h antes de lo anunciado.
     // El FOR UPDATE bloquea el evento durante toda la transacción: es lo que
-    // hace atómico el conteo de lugares y el recálculo posterior de cupos.
+    // hace atómico el conteo de cupos, el cupo del desafío y el recálculo
+    // posterior. Dos equipos que llegan a la vez se serializan aquí, así que
+    // el segundo ve la inscripción del primero antes de decidir si cabe.
     const eventoRes = await client.query(`
       SELECT e.id_evento, e.cupos, e.cupos_disponibles, e.estado, e.nombre,
              e.tiene_costo, e.costo, e.instrucciones_pago, e.solicitar_talla,
@@ -151,6 +155,8 @@ export async function POST(request) {
     }
 
     const evento = eventoRes.rows[0];
+    const porEquipos = esPorEquipos(evento);
+    const unidad = unidadAforo(evento);
 
     // Estado del evento
     if (!['publicado', 'en_curso'].includes(evento.estado)) {
@@ -172,6 +178,19 @@ export async function POST(request) {
         success: false,
         error: 'El periodo de inscripción para este evento ha finalizado.',
       }, { status: 400 });
+    }
+
+    // Modalidad ↔ tipo de inscripción. En un concurso por equipos NO se
+    // admiten inscripciones individuales: la interfaz nunca las ofrecía, pero
+    // el API sí las aceptaba y una persona suelta ocupaba el cupo de un
+    // equipo entero. Y al revés, `resolverEquipo` rechaza equipos donde no
+    // toca.
+    if (porEquipos && tipo !== 'equipo') {
+      await client.query('ROLLBACK');
+      return NextResponse.json(
+        { success: false, error: 'Este evento se inscribe por equipos: registra a tu equipo desde la página del evento.' },
+        { status: 400 },
+      );
     }
 
     // --- VERIFICACIÓN ROBUSTA DE DUPLICADOS ---
@@ -223,8 +242,6 @@ export async function POST(request) {
     const requierePago = Boolean(evento.tiene_costo);
 
     let inscripcionId;
-    // Lugares que consume esta inscripción (un equipo ocupa uno por integrante).
-    let lugaresSolicitados = 1;
     // Equipo validado y resuelto (integrantes → miembro/invitado, asesores
     // filtrados), listo para insertarse tras verificar cupos.
     let equipoResuelto = null;
@@ -239,20 +256,21 @@ export async function POST(request) {
         { equipo, integrantes, asesores },
         { capitanId: memberId },
       );
-      lugaresSolicitados = equipoResuelto.lugaresSolicitados;
     }
 
     // Cupos: se decide contra las INSCRIPCIONES REALES, no contra el contador
-    // `cupos_disponibles` (que puede venir desfasado de datos antiguos y que
-    // además mide filas, no lugares). `cupos IS NULL` = aforo ilimitado; antes
-    // `null <= 0` daba true y esos eventos rechazaban todo registro.
-    const disponibilidad = await verificarDisponibilidad(client, eventoId, evento.cupos, lugaresSolicitados);
+    // `cupos_disponibles`. Toda inscripción ocupa UN cupo: en concursos por
+    // equipos el aforo se cuenta en equipos (src/lib/aforo.js), así que un
+    // equipo de 5 consume 1, no 5. `cupos IS NULL` = aforo ilimitado.
+    const disponibilidad = await verificarDisponibilidad(client, eventoId, evento.cupos);
     if (!disponibilidad.cabe) {
       await client.query('ROLLBACK');
-      const mensaje = lugaresSolicitados > 1
-        ? `No hay cupos suficientes: quedan ${disponibilidad.libres} lugares y el equipo necesita ${lugaresSolicitados}.`
-        : 'No hay cupos disponibles para este evento';
-      return NextResponse.json({ success: false, error: mensaje }, { status: 400 });
+      return NextResponse.json({
+        success: false,
+        error: porEquipos
+          ? 'Ya no hay cupo para más equipos en este evento.'
+          : 'No hay cupos disponibles para este evento',
+      }, { status: 400 });
     }
 
     if (tipo === 'equipo') {
@@ -299,7 +317,7 @@ export async function POST(request) {
          VALUES ($1, $2, $3, $4, $5, NOW())
          ON CONFLICT ON CONSTRAINT inscripcion_evento_id_evento_id_miembro_key
          DO UPDATE SET estado = EXCLUDED.estado, requiere_pago = EXCLUDED.requiere_pago,
-                       id_reto = EXCLUDED.id_reto,
+                       id_reto = EXCLUDED.id_reto, mesa = NULL,
                        fecha_inscripcion = NOW(), updated_at = NOW()
          RETURNING id_inscripcion`,
         [eventoId, memberId, reto.idReto, estadoInicial, requierePago],
@@ -325,7 +343,7 @@ export async function POST(request) {
          VALUES ($1, $2, $3, $4, $5, NOW())
          ON CONFLICT ON CONSTRAINT inscripcion_evento_id_evento_id_invitado_key
          DO UPDATE SET estado = EXCLUDED.estado, requiere_pago = EXCLUDED.requiere_pago,
-                       id_reto = EXCLUDED.id_reto,
+                       id_reto = EXCLUDED.id_reto, mesa = NULL,
                        fecha_inscripcion = NOW(), updated_at = NOW()
          RETURNING id_inscripcion`,
         [eventoId, guestId, reto.idReto, estadoInicial, requierePago],
@@ -335,16 +353,12 @@ export async function POST(request) {
 
     // Contabilidad de cupos: un único punto de ajuste. `recalcularCupos` deriva
     // `cupos_disponibles` de las inscripciones reales y pisa lo que haya hecho
-    // el trigger de la BD (que cuenta filas, no lugares, y sólo reacciona a
-    // 'confirmada'). Ver src/lib/eventos-cupos.js.
+    // el trigger de la BD. Ver src/lib/eventos-cupos.js.
     const cuposFinales = await recalcularCupos(client, eventoId);
 
     // Generar el token del QR y leer el estado final ANTES del COMMIT. Si algo
     // de esto fallara, el catch hace ROLLBACK y el registro no queda a medias.
-    const crypto = await import('crypto');
-    const qrPayload = JSON.stringify({ id: inscripcionId, eid: eventoId, ts: Date.now() });
-    const hash = crypto.createHmac('sha256', payloadSecret).update(qrPayload).digest('hex');
-    const secureQrToken = Buffer.from(JSON.stringify({ data: qrPayload, sig: hash })).toString('base64');
+    const secureQrToken = firmarQrToken({ id: inscripcionId, eid: eventoId, ts: Date.now() }, payloadSecret);
 
     // Estado actualizado del evento para el frontend (cupos y conteo).
     const finalEventRes = await client.query(`
@@ -362,10 +376,12 @@ export async function POST(request) {
       ...finalEvent, // Propiedades actualizadas (cupos, count)
       fecha: finalEvent?.fecha instanceof Date ? finalEvent.fecha.toISOString().split('T')[0] : finalEvent?.fecha,
       asistentes_count: Number(finalEvent?.asistentes_count) || 0,
-      cupos_disponibles: finalEvent?.cupos_disponibles !== null ? Number(finalEvent.cupos_disponibles) : null,
-      // Lugares ocupados contando los integrantes de cada equipo. `asistentes_count`
-      // cuenta FILAS de inscripción: no son la misma unidad y no deben compararse.
+      cupos: finalEvent?.cupos != null ? Number(finalEvent.cupos) : null,
+      cupos_disponibles: finalEvent?.cupos_disponibles != null ? Number(finalEvent.cupos_disponibles) : null,
+      // Inscripciones vivas (equipos en concursos por equipos, personas en el
+      // resto): la misma unidad que `cupos`.
       lugares_ocupados: cuposFinales.lugares_ocupados,
+      unidad_aforo: unidad,
     };
 
     return NextResponse.json({
@@ -382,6 +398,10 @@ export async function POST(request) {
       estado_inscripcion: estadoInicial,
       requiere_pago: requierePago,
       qrToken: secureQrToken,
+      restantes: textoRestantes(
+        cuposFinales.cupos == null ? null : Math.max(0, Number(cuposFinales.cupos) - cuposFinales.lugares_ocupados),
+        unidad,
+      ),
       event: eventToSend
     });
 

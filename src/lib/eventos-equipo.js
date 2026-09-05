@@ -7,6 +7,8 @@
 // sabía dar de alta a una persona suelta, incluso en concursos por equipos.
 
 import { TALLAS_PLAYERA } from '@/lib/registro-campos';
+import { MAX_INTEGRANTES_POR_DEFECTO, MIN_ASESORES_EQUIPO } from '@/lib/concurso-reglas';
+import { esPorEquipos } from '@/lib/aforo';
 
 // Errores de reglas de negocio (no fallos del servidor): el mensaje está
 // redactado para mostrarse tal cual al usuario. Las rutas lo convierten en 400.
@@ -29,7 +31,7 @@ const TALLAS_VALIDAS = new Set(TALLAS_PLAYERA);
  * admin) el capitán es el integrante marcado `es_capitan` o, en su defecto, el
  * primer integrante que sea miembro del club, o el primero de la lista.
  *
- * Devuelve { integrantesResueltos, asesores, lugaresSolicitados } listos para
+ * Devuelve { integrantesResueltos, asesores, personas } listos para
  * `insertarEquipo`. Lanza ValidationError si algo no cumple.
  */
 export async function resolverEquipo(
@@ -43,12 +45,11 @@ export async function resolverEquipo(
   const asesores = (Array.isArray(asesoresCrudos) ? asesoresCrudos : [])
     .filter((a) => a && (a.nombre || a.email || a.telefono));
 
+  // Las tres condiciones del registro por equipos, las mismas que usa la UI
+  // (src/lib/aforo.js): sin ellas entraban "equipos" en concursos individuales.
   if (!evento.permite_equipos) throw new ValidationError('Este evento no permite registro por equipos.');
   if (!evento.id_concurso) throw new ValidationError('Configuración de concurso no encontrada para este evento.');
-  // La modalidad del concurso manda sobre el flag del catálogo de tipos:
-  // en 'individual' el esquema obliga a max_integrantes_equipo NULL, así
-  // que sin esta comprobación entraban "equipos" de hasta 10 personas.
-  if (evento.modalidad !== 'equipos') {
+  if (!esPorEquipos(evento)) {
     throw new ValidationError('Este concurso es de modalidad individual; no admite registro por equipos.');
   }
   if (!equipo?.nombre) throw new ValidationError('Nombre del equipo requerido.');
@@ -57,7 +58,7 @@ export async function resolverEquipo(
     throw new ValidationError(`El mínimo de integrantes por equipo es ${evento.min_integrantes_equipo}.`);
   }
   // Tope duro aunque el concurso no lo configure, para no depender de un NULL.
-  const maxIntegrantes = evento.max_integrantes_equipo || 5;
+  const maxIntegrantes = evento.max_integrantes_equipo || MAX_INTEGRANTES_POR_DEFECTO;
   if (integrantes.length > maxIntegrantes) {
     throw new ValidationError(`El máximo de integrantes por equipo es ${maxIntegrantes}.`);
   }
@@ -65,7 +66,7 @@ export async function resolverEquipo(
     throw new ValidationError('Datos del asesor requeridos.');
   }
   // Tope de asesores configurado en el concurso (1 por defecto).
-  const maxAsesores = Number(evento.max_asesores) || 1;
+  const maxAsesores = Number(evento.max_asesores) || MIN_ASESORES_EQUIPO;
   if (asesores.length > maxAsesores) {
     throw new ValidationError(`Este concurso admite como máximo ${maxAsesores} asesor(es) por equipo.`);
   }
@@ -86,7 +87,7 @@ export async function resolverEquipo(
   }
 
   // Correos únicos: repetir uno creaba dos filas en integrante_equipo para
-  // la misma persona y consumía dos lugares.
+  // la misma persona.
   const correos = integrantes.map((i) => String(i.email || '').trim().toLowerCase());
   if (correos.some((c) => !c)) throw new ValidationError('Todos los integrantes deben indicar su correo.');
   if (new Set(correos).size !== correos.length) {
@@ -181,11 +182,29 @@ export async function resolverEquipo(
     }
   }
 
+  // 4) El nombre del equipo tiene que ser único dentro del concurso (entre las
+  //    inscripciones vivas). No hay UNIQUE en la base, así que se comprueba
+  //    aquí, bajo el bloqueo del evento que sostiene la ruta.
+  const nombreRes = await client.query(
+    `SELECT 1
+       FROM equipo_concurso eq
+       JOIN inscripcion_evento ie ON ie.id_equipo = eq.id_equipo
+      WHERE eq.id_concurso = $1
+        AND LOWER(TRIM(eq.nombre_equipo)) = LOWER(TRIM($2))
+        AND ie.estado <> 'cancelada'
+      LIMIT 1`,
+    [evento.id_concurso, equipo.nombre],
+  );
+  if (nombreRes.rows.length > 0) {
+    throw new ValidationError(`Ya hay un equipo inscrito con el nombre “${equipo.nombre}”. Elige otro.`);
+  }
+
   return {
     integrantesResueltos,
     asesores,
-    // Lugares que consume esta inscripción (un equipo ocupa uno por integrante).
-    lugaresSolicitados: integrantesResueltos.length,
+    // Personas físicas del equipo (integrantes). El aforo del evento se cuenta
+    // en EQUIPOS (src/lib/aforo.js), así que este número es informativo.
+    personas: integrantesResueltos.length,
   };
 }
 
@@ -206,7 +225,7 @@ export async function insertarEquipo(
      VALUES ($1, $2, $3, $4, $5, true) RETURNING id_equipo`,
     [
       idConcurso,
-      equipo.nombre,
+      String(equipo.nombre).trim(),
       asesores[0]?.nombre || null,
       asesores[0]?.email || null,
       asesores[0]?.telefono || null,

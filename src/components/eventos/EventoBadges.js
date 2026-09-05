@@ -1,5 +1,7 @@
 'use client';
 
+import { ocupacionDeEvento } from '@/lib/aforo';
+
 /**
  * Los DOS sistemas de etiqueta de un evento, separados a propósito:
  *
@@ -31,7 +33,7 @@ export function estadoDeEvento(evento, isRegistered = false) {
   if (evento?.isPastEvent) return 'finalizado';
   if (isRegistered) return 'inscrito';
   if (evento?.registroCerrado) return 'cerrado';
-  if (evento?.cupos !== null && evento?.cupos_disponibles <= 0) return 'lleno';
+  if (ocupacionDeEvento(evento).lleno) return 'lleno';
   return 'disponible';
 }
 

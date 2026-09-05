@@ -15,8 +15,10 @@ export default function AppShell({ children }) {
   const isAdmin = pathname === '/admin' || pathname.startsWith('/admin/');
   // HackaItlac tiene su propio diseño full-bleed con navegación personalizada.
   const isHackaitlac = pathname === '/hackaitlac' || pathname.startsWith('/hackaitlac/');
+  // La presentación de ganadores se proyecta a pantalla completa: sin menú.
+  const isPresentacion = /^\/eventos\/[^/]+\/ganadores\/presentacion\/?$/.test(pathname);
   // La home tiene su propio scroll container y renderiza su Footer internamente.
-  const showChrome = !isAdmin && !isHackaitlac;
+  const showChrome = !isAdmin && !isHackaitlac && !isPresentacion;
   const showFooter = showChrome && pathname !== '/';
 
   return (
