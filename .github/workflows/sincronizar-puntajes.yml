@@ -20,6 +20,11 @@
 # OJO: GitHub desactiva los workflows programados en repositorios sin actividad
 # durante 60 días. Si el ranking vuelve a congelarse, revisar primero si Actions
 # lo deshabilitó y reactivarlo desde la pestaña Actions.
+#
+# Si las ejecuciones fallan en ~3 s sin ningún paso y con el aviso "account is
+# locked due to a billing issue", el problema no está aquí: es la cuenta de
+# GitHub. Hay que resolverlo en Settings > Billing and plans (método de pago o
+# saldo pendiente); mientras tanto el cron diario de Vercel sigue funcionando.
 
 name: Sincronizar puntajes
 
@@ -40,7 +45,9 @@ concurrency:
 
 jobs:
   sincronizar:
-    runs-on: ubuntu-latest
+    # Versión fija: `ubuntu-latest` pasa a Ubuntu 26 a partir del 19-oct-2026 y
+    # este job no necesita nada nuevo, así que se evita el cambio sin aviso.
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Llamar al endpoint de sincronización
@@ -51,27 +58,40 @@ jobs:
           set -euo pipefail
 
           if [ -z "${CRON_SECRET}" ] || [ -z "${SITIO_URL}" ]; then
-            echo "Faltan los secretos CRON_SECRET y/o SITIO_URL del repositorio."
-            echo "Configúralos en Settings > Secrets and variables > Actions."
+            echo "::error::Faltan los secretos CRON_SECRET y/o SITIO_URL del repositorio. Configúralos en Settings > Secrets and variables > Actions."
             exit 1
           fi
+
+          # Tolera los descuidos más comunes al pegar el secreto: espacios o
+          # saltos de línea alrededor y una barra final (que daría //api/... y
+          # una redirección 308 que curl no sigue con la cabecera Authorization).
+          SITIO_URL="$(printf '%s' "${SITIO_URL}" | tr -d '[:space:]')"
+          SITIO_URL="${SITIO_URL%/}"
+          CRON_SECRET="$(printf '%s' "${CRON_SECRET}" | tr -d '\r\n')"
 
           # --max-time cubre el peor caso: la función tiene 60 s de tope y aún
           # debe poder responder. -sS calla la barra de progreso pero deja pasar
           # los errores; el cuerpo se imprime para que quede en el registro.
+          # Si curl ni siquiera conecta (DNS, timeout) no debe abortar antes de
+          # explicar qué pasó, de ahí el `|| codigo=000`.
           codigo=$(curl -sS -o respuesta.json -w '%{http_code}' \
             --max-time 90 \
             -H "Authorization: Bearer ${CRON_SECRET}" \
-            "${SITIO_URL}/api/cron/puntajes")
+            "${SITIO_URL}/api/cron/puntajes") || codigo="000"
 
           echo "HTTP ${codigo}"
-          cat respuesta.json
+          cat respuesta.json 2>/dev/null || true
           echo
 
           # Un 401 significa que el secreto no coincide con el de Vercel, y un
           # 503 que allí falta la variable: son fallos de configuración que
           # deben verse, no reintentarse en silencio cada media hora.
-          if [ "${codigo}" != "200" ]; then
-            echo "La sincronización no se pudo lanzar (HTTP ${codigo})."
-            exit 1
-          fi
+          case "${codigo}" in
+            200) ;;
+            000) echo "::error::No se pudo conectar con ${SITIO_URL}. Revisa que SITIO_URL sea la URL de producción (https://...)."; exit 1 ;;
+            401) echo "::error::HTTP 401: CRON_SECRET de GitHub no coincide con la variable CRON_SECRET de Vercel."; exit 1 ;;
+            503) echo "::error::HTTP 503: falta la variable CRON_SECRET en el proyecto de Vercel (y hay que redesplegar)."; exit 1 ;;
+            404) echo "::error::HTTP 404: ${SITIO_URL}/api/cron/puntajes no existe. ¿SITIO_URL apunta al despliegue correcto?"; exit 1 ;;
+            30*) echo "::error::HTTP ${codigo}: redirección. Usa la URL final exacta en SITIO_URL (https, sin www si no corresponde)."; exit 1 ;;
+            *)   echo "::error::La sincronización no se pudo lanzar (HTTP ${codigo})."; exit 1 ;;
+          esac
